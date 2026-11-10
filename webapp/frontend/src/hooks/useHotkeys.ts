@@ -24,6 +24,7 @@ export interface HotkeyHandlers {
 function isTextInput(el: Element | null): boolean {
   if (!el) return false;
   if (el instanceof HTMLInputElement) {
+    if (el.readOnly) return false;
     const t = (el.getAttribute("type") || "text").toLowerCase();
     return [
       "text",
@@ -36,7 +37,10 @@ function isTextInput(el: Element | null): boolean {
       "date",
     ].includes(t);
   }
-  return el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+  if (el instanceof HTMLTextAreaElement) {
+    return !el.readOnly;
+  }
+  return el instanceof HTMLSelectElement;
 }
 
 /**

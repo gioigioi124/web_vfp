@@ -181,7 +181,11 @@ ctx.onmessage = async (e: MessageEvent) => {
   if (!data) return;
 
   if (data.type === "init") {
-    await loadFromIdb();
+    const loaded = await loadFromIdb();
+    if (loaded && map.size > 0) {
+      // Báo sẵn sàng ngay lập tức từ IndexedDB để người dùng tra cứu không cần chờ mạng.
+      ctx.postMessage({ type: "ready", count: map.size });
+    }
     try {
       await sync();
     } catch {

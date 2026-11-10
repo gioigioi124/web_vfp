@@ -32,11 +32,7 @@ async def _product_index_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Nạp bản chụp danh mục vật tư lần đầu (đồng bộ) rồi mới chạy vòng quét nền.
-    try:
-        await asyncio.get_running_loop().run_in_executor(None, product_index_service.refresh)
-    except Exception as e:
-        logger.warning(f"Initial product index load failed: {e}")
+    # Chạy ngầm việc nạp và đồng bộ danh mục vật tư để mở cổng 8000 ngay lập tức.
     task = asyncio.create_task(_product_index_loop())
     try:
         yield

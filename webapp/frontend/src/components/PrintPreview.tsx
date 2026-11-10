@@ -78,7 +78,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
           Đang chuẩn bị mẫu in...
         </div>
       ) : (
-        <div className="print-area bg-white p-6 border border-slate-300 rounded shadow-sm text-slate-900 select-text font-serif print:border-none print:shadow-none print:p-0">
+        <div className="print-area bg-white p-6 border border-slate-300 rounded shadow-sm text-slate-900 select-text font-sans print:border-none print:shadow-none print:p-0">
           {/* Company Header */}
           <div className="flex justify-between items-start pb-4 border-b border-slate-300 mb-4">
             <div>

@@ -3,6 +3,11 @@ import { Button } from "./ui/Button";
 import { PickupSlip, PickupItem } from "../types/pickup";
 import { formatQuantity, formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
+import {
+  arrowDir,
+  handleExcelMouseDown,
+  selectAllLater,
+} from "./ui/excelCell";
 import { Check, X, Minus, Square, RefreshCw } from "lucide-react";
 
 interface PickupDialogProps {
@@ -31,14 +36,112 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   const [selectedStts, setSelectedStts] = useState<Set<string>>(new Set());
   const [activeStt, setActiveStt] = useState<string | null>(null);
   const [activeItems, setActiveItems] = useState<PickupItem[]>([]);
+  const [activeDetailRow, setActiveDetailRow] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   // Tăng mỗi lần nạp lại danh sách phiếu -> buộc nạp lại chi tiết kể cả khi
   // activeStt không đổi (dialog luôn mounted nên state cũ vẫn còn).
   const [detailVersion, setDetailVersion] = useState(0);
+  const [listFetchSeq, setListFetchSeq] = useState(0);
+  const listFetchSeqRef = useRef(0);
+  const openAtSeqRef = useRef(0);
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const masterScrollRef = useRef<HTMLDivElement | null>(null);
+  const masterHeadRef = useRef<HTMLTableSectionElement | null>(null);
+  const masterRowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const masterActiveColRef = useRef<number>(2); // mặc định cột Số phiếu
+  const detailSectionRef = useRef<HTMLElement | null>(null);
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
+  const detailHeadRef = useRef<HTMLTableSectionElement | null>(null);
+  const detailRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+  const pendingInitialFocusRef = useRef<boolean>(false);
+  const prevIsOpenRef = useRef<boolean>(false);
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+
+  // Lưu phần tử đang focus trước khi mở dialog (VD: nút "Chọn phiếu xuất")
+  // để khi Esc / đóng dialog thì trả focus lại đúng vị trí ban đầu.
+  if (isOpen && !prevIsOpenRef.current) {
+    const active = document.activeElement as HTMLElement | null;
+    if (
+      active &&
+      active !== document.body &&
+      !containerRef.current?.contains(active)
+    ) {
+      prevFocusRef.current = active;
+    }
+  }
+
+  useEffect(() => {
+    if (isOpen) {
+      prevIsOpenRef.current = true;
+      return;
+    }
+    if (prevIsOpenRef.current) {
+      prevIsOpenRef.current = false;
+      const target = prevFocusRef.current;
+      prevFocusRef.current = null;
+      if (target && target.isConnected) {
+        const restore = () => target.focus({ preventScroll: true });
+        restore();
+        window.setTimeout(restore, 0);
+      }
+    }
+  }, [isOpen]);
+
   // Khóa modal: giữ focus trong dialog + báo tầng ngoài (VoucherForm/App) khóa phím.
   useModalLock(isOpen, containerRef);
+
+  const ensureRowVisible = useCallback(
+    (
+      container: HTMLDivElement | null,
+      thead: HTMLTableSectionElement | null,
+      row: HTMLTableRowElement | null,
+    ) => {
+      if (!container || !row) return;
+      const headerHeight = thead ? thead.getBoundingClientRect().height : 0;
+      const cRect = container.getBoundingClientRect();
+      const rRect = row.getBoundingClientRect();
+      const visibleTop = cRect.top + headerHeight;
+      const visibleBottom = cRect.top + container.clientHeight;
+      if (rRect.top < visibleTop) {
+        container.scrollTop -= visibleTop - rRect.top;
+      } else if (rRect.bottom > visibleBottom) {
+        container.scrollTop += rRect.bottom - visibleBottom;
+      }
+    },
+    [],
+  );
+
+  const focusMasterCell = useCallback(
+    (stt: string | null, colIdx?: number) => {
+      if (!stt) return;
+      const row = masterRowRefs.current[stt];
+      if (!row) return;
+      const targetCol = colIdx ?? masterActiveColRef.current;
+      const td = row.children[targetCol] as HTMLElement | undefined;
+      const input =
+        td?.querySelector<HTMLInputElement>("input.grid-cell-input") ||
+        row.querySelector<HTMLInputElement>("input.grid-cell-input");
+      if (input) {
+        input.focus({ preventScroll: true });
+        input.select();
+      }
+      ensureRowVisible(masterScrollRef.current, masterHeadRef.current, row);
+    },
+    [ensureRowVisible],
+  );
+
+  const handleCellCopy = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const el = e.currentTarget;
+      if (el.selectionStart === el.selectionEnd && el.value) {
+        e.clipboardData.setData("text/plain", el.value);
+        e.preventDefault();
+      }
+    },
+    [],
+  );
 
   // Fetch slips
   const loadSlips = useCallback(async () => {
@@ -78,21 +181,56 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
       console.error("Error fetching pickup slips", e);
     } finally {
       setLoading(false);
-      // Luôn tăng để effect chi tiết chạy lại (kể cả activeStt giữ nguyên).
+      // Luôn tăng để effect chi tiết & focus sau tải chạy lại (kể cả activeStt giữ nguyên).
       setDetailVersion((v) => v + 1);
+      listFetchSeqRef.current += 1;
+      setListFetchSeq(listFetchSeqRef.current);
     }
   }, [maDt, ngayCt]);
 
   useEffect(() => {
     if (isOpen) {
+      openAtSeqRef.current = listFetchSeqRef.current;
+      pendingInitialFocusRef.current = true;
       loadSlips();
     }
   }, [isOpen, loadSlips]);
+
+  // Tự động focus vào ô đầu tiên của grid phiếu (hoặc nút Hủy bỏ nếu không có phiếu nào)
+  useEffect(() => {
+    if (!isOpen || loading) return;
+    if (listFetchSeq <= openAtSeqRef.current) return;
+    if (slips.length === 0) {
+      pendingInitialFocusRef.current = false;
+      const timer = window.setTimeout(() => {
+        cancelBtnRef.current?.focus({ preventScroll: true });
+      }, 35);
+      return () => window.clearTimeout(timer);
+    }
+    if (!pendingInitialFocusRef.current) return;
+    pendingInitialFocusRef.current = false;
+    const firstStt = activeStt || slips[0]?.stt;
+    const timer = window.setTimeout(() => {
+      if (firstStt) focusMasterCell(firstStt, masterActiveColRef.current);
+    }, 35);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, loading, listFetchSeq, slips, activeStt, focusMasterCell]);
+
+  // Cuộn dòng Master đang chọn vào vùng hiển thị (tránh che dưới header sticky)
+  useEffect(() => {
+    if (!activeStt) return;
+    ensureRowVisible(
+      masterScrollRef.current,
+      masterHeadRef.current,
+      masterRowRefs.current[activeStt] ?? null,
+    );
+  }, [activeStt, slips, ensureRowVisible]);
 
   // Fetch items when active slip changes (hoặc khi danh sách phiếu vừa nạp lại).
   useEffect(() => {
     if (!isOpen || !activeStt) {
       setActiveItems([]);
+      setActiveDetailRow(0);
       return;
     }
     let cancelled = false;
@@ -105,6 +243,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         const data = await res.json();
         if (!cancelled && data.success && data.data?.items) {
           setActiveItems(data.data.items);
+          setActiveDetailRow(0);
         }
       } catch (e) {
         console.error("Error fetching pickup detail", e);
@@ -164,24 +303,198 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     }
   }, [selectedStts, slips, maDt, ngayCt, onAccept, onClose]);
 
+  // Điều hướng bàn phím trên Grid 1 (Danh sách phiếu xuất kho)
+  const handleMasterCellKeyDown = useCallback(
+    (
+      e: React.KeyboardEvent<HTMLInputElement>,
+      rowIdx: number,
+      colIdx: number,
+    ) => {
+      const dir = arrowDir(e.key);
+      if (dir === "up" || dir === "down") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (slips.length === 0) return;
+        const nextIdx =
+          dir === "down"
+            ? Math.min(rowIdx + 1, slips.length - 1)
+            : Math.max(rowIdx - 1, 0);
+        const nextStt = slips[nextIdx]?.stt;
+        if (!nextStt) return;
+        setActiveStt(nextStt);
+        focusMasterCell(nextStt, colIdx);
+        return;
+      }
+
+      if (dir === "left" || dir === "right" || e.key === "Tab") {
+        const el = e.currentTarget;
+        const tr = el.closest("tr");
+        if (!tr) return;
+        const rowInputs = Array.from(
+          tr.querySelectorAll<HTMLInputElement>("input.grid-cell-input"),
+        );
+        const idx = rowInputs.indexOf(el);
+        if (idx < 0) return;
+        const forward = dir === "right" || (e.key === "Tab" && !e.shiftKey);
+        const targetIdx = forward ? idx + 1 : idx - 1;
+        if (dir === "left" || dir === "right") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (targetIdx >= 0 && targetIdx < rowInputs.length) {
+            rowInputs[targetIdx].focus({ preventScroll: true });
+            rowInputs[targetIdx].select();
+          }
+          return;
+        }
+        // Tab / Shift+Tab: nhảy ô; hết dòng thì xuống/lên dòng kế trong grid
+        if (targetIdx >= 0 && targetIdx < rowInputs.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          rowInputs[targetIdx].focus({ preventScroll: true });
+          rowInputs[targetIdx].select();
+        } else {
+          const nextRowIdx = rowIdx + (forward ? 1 : -1);
+          const nextStt = slips[nextRowIdx]?.stt;
+          if (nextStt) {
+            e.preventDefault();
+            e.stopPropagation();
+            setActiveStt(nextStt);
+            focusMasterCell(nextStt, forward ? 1 : 5);
+          }
+        }
+      }
+    },
+    [slips, focusMasterCell],
+  );
+
+  // Điều hướng bàn phím trên Grid 2 (Chi tiết vật tư)
+  const handleDetailCellKeyDown = useCallback(
+    (
+      e: React.KeyboardEvent<HTMLInputElement>,
+      rowIdx: number,
+      colIdx: number,
+    ) => {
+      const dir = arrowDir(e.key);
+      if (dir === "up" || dir === "down") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (activeItems.length === 0) return;
+        const nextIdx =
+          dir === "down"
+            ? Math.min(rowIdx + 1, activeItems.length - 1)
+            : Math.max(rowIdx - 1, 0);
+        setActiveDetailRow(nextIdx);
+        const targetRow = detailRowRefs.current[nextIdx];
+        const td = targetRow?.children[colIdx] as HTMLElement | undefined;
+        const targetInput =
+          td?.querySelector<HTMLInputElement>("input.grid-cell-input");
+        if (targetInput && targetRow) {
+          targetInput.focus({ preventScroll: true });
+          targetInput.select();
+          ensureRowVisible(
+            detailScrollRef.current,
+            detailHeadRef.current,
+            targetRow,
+          );
+        }
+        return;
+      }
+
+      if (dir === "left" || dir === "right" || e.key === "Tab") {
+        const el = e.currentTarget;
+        const tr = el.closest("tr");
+        if (!tr) return;
+        const rowInputs = Array.from(
+          tr.querySelectorAll<HTMLInputElement>("input.grid-cell-input"),
+        );
+        const idx = rowInputs.indexOf(el);
+        if (idx < 0) return;
+        const forward = dir === "right" || (e.key === "Tab" && !e.shiftKey);
+        const targetIdx = forward ? idx + 1 : idx - 1;
+        if (dir === "left" || dir === "right") {
+          e.preventDefault();
+          e.stopPropagation();
+          if (targetIdx >= 0 && targetIdx < rowInputs.length) {
+            rowInputs[targetIdx].focus({ preventScroll: true });
+            rowInputs[targetIdx].select();
+          }
+          return;
+        }
+        if (targetIdx >= 0 && targetIdx < rowInputs.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          rowInputs[targetIdx].focus({ preventScroll: true });
+          rowInputs[targetIdx].select();
+        } else {
+          const nextRowIdx = rowIdx + (forward ? 1 : -1);
+          const nextRow = detailRowRefs.current[nextRowIdx];
+          if (nextRow) {
+            e.preventDefault();
+            e.stopPropagation();
+            setActiveDetailRow(nextRowIdx);
+            const inputs = Array.from(
+              nextRow.querySelectorAll<HTMLInputElement>("input.grid-cell-input"),
+            );
+            const wrapInput = forward ? inputs[0] : inputs[inputs.length - 1];
+            if (wrapInput) {
+              wrapInput.focus({ preventScroll: true });
+              wrapInput.select();
+              ensureRowVisible(
+                detailScrollRef.current,
+                detailHeadRef.current,
+                nextRow,
+              );
+            }
+          }
+        }
+      }
+    },
+    [activeItems.length, ensureRowVisible],
+  );
+
   // ===== Hotkey chuẩn VFP ctbhch (plan §7.2.3) =====
-  // Chỉ xử lý khi dialog đang mở VÀ focus không nằm trong ô nhập liệu
-  // (tránh Space/Enter/Ctrl+A ảnh hưởng tới VoucherList hoặc ô text khác).
+  // Cho phép các phím grid (↑/↓, Space, Ctrl+A/U, Ctrl+Home/End, Enter, Esc)
+  // hoạt động bình thường cả khi đang đứng trong các ô readOnly của grid.
   useEffect(() => {
     if (!isOpen) return;
     const isTypingTarget = (el: Element | null): boolean => {
       if (!el) return false;
       if (el instanceof HTMLInputElement) {
+        if (el.readOnly) return false;
         const t = (el.getAttribute("type") || "text").toLowerCase();
         return t !== "checkbox" && t !== "radio" && t !== "button";
       }
-      return (
-        el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
-      );
+      if (el instanceof HTMLTextAreaElement) return !el.readOnly;
+      return el instanceof HTMLSelectElement;
     };
     const onKey = (e: KeyboardEvent) => {
-      const typing = isTypingTarget(document.activeElement);
+      const activeEl = document.activeElement;
+      const typing = isTypingTarget(activeEl);
+      const inCheckbox =
+        activeEl instanceof HTMLInputElement &&
+        (activeEl.getAttribute("type") || "").toLowerCase() === "checkbox";
+      const inButton = activeEl instanceof HTMLButtonElement;
       const ctrl = e.ctrlKey || e.metaKey;
+
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (typing || ctrl || e.altKey || e.shiftKey) return;
+        if (detailSectionRef.current?.contains(activeEl)) return;
+        e.preventDefault();
+        if (slips.length === 0) return;
+        const idx = slips.findIndex((s) => s.stt === activeStt);
+        const nextIdx =
+          idx === -1
+            ? 0
+            : e.key === "ArrowDown"
+              ? Math.min(idx + 1, slips.length - 1)
+              : Math.max(idx - 1, 0);
+        const nextStt = slips[nextIdx]?.stt;
+        if (!nextStt) return;
+        setActiveStt(nextStt);
+        focusMasterCell(nextStt);
+        return;
+      }
+
       if (ctrl && e.key.toLowerCase() === "a") {
         if (typing) return;
         e.preventDefault();
@@ -192,16 +505,23 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         deselectAll();
       } else if (ctrl && e.key === "Home") {
         e.preventDefault();
-        if (slips.length > 0) setActiveStt(slips[0].stt);
+        if (slips.length > 0) {
+          setActiveStt(slips[0].stt);
+          focusMasterCell(slips[0].stt);
+        }
       } else if (ctrl && e.key === "End") {
         e.preventDefault();
-        if (slips.length > 0) setActiveStt(slips[slips.length - 1].stt);
+        if (slips.length > 0) {
+          const lastStt = slips[slips.length - 1].stt;
+          setActiveStt(lastStt);
+          focusMasterCell(lastStt);
+        }
       } else if (e.key === " ") {
-        if (typing) return;
+        if (typing || inCheckbox || inButton) return;
         e.preventDefault();
         if (activeStt) toggleSelect(activeStt);
       } else if (e.key === "Enter") {
-        if (typing) return;
+        if (typing || inButton) return;
         e.preventDefault();
         if (selectedStts.size > 0) handleAccept();
       } else if (e.key === "Escape") {
@@ -220,6 +540,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     selectAll,
     deselectAll,
     toggleSelect,
+    focusMasterCell,
     handleAccept,
     onClose,
   ]);
@@ -287,45 +608,49 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         {/* ===== Master / Detail Body ===== */}
         <main className="flex-1 flex flex-col overflow-hidden p-3 gap-3 bg-neutral-100/70">
           {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU XUẤT KHO */}
-          <section className="shrink-0 max-h-[200px] flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden">
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="sticky top-0 bg-neutral-100/95 backdrop-blur z-10 text-neutral-700 uppercase text-[11px] font-semibold border-b border-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
-                  <tr className="divide-x divide-neutral-200">
-                    <th className="w-10 px-2 py-2 text-center" scope="col">
+          <section className="shrink-0 max-h-[210px] flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden">
+            <div
+              ref={masterScrollRef}
+              className="flex-1 overflow-auto table-sticky-header"
+            >
+              <table className="w-full min-w-[960px] table-fixed text-left dense-table border-collapse text-[12px] xl-grid">
+                <thead
+                  ref={masterHeadRef}
+                  className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 uppercase text-[11px] font-semibold tracking-wide select-none border-b border-neutral-300"
+                >
+                  <tr>
+                    <th className="w-10 text-center" scope="col">
                       <input
                         type="checkbox"
                         checked={allSelected}
                         onChange={(e) =>
                           e.target.checked ? selectAll() : deselectAll()
                         }
-                        className="rounded border-neutral-300 text-primary-800 focus:ring-primary-700 w-3.5 h-3.5 cursor-pointer"
+                        className="rounded border-neutral-300 text-primary-800 focus:ring-primary-700 w-3.5 h-3.5 cursor-pointer align-middle"
                         title="Chọn tất cả (Ctrl+A)"
                       />
                     </th>
-                    <th className="w-32 px-2.5 py-2 text-center" scope="col">
+                    <th className="w-[115px] text-center" scope="col">
                       Ngày
                     </th>
-                    <th className="w-36 px-3 py-2" scope="col">
+                    <th className="w-[130px]" scope="col">
                       Số phiếu
                     </th>
-                    <th className="w-36 px-3 py-2" scope="col">
+                    <th className="w-[150px]" scope="col">
                       Mã KH
                     </th>
-                    <th className="w-1/3 min-w-[240px] px-3 py-2" scope="col">
+                    <th className="w-[290px]" scope="col">
                       Tên KH
                     </th>
-                    <th className="w-1/2 min-w-[280px] px-3 py-2" scope="col">
-                      Địa chỉ
-                    </th>
+                    <th scope="col">Địa chỉ</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-200 text-neutral-700 text-[12px]">
+                <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
                   {slips.length === 0 ? (
                     <tr>
                       <td
                         colSpan={6}
-                        className="px-4 py-6 text-center text-neutral-400 italic"
+                        className="px-4 py-6 text-center text-neutral-400 italic font-normal"
                       >
                         {loading
                           ? "Đang tải dữ liệu từ CSDL Kho..."
@@ -333,52 +658,155 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    slips.map((s) => {
+                    slips.map((s, rowIdx) => {
                       const isChecked = selectedStts.has(s.stt);
                       const isActive = activeStt === s.stt;
                       return (
                         <tr
                           key={s.stt}
+                          ref={(el) => {
+                            if (el) masterRowRefs.current[s.stt] = el;
+                            else delete masterRowRefs.current[s.stt];
+                          }}
                           onClick={() => setActiveStt(s.stt)}
-                          className={`cursor-pointer transition-colors divide-x divide-neutral-200/80 ${
+                          className={
                             isActive
-                              ? "bg-primary-50/70 border-l-4 border-l-primary-800 hover:bg-primary-100/60 font-medium"
-                              : "hover:bg-primary-50/40"
-                          }`}
+                              ? "xl-row-active"
+                              : isChecked
+                                ? "xl-row-marked"
+                                : undefined
+                          }
                         >
-                          <td className="px-2 py-1.5 text-center">
-                            <div className="flex items-center justify-center space-x-1">
-                              {isActive && (
-                                <span className="text-primary-900 text-[10px] font-black">
-                                  ►
-                                </span>
-                              )}
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => toggleSelect(s.stt)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="rounded border-primary-400 text-primary-800 focus:ring-primary-800 w-3.5 h-3.5 cursor-pointer"
-                              />
-                            </div>
-                          </td>
-                          <td className="px-2.5 py-1.5 text-center font-mono tabular-nums text-primary-900">
-                            {formatDate(s.ngay_ct)}
-                          </td>
-                          <td className="px-3 py-1.5 font-bold text-primary-900">
-                            {s.so_ct || s.stt}
-                          </td>
-                          <td className="px-3 py-1.5 font-mono text-neutral-800">
-                            {s.ma_dt}
-                          </td>
-                          <td className="px-3 py-1.5 text-neutral-900 font-semibold">
-                            {s.ten_dt || "—"}
-                          </td>
                           <td
-                            className="px-3 py-1.5 text-neutral-600 truncate"
-                            title={s.dia_chi || ""}
+                            className="xl-cell text-center cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveStt(s.stt);
+                              toggleSelect(s.stt);
+                            }}
+                            title="Nhấn để đánh dấu (Space)"
                           >
-                            {s.dia_chi || "—"}
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              tabIndex={-1}
+                              className="rounded border-neutral-400 text-primary-800 focus:ring-0 w-3.5 h-3.5 cursor-pointer align-middle pointer-events-none"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={formatDate(s.ngay_ct)}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                masterActiveColRef.current = 1;
+                                setActiveStt(s.stt);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleMasterCellKeyDown(e, rowIdx, 1)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-center font-mono font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={s.so_ct || s.stt}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                masterActiveColRef.current = 2;
+                                setActiveStt(s.stt);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleMasterCellKeyDown(e, rowIdx, 2)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={s.ma_dt || ""}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                masterActiveColRef.current = 3;
+                                setActiveStt(s.stt);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleMasterCellKeyDown(e, rowIdx, 3)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={s.ten_dt || ""}
+                              placeholder="—"
+                              title={s.ten_dt || ""}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                masterActiveColRef.current = 4;
+                                setActiveStt(s.stt);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleMasterCellKeyDown(e, rowIdx, 4)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={s.dia_chi || ""}
+                              placeholder="—"
+                              title={s.dia_chi || ""}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                masterActiveColRef.current = 5;
+                                setActiveStt(s.stt);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleMasterCellKeyDown(e, rowIdx, 5)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
+                            />
                           </td>
                         </tr>
                       );
@@ -388,12 +816,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                   {Array.from({
                     length: Math.max(0, 6 - slips.length),
                   }).map((_, i) => (
-                    <tr
-                      key={`filler-${i}`}
-                      className={`h-7 divide-x divide-neutral-100 ${
-                        i % 2 === 1 ? "bg-neutral-50/20" : "bg-white"
-                      }`}
-                    >
+                    <tr key={`filler-${i}`} className="h-[24px] bg-white">
                       <td colSpan={6} />
                     </tr>
                   ))}
@@ -403,43 +826,49 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
           </section>
 
           {/* TẦNG 2: BẢNG DETAIL — CHI TIẾT HÀNG HÓA VẬT TƯ */}
-          <section className="flex-1 flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden h-full">
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="sticky top-0 bg-neutral-100/95 backdrop-blur z-10 text-neutral-700 uppercase text-[11px] font-semibold border-b border-neutral-300 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
-                  <tr className="divide-x divide-neutral-200">
-                    <th className="w-40 px-3 py-2 text-center" scope="col">
+          <section
+            ref={detailSectionRef}
+            className="flex-1 flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden h-full"
+          >
+            <div
+              ref={detailScrollRef}
+              className="flex-1 overflow-auto table-sticky-header"
+            >
+              <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+                <thead
+                  ref={detailHeadRef}
+                  className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 uppercase text-[11px] font-semibold tracking-wide select-none border-b border-neutral-300"
+                >
+                  <tr>
+                    <th className="w-40 text-center" scope="col">
                       Vật tư (Mã VT)
                     </th>
-                    <th
-                      className="min-w-[240px] px-3 py-2 text-left"
-                      scope="col"
-                    >
+                    <th className="min-w-[240px] text-left" scope="col">
                       Tên vật tư hàng hóa
                     </th>
-                    <th className="w-24 px-2.5 py-2 text-center" scope="col">
+                    <th className="w-24 text-center" scope="col">
                       Mã kho
                     </th>
-                    <th className="w-20 px-2 py-2 text-center" scope="col">
+                    <th className="w-20 text-center" scope="col">
                       ĐVT
                     </th>
-                    <th className="w-24 px-3 py-2 text-right" scope="col">
+                    <th className="w-24 text-right" scope="col">
                       Số tấm
                     </th>
-                    <th className="w-24 px-3 py-2 text-right" scope="col">
+                    <th className="w-24 text-right" scope="col">
                       Hệ số
                     </th>
-                    <th className="w-24 px-3 py-2 text-right" scope="col">
+                    <th className="w-24 text-right" scope="col">
                       SL bán
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-200 text-neutral-700 text-[12px]">
+                <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
                   {activeItems.length === 0 ? (
                     <tr>
                       <td
                         colSpan={7}
-                        className="px-4 py-6 text-center text-neutral-400 italic"
+                        className="px-4 py-6 text-center text-neutral-400 italic font-normal"
                       >
                         {loadingDetail
                           ? "Đang nạp chi tiết..."
@@ -447,41 +876,172 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    activeItems.map((item, idx) => (
-                      <tr
-                        key={item.stt0 || idx}
-                        className={`hover:bg-secondary-50/40 transition-colors divide-x divide-neutral-200 font-medium ${
-                          idx % 2 === 1 ? "bg-neutral-50/20" : ""
-                        }`}
-                      >
-                        <td className="px-3 py-2 font-mono text-primary-900 font-bold bg-neutral-50/50 text-center">
-                          {item.ma_vt}
-                        </td>
-                        <td className="px-3 py-2 text-neutral-900">
-                          <div className="flex items-center">
-                            <span className="w-1.5 h-1.5 rounded-full bg-secondary-600 mr-2 shrink-0" />
-                            <span className="font-medium">
-                              {item.ten_vt || "—"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-2.5 py-2 text-center font-semibold text-neutral-800 bg-neutral-50/30">
-                          {item.ma_kho || "—"}
-                        </td>
-                        <td className="px-2 py-2 text-center text-neutral-600">
-                          {item.dvt || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-700">
-                          {formatQuantity(item.so_tam)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500">
-                          {formatQuantity(item.he_so8)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-primary-900 font-bold">
-                          {formatQuantity(item.so_luong9)}
-                        </td>
-                      </tr>
-                    ))
+                    activeItems.map((item, idx) => {
+                      const isActive = idx === activeDetailRow;
+                      return (
+                        <tr
+                          key={item.stt0 || idx}
+                          ref={(el) => {
+                            if (el) detailRowRefs.current[idx] = el;
+                            else delete detailRowRefs.current[idx];
+                          }}
+                          onClick={() => setActiveDetailRow(idx)}
+                          className={isActive ? "xl-row-active" : undefined}
+                        >
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={item.ma_vt || ""}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 0)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-center font-mono font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell min-w-[240px]">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={item.ten_vt || ""}
+                              placeholder="—"
+                              title={item.ten_vt || ""}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 1)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={item.ma_kho || ""}
+                              placeholder="—"
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 2)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-center font-mono font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={item.dvt || ""}
+                              placeholder="—"
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 3)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-center font-sans font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell xl-amber">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={formatQuantity(item.so_tam)}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 4)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-right font-mono font-bold text-neutral-900 tabular-nums grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell xl-amber">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={formatQuantity(item.he_so8)}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 5)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-right font-mono font-bold text-neutral-900 tabular-nums grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell xl-amber">
+                            <input
+                              type="text"
+                              readOnly
+                              data-mode="select"
+                              value={formatQuantity(item.so_luong9)}
+                              onMouseDown={(e) =>
+                                handleExcelMouseDown(e, "select")
+                              }
+                              onFocus={(e) => {
+                                setActiveDetailRow(idx);
+                                e.currentTarget.select();
+                                selectAllLater(e.currentTarget);
+                              }}
+                              onKeyDown={(e) =>
+                                handleDetailCellKeyDown(e, idx, 6)
+                              }
+                              onCopy={handleCellCopy}
+                              className="xl-input text-right font-mono font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                   {/* Dòng trống bổ sung — giữ chiều cao bảng như mẫu Pickup.html */}
                   {Array.from({
@@ -489,9 +1049,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                   }).map((_, i) => (
                     <tr
                       key={`detail-filler-${i}`}
-                      className={`h-7 divide-x divide-neutral-100 ${
-                        i % 2 === 1 ? "bg-neutral-50/20" : "bg-white"
-                      }`}
+                      className="h-[24px] bg-white"
                     >
                       <td colSpan={7} />
                     </tr>
@@ -535,6 +1093,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               <span>Chấp nhận</span>
             </div>
             <Button
+              ref={cancelBtnRef}
+              data-autofocus={slips.length === 0 ? true : undefined}
               variant="outline"
               size="md"
               onClick={onClose}

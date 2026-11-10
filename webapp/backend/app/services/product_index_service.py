@@ -1,4 +1,6 @@
 import logging
+import os
+import pickle
 import threading
 import time
 import unicodedata
@@ -11,6 +13,13 @@ logger = logging.getLogger("app.services.product_index")
 
 # Khoảng thời gian quét nền (giây) để phát hiện thay đổi danh mục vật tư.
 REFRESH_INTERVAL = 45
+
+# File cache trên đĩa để khởi động lại server tức thì và giữ nguyên epoch cho trình duyệt.
+_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    ".cache",
+)
+_CACHE_FILE = os.path.join(_CACHE_DIR, "product_index.pkl")
 
 
 def chuan(s: Optional[str]) -> str:
@@ -26,7 +35,7 @@ class ProductIndexService:
     - `snapshot`: {VTID: {ma, ten, dvt, dvt_ban, loai_vt, tk_gv, tk_vt, tk_dt, tk_ck, he_so0}}
     - `changes`: danh sách thay đổi tăng dần, mỗi phần tử gắn `v` (version).
     - `version`: version hiện tại (do service tự cấp).
-    - `epoch`: đổi mỗi lần server khởi động -> client biết phải tải lại toàn bộ.
+    - `epoch`: giữ cố định qua file cache trên đĩa để client tái sử dụng IndexedDB.
 
     Chạy MỘT tiến trình uvicorn duy nhất để bản chụp không lệch version.
     100% READ-ONLY (chỉ SELECT).
@@ -38,11 +47,52 @@ class ProductIndexService:
         self.fn_uni = f"{self.vp_db}.dbo.fn_TCVNToUnicode"
 
         self._lock = threading.Lock()
+        self._refresh_lock = threading.Lock()
         self.snapshot: Dict[int, dict] = {}
         self.changes: List[dict] = []
         self.version = 0
         self.epoch = int(time.time())
         self._loaded = False
+        self._load_disk_cache()
+
+    def _load_disk_cache(self) -> None:
+        """Nạp nhanh bản chụp từ đĩa (nếu có) để không phải chờ SQL lúc mới bật server."""
+        if not os.path.exists(_CACHE_FILE):
+            return
+        try:
+            with open(_CACHE_FILE, "rb") as f:
+                data = pickle.load(f)
+            if isinstance(data, dict) and isinstance(data.get("snapshot"), dict) and data["snapshot"]:
+                self.snapshot = data["snapshot"]
+                self.changes = data.get("changes", [])
+                self.version = int(data.get("version", 0))
+                self.epoch = int(data.get("epoch", self.epoch))
+                self._loaded = True
+                logger.info(
+                    f"Loaded {len(self.snapshot)} products from disk cache (epoch={self.epoch}, v={self.version})"
+                )
+        except Exception as e:
+            logger.warning(f"Could not load product index disk cache: {e}")
+
+    def _save_disk_cache(self) -> None:
+        """Lưu bản chụp xuống đĩa để lần bật server tiếp theo dùng lại ngay."""
+        try:
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            tmp_file = f"{_CACHE_FILE}.tmp"
+            with open(tmp_file, "wb") as f:
+                pickle.dump(
+                    {
+                        "snapshot": self.snapshot,
+                        "changes": self.changes,
+                        "version": self.version,
+                        "epoch": self.epoch,
+                    },
+                    f,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
+            os.replace(tmp_file, _CACHE_FILE)
+        except Exception as e:
+            logger.warning(f"Could not save product index disk cache: {e}")
 
     # ------------------------------------------------------------------ loading
     def _read_all(self) -> Dict[int, dict]:
@@ -92,30 +142,37 @@ class ProductIndexService:
 
     def refresh(self) -> None:
         """Đọc lại toàn bộ danh mục, so sánh với bản chụp và ghi nhận thay đổi."""
-        try:
-            new = self._read_all()
-        except Exception as e:
-            logger.warning(f"Could not refresh product index: {e}")
-            return
+        with self._refresh_lock:
+            try:
+                new = self._read_all()
+            except Exception as e:
+                logger.warning(f"Could not refresh product index: {e}")
+                return
 
-        with self._lock:
-            for vtid, val in new.items():
-                if self.snapshot.get(vtid) != val:
+            changed = False
+            with self._lock:
+                for vtid, val in new.items():
+                    if self.snapshot.get(vtid) != val:
+                        self.version += 1
+                        changed = True
+                        self.changes.append({
+                            "v": self.version,
+                            **self._to_item(vtid, val),
+                            "del": False,
+                        })
+                for vtid in self.snapshot.keys() - new.keys():
                     self.version += 1
-                    self.changes.append({
-                        "v": self.version,
-                        **self._to_item(vtid, val),
-                        "del": False,
-                    })
-            for vtid in self.snapshot.keys() - new.keys():
-                self.version += 1
-                self.changes.append({"v": self.version, "id": vtid, "del": True})
+                    changed = True
+                    self.changes.append({"v": self.version, "id": vtid, "del": True})
 
-            self.snapshot = new
-            self._loaded = True
-            # Cắt bớt lịch sử thay đổi cũ (giữ ~vài giờ) để không phình RAM.
-            if len(self.changes) > 20000:
-                self.changes = self.changes[-10000:]
+                self.snapshot = new
+                self._loaded = True
+                # Cắt bớt lịch sử thay đổi cũ (giữ ~vài giờ) để không phình RAM.
+                if len(self.changes) > 20000:
+                    self.changes = self.changes[-10000:]
+
+            if changed or not os.path.exists(_CACHE_FILE):
+                self._save_disk_cache()
 
     def ensure_loaded(self) -> None:
         if not self._loaded:

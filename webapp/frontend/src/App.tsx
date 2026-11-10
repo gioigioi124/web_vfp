@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
+import { useModalLock } from "./lib/modalLock";
 import { VoucherList } from "./components/VoucherList";
 import { VoucherForm } from "./components/VoucherForm";
 import { FilterDialog } from "./components/FilterDialog";
@@ -55,6 +56,8 @@ export function App() {
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<VoucherHeader | null>(null);
   const [deleting, setDeleting] = useState<boolean>(false);
+  const deleteDialogRef = useRef<HTMLDivElement | null>(null);
+  useModalLock(!!deleteTarget, deleteDialogRef);
 
   // Inherited data for new voucher (F2 / Ctrl+F2 / Pickup)
   const [inheritedData, setInheritedData] =
@@ -96,8 +99,11 @@ export function App() {
       if (activeVoucher?.stt !== sttParam) {
         handleOpenDetail(sttParam);
       }
-    } else if (!sttParam && activeVoucher) {
-      handleCloseDetail();
+    } else if (!sttParam) {
+      if (activeVoucher) {
+        handleCloseDetail();
+      }
+      setInheritedData(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sttParam]);
@@ -132,6 +138,7 @@ export function App() {
         ten_dt: currentSelectedVoucher.ten_dt,
         dia_chi: currentSelectedVoucher.dia_chi,
         ong_ba: currentSelectedVoucher.ong_ba,
+        dien_giai0: currentSelectedVoucher.dien_giai0,
         ma_xe: currentSelectedVoucher.ma_xe,
         ten_xe: currentSelectedVoucher.ten_xe,
         ma_bp: currentSelectedVoucher.ma_bp,
@@ -272,18 +279,26 @@ export function App() {
           showToast("F4 - Đang chọn tài khoản ngầm định.");
       },
       // Space = đánh dấu / bỏ đánh dấu dòng (ctbhh KeyPress 32)
-      onSpace: () => toggleMark(selectedStt),
+      onSpace: () => {
+        if (!sttParam) toggleMark(selectedStt);
+      },
       // Ctrl+A = chọn tất cả dòng (Mark = .T.)
       onCtrlA: () => {
-        setMarked(new Set(vouchers.map((v) => v.stt)));
-        showToast(`Đã chọn tất cả ${vouchers.length} chứng từ.`);
+        if (!sttParam) {
+          setMarked(new Set(vouchers.map((v) => v.stt)));
+          showToast(`Đã chọn tất cả ${vouchers.length} chứng từ.`);
+        }
       },
       // Ctrl+U = bỏ chọn tất cả dòng (Mark = .F.)
       onCtrlU: () => {
-        setMarked(new Set());
-        showToast("Đã bỏ chọn tất cả chứng từ.");
+        if (!sttParam) {
+          setMarked(new Set());
+          showToast("Đã bỏ chọn tất cả chứng từ.");
+        }
       },
-      onCtrlF: () => showToast("Ctrl+F - Đánh số chứng từ tự động."),
+      onCtrlF: () => {
+        if (!sttParam) showToast("Ctrl+F - Đánh số chứng từ tự động.");
+      },
       // Enter = mở chi tiết dòng đang chọn (tương đương double-click)
       onEnter: () => {
         if (!sttParam && selectedStt) {
@@ -306,10 +321,10 @@ export function App() {
         }
       },
       onCtrlHome: () => {
-        if (vouchers.length > 0) setSelectedStt(vouchers[0].stt);
+        if (!sttParam && vouchers.length > 0) setSelectedStt(vouchers[0].stt);
       },
       onCtrlEnd: () => {
-        if (vouchers.length > 0)
+        if (!sttParam && vouchers.length > 0)
           setSelectedStt(vouchers[vouchers.length - 1].stt);
       },
       // Tắt hotkey danh sách khi có dialog đang mở (tránh Space/Ctrl+A/Enter
@@ -382,7 +397,10 @@ export function App() {
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs">
-          <div className="bg-white rounded shadow-2xl border border-neutral-300 w-[440px] overflow-hidden animate-in fade-in zoom-in-95">
+          <div
+            ref={deleteDialogRef}
+            className="bg-white rounded shadow-2xl border border-neutral-300 w-[440px] overflow-hidden animate-in fade-in zoom-in-95"
+          >
             <div className="bg-danger-700 text-white px-4 py-2.5 flex items-center justify-between shadow">
               <div className="flex items-center gap-2">
                 <Trash2 className="w-4 h-4" />

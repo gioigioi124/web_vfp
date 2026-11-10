@@ -6,7 +6,7 @@ import urllib.request
 import webbrowser
 import signal
 
-def is_port_ready(url, timeout=1):
+def is_port_ready(url, timeout=0.3):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'HealthCheck'})
         with urllib.request.urlopen(req, timeout=timeout) as res:
@@ -33,7 +33,7 @@ def main():
 
     print("[1/2] Khoi dong Backend FastAPI (Port 8000)...")
     backend_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"],
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
         cwd=backend_dir
     )
 
@@ -48,9 +48,9 @@ def main():
 
     backend_ok = False
     frontend_ok = False
-    for i in range(20):
-        time.sleep(0.5)
-        if not backend_ok and is_port_ready("http://127.0.0.1:8000/docs"):
+    for i in range(60):
+        time.sleep(0.15)
+        if not backend_ok and is_port_ready("http://127.0.0.1:8000/"):
             backend_ok = True
             print("  [OK] Backend FastAPI da san sang: http://localhost:8000/docs")
         if not frontend_ok and is_port_ready("http://127.0.0.1:5173"):

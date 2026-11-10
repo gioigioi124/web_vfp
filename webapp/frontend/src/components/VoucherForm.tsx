@@ -11,6 +11,7 @@ import { Autocomplete, AutocompleteOption } from "./ui/Autocomplete";
 import { fetchPrice } from "../lib/lookups";
 import {
   initCustomerIndex,
+  isCustomerIndexReady,
   searchCustomers,
   getCustomer,
 } from "../lib/customerIndex";
@@ -34,7 +35,6 @@ import {
   Check,
   Ban,
   AlertTriangle,
-  CheckCircle2,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -140,7 +140,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     voucher?.dia_chi || initialInherited?.dia_chi || "",
   );
   const [dienGiai0, setDienGiai0] = useState<string>(
-    voucher?.dien_giai0 || initialInherited?.dien_giai0 || "Mua hàng",
+    voucher?.dien_giai0 ?? initialInherited?.dien_giai0 ?? "Mua hàng",
   );
   const [maBp, setMaBp] = useState<string>(
     voucher?.ma_bp || initialInherited?.ma_bp || "",
@@ -218,7 +218,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Status & Validation States
   const [saving, setSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Debt Info State (khớp CustomerDebtSummary từ /api/debt/customer)
   const [debtInfo, setDebtInfo] = useState<{
@@ -231,19 +230,46 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     is_near_limit: boolean;
     status_message: string;
   } | null>(null);
-  // Dialog cảnh báo công nợ (thay cho thẻ span trước đây).
+  // Dialog cảnh báo (công nợ, hoặc mã khách hàng không hợp lệ — không làm xô lệch form).
   const [debtDialog, setDebtDialog] = useState<{
     title: string;
     message: string;
     tone: "danger" | "warning";
+    focusTarget?: "tenDt" | "maDt";
   } | null>(null);
-  // Chỉ kiểm tra hạn nợ SAU khi người dùng chọn khách hàng / Enter.
-  // Khi tạo mới (mã KH kế thừa từ đơn đang xem) thì KHÔNG kiểm tra ngay.
-  const [debtCheckArmed, setDebtCheckArmed] = useState<boolean>(!isCreate);
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
   useModalLock(!!debtDialog, debtDialogRef);
   useModalLock(showAccountPicker, accountPickerRef);
+
+  // Đóng dialog cảnh báo và trả focus về trường phù hợp (Tên KH hoặc Mã KH).
+  const closeDebtDialog = useCallback(() => {
+    const target = debtDialog?.focusTarget ?? "tenDt";
+    setDebtDialog(null);
+    const focusField = () => {
+      const el =
+        target === "maDt" ? maDtInputRef.current : tenDtInputRef.current;
+      if (el) {
+        el.focus();
+        el.select();
+      }
+    };
+    setTimeout(focusField, 0);
+    setTimeout(focusField, 35);
+  }, [debtDialog]);
+
+  useEffect(() => {
+    if (!debtDialog) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeDebtDialog();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [debtDialog, closeDebtDialog]);
 
   // 0a. Nạp danh mục khách hàng (RAM) + index vật tư (Web Worker) + danh mục nhỏ
   //     (kho/xe/bộ phận/tài khoản) một lần khi mở form.
@@ -260,6 +286,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Ref giữ giá trị ô Mã KH mới nhất, cập nhật ĐỒNG BỘ trong onChange/onSelect.
   // Tránh việc onKeyDown/onBlur dùng giá trị cũ (stale closure) ghi đè mã vừa chọn.
   const maDtValueRef = useRef<string>(maDt);
+  // Ref ghi nhận mã KH đã được CHỌN/XÁC NHẬN (Enter / chọn từ danh sách / blur).
+  // Khi đang gõ dở ký tự trong ô Đối tượng, ref này được xóa về "" để không cảnh báo sớm.
+  const committedMaDtRef = useRef<string>(
+    isCreate ? "" : (voucher?.ma_dt || "").trim().toUpperCase(),
+  );
   // Đồng bộ khi maDt đổi từ bên ngoài (nạp phiếu cũ) — không ảnh hưởng luồng gõ/chọn.
   useEffect(() => {
     maDtValueRef.current = maDt;
@@ -346,8 +377,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     return () => {
       cancelled = true;
     };
+    // Chỉ chạy khi khởi tạo form với maDt ban đầu (không chạy khi đang gõ dở)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maDt]);
+  }, []);
 
   // 4. Nếu đã có maBp nhưng tenBp đang trống -> tự động lookup tên bộ phận từ DmBp
   useEffect(() => {
@@ -387,88 +419,97 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     };
   }, [maXe, tenXe]);
 
-  // Load customer debt info on maDt change (công nợ đến NGÀY HIỆN TẠI).
-  const loadDebtInfo = useCallback(async (dt: string) => {
-    if (!dt) {
-      setDebtInfo(null);
-      return;
-    }
-    try {
-      const res = await fetch(
-        `/api/debt/customer?ma_dt=${encodeURIComponent(dt)}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.data) {
-          const d = data.data;
-          setDebtInfo({
-            du_no: d.du_no ?? 0,
-            du_co: d.du_co ?? 0,
-            du_cuoi: d.du_cuoi ?? 0,
-            gioi_han: d.gioi_han ?? 0,
-            toi_han: d.toi_han ?? 0,
-            is_over_limit: !!d.is_over_limit,
-            is_near_limit: !!d.is_near_limit,
-            status_message: d.status_message ?? "",
-          });
-        }
+  // Nạp thông tin công nợ của khách hàng (đến NGÀY HIỆN TẠI).
+  // Chỉ bật dialog cảnh báo khi `showWarningDialog = true` (sau khi người dùng đã chọn/xác nhận xong khách hàng).
+  const loadDebtInfo = useCallback(
+    async (dt: string, showWarningDialog: boolean = false) => {
+      const cleanDt = dt.trim().toUpperCase();
+      if (!cleanDt) {
+        setDebtInfo(null);
+        return;
       }
-    } catch {
-      setDebtInfo(null);
-    }
-  }, []);
+      try {
+        const res = await fetch(
+          `/api/debt/customer?ma_dt=${encodeURIComponent(cleanDt)}`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.data) {
+            // Nếu người dùng đã gõ sang mã khác trong lúc đang tải -> bỏ qua
+            if (maDtValueRef.current.trim().toUpperCase() !== cleanDt) return;
+            const d = data.data;
+            const nextDebt = {
+              du_no: d.du_no ?? 0,
+              du_co: d.du_co ?? 0,
+              du_cuoi: d.du_cuoi ?? 0,
+              gioi_han: d.gioi_han ?? 0,
+              toi_han: d.toi_han ?? 0,
+              is_over_limit: !!d.is_over_limit,
+              is_near_limit: !!d.is_near_limit,
+              status_message: d.status_message ?? "",
+            };
+            setDebtInfo(nextDebt);
 
+            if (showWarningDialog) {
+              const fmt = (n: number) => formatCurrency(n, "VND");
+              if (nextDebt.is_over_limit) {
+                setDebtDialog({
+                  title: "Vượt quá hạn mức nợ",
+                  tone: "danger",
+                  message:
+                    `Khách hàng ${cleanDt} vượt quá hạn mức nợ cho phép!\n\n` +
+                    `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
+                    `Giới hạn nợ: ${fmt(nextDebt.gioi_han)}\n\n` +
+                    `Vui lòng kiểm tra lại trước khi lưu chứng từ.`,
+                });
+              } else if (nextDebt.is_near_limit) {
+                setDebtDialog({
+                  title: "Đến hạn mức thanh toán",
+                  tone: "warning",
+                  message:
+                    `Khách hàng ${cleanDt} đã chạm ngưỡng cảnh báo thanh toán.\n\n` +
+                    `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
+                    `Ngưỡng cảnh báo: ${fmt(nextDebt.toi_han)}`,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        setDebtInfo(null);
+      }
+    },
+    [],
+  );
+
+  // Nạp số liệu hạn mức / dư nợ ban đầu khi mở form (không bật popup cảnh báo tự động khi chưa chọn khách)
   useEffect(() => {
-    if (maDt) {
-      loadDebtInfo(maDt);
+    if (maDt && maDt.trim()) {
+      loadDebtInfo(maDt, false);
     } else {
       setDebtInfo(null);
     }
-  }, [maDt, loadDebtInfo]);
-
-  // Hiện dialog cảnh báo khi công nợ vượt/chạm hạn mức (chỉ khi mã khách đổi).
-  const lastDebtWarnRef = useRef<string>("");
-  useEffect(() => {
-    if (!debtInfo || !maDt) return;
-    // Chưa "kích hoạt" kiểm tra (tạo mới, chưa chọn khách) -> không cảnh báo.
-    if (!debtCheckArmed) return;
-    const key = `${maDt}|${debtInfo.is_over_limit}|${debtInfo.is_near_limit}`;
-    if (lastDebtWarnRef.current === key) return;
-    lastDebtWarnRef.current = key;
-
-    const fmt = (n: number) => formatCurrency(n, "VND");
-    if (debtInfo.is_over_limit) {
-      setDebtDialog({
-        title: "Vượt quá hạn mức nợ",
-        tone: "danger",
-        message:
-          `Khách hàng ${maDt} vượt quá hạn mức nợ cho phép!\n\n` +
-          `Dư nợ hiện tại: ${fmt(debtInfo.du_cuoi)}\n` +
-          `Giới hạn nợ: ${fmt(debtInfo.gioi_han)}\n\n` +
-          `Vui lòng kiểm tra lại trước khi lưu chứng từ.`,
-      });
-    } else if (debtInfo.is_near_limit) {
-      setDebtDialog({
-        title: "Đến hạn mức thanh toán",
-        tone: "warning",
-        message:
-          `Khách hàng ${maDt} đã chạm ngưỡng cảnh báo thanh toán.\n\n` +
-          `Dư nợ hiện tại: ${fmt(debtInfo.du_cuoi)}\n` +
-          `Ngưỡng cảnh báo: ${fmt(debtInfo.toi_han)}`,
-      });
-    }
-  }, [debtInfo, maDt, debtCheckArmed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle Customer Selection -> tự động điền Tên KH, Ông/Bà (từ Doi_Tac hoặc Ten_Dt), Địa chỉ, Mã bộ phận, Tên bộ phận
   const [maDtError, setMaDtError] = useState<string | null>(null);
+  const lastWarnedMaDtRef = useRef<string>("");
   const handleSelectCustomer = async (selectedCode: string) => {
     const raw = selectedCode.trim().toUpperCase();
     if (!raw) {
       setMaDtError(null);
+      setDebtInfo(null);
+      committedMaDtRef.current = "";
+      lastWarnedMaDtRef.current = "";
       return;
     }
-    // Người dùng đã chọn/Enter khách hàng -> bật kiểm tra hạn nợ.
-    setDebtCheckArmed(true);
+    // Tránh chạy lặp khi onSelect + Enter + onBlur kích hoạt liên tiếp cho cùng 1 mã vừa chọn
+    if (committedMaDtRef.current === raw) {
+      return;
+    }
+    committedMaDtRef.current = raw;
+
     // RAM-only: chờ lần nạp danh mục đầu tiên (đã khởi động từ app) rồi tra trong RAM.
     await initCustomerIndex();
     const cust = getCustomer(raw);
@@ -478,6 +519,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       // LUÔN lấy MÃ thật từ danh mục DmDt, không dùng chuỗi người dùng đã gõ.
       // Tránh trường hợp người dùng gõ TÊN khách -> Ma_Dt bị ghi thành tên (ghi rác).
       const realCode = cust.ma_dt.trim().toUpperCase();
+      committedMaDtRef.current = realCode;
+      lastWarnedMaDtRef.current = "";
       maDtValueRef.current = realCode;
       setMaDt(realCode);
       setMaDtError(null);
@@ -493,13 +536,25 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       }
       setMaDtGtGt(cust.ms_thue || "");
       setMaVm(cust.ma_vm || "");
+      // Chỉ kiểm tra và cảnh báo quá hạn nợ SAU khi đã chọn xong khách hàng hợp lệ
+      loadDebtInfo(realCode, true);
     } else {
       // Không tìm thấy mã khách trong DmDt -> giữ nguyên chuỗi để người dùng sửa,
-      // đánh dấu lỗi và chặn Lưu (khớp hành vi VFP: Ma_Dt phải là mã hợp lệ).
+      // hiện dialog cảnh báo (không xô lệch form) và chặn Lưu (khớp hành vi VFP).
+      committedMaDtRef.current = "";
       setMaDt(raw);
-      setMaDtError(
-        `Mã khách hàng "${raw}" không tồn tại trong danh mục. Vui lòng chọn từ danh sách.`,
-      );
+      setDebtInfo(null);
+      const errMsg = `Mã khách hàng "${raw}" không tồn tại trong danh mục. Vui lòng chọn từ danh sách.`;
+      setMaDtError(errMsg);
+      if (lastWarnedMaDtRef.current !== raw) {
+        lastWarnedMaDtRef.current = raw;
+        setDebtDialog({
+          title: "Không tìm thấy mã khách hàng",
+          tone: "danger",
+          message: errMsg,
+          focusTarget: "maDt",
+        });
+      }
     }
   };
 
@@ -603,10 +658,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const handleDeleteItem = (idx: number) => {
     if (items.length <= 1) return;
     const next = items.filter((_, i) => i !== idx);
+    const nextActive = Math.min(idx, next.length - 1);
+    const colIdx = detailGridRef.current?.getFocusedColumnIndex();
+    detailGridRef.current?.scheduleFocusCell(nextActive, colIdx);
     setItems(next);
-    if (activeRowIndex >= next.length) {
-      setActiveRowIndex(next.length - 1);
-    }
+    setActiveRowIndex(nextActive);
   };
 
   const handleAddItem = () => {
@@ -644,14 +700,25 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
   const handleSave = async () => {
     setErrorMessage(null);
-    setSuccessMessage(null);
 
     if (!maDt.trim()) {
       setErrorMessage("Vui lòng chọn Mã khách hàng / Đối tượng.");
       return;
     }
-    if (maDtError) {
-      setErrorMessage(maDtError);
+    const cleanMaDt = maDt.trim().toUpperCase();
+    await initCustomerIndex();
+    if (maDtError || (isCustomerIndexReady() && !getCustomer(cleanMaDt))) {
+      const errMsg =
+        maDtError ||
+        `Mã khách hàng "${cleanMaDt}" không tồn tại trong danh mục. Vui lòng chọn từ danh sách.`;
+      setMaDtError(errMsg);
+      lastWarnedMaDtRef.current = cleanMaDt;
+      setDebtDialog({
+        title: "Không tìm thấy mã khách hàng",
+        tone: "danger",
+        message: errMsg,
+        focusTarget: "maDt",
+      });
       return;
     }
     if (!ngayCt.trim()) {
@@ -794,13 +861,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         setSoCt(savedSoCt);
       }
 
-      setSuccessMessage(
-        `${isCreate ? "Tạo mới" : "Cập nhật"} chứng từ thành công! Số phiếu: ${savedSoCt}`,
-      );
       if (onSaveSuccess && data.data?.stt) {
-        setTimeout(() => {
-          onSaveSuccess(data.data.stt);
-        }, 800);
+        onSaveSuccess(data.data.stt);
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Lỗi mạng hoặc máy chủ không phản hồi.");
@@ -1011,20 +1073,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           </button>
         </div>
       )}
-      {successMessage && (
-        <div className="bg-success-50 border-b border-success-200 px-4 py-2 flex items-center justify-between text-xs text-success-800">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-success-600 shrink-0" />
-            <span className="font-semibold">{successMessage}</span>
-          </div>
-          <button
-            onClick={() => setSuccessMessage(null)}
-            className="text-success-500 hover:text-success-800"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
 
       {/* ===== Master Information Form ===== */}
       <section
@@ -1035,36 +1083,38 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           {/* Left & Center: Transaction & Customer */}
           <div className="w-full xl:flex-1 min-w-0 grid grid-cols-12 gap-x-2 gap-y-1.5">
             {/* Row 1: Dates, Voucher No & Credit Guard */}
-            <div className="col-span-12 flex flex-wrap items-center gap-x-3 gap-y-1 pb-1 border-b border-neutral-200/80">
-              <div className="flex items-center gap-1.5">
-                <label className="erp-label text-neutral-700 font-bold">
-                  Ngày hạch toán:
+            <div className="col-span-12 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <div className="flex items-center gap-2">
+                <label className="erp-label w-[72px] shrink-0 inline-block text-neutral-700 font-bold">
+                  Ngày:
                 </label>
-                {isEditable ? (
-                  <input
-                    ref={ngayCtInputRef}
-                    type="date"
-                    className="erp-input w-32 text-xs py-0.5 font-mono font-semibold"
-                    value={ngayCt}
-                    onChange={(e) => setNgayCt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        soCtInputRef.current?.focus();
-                        soCtInputRef.current?.select();
-                        return;
-                      }
-                      handleHeaderArrowNav(e, 0);
-                    }}
-                  />
-                ) : (
-                  <input
-                    className={readonlyField + " w-28 text-xs py-0.5"}
-                    value={formatDate(ngayCt)}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                  />
-                )}
+                <div className="w-40 shrink-0">
+                  {isEditable ? (
+                    <input
+                      ref={ngayCtInputRef}
+                      type="date"
+                      className="erp-input w-full text-xs py-0.5 font-mono font-semibold"
+                      value={ngayCt}
+                      onChange={(e) => setNgayCt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          soCtInputRef.current?.focus();
+                          soCtInputRef.current?.select();
+                          return;
+                        }
+                        handleHeaderArrowNav(e, 0);
+                      }}
+                    />
+                  ) : (
+                    <input
+                      className={readonlyField + " text-xs py-0.5"}
+                      value={formatDate(ngayCt)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      readOnly
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -1185,24 +1235,35 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                     value={maDt}
                     onChange={(val) => {
                       maDtValueRef.current = val;
+                      committedMaDtRef.current = "";
+                      lastWarnedMaDtRef.current = "";
                       setMaDt(val);
                       if (maDtError) setMaDtError(null);
                     }}
                     onSelect={(opt) => {
                       maDtValueRef.current = opt.value;
+                      lastWarnedMaDtRef.current = "";
                       handleSelectCustomer(opt.value);
+                      tenDtInputRef.current?.focus();
+                      tenDtInputRef.current?.select();
                     }}
                     onBlur={() => {
-                      const v = maDtValueRef.current;
-                      if (v.trim()) {
+                      const v = maDtValueRef.current.trim();
+                      const upper = v.toUpperCase();
+                      if (
+                        v &&
+                        upper !== committedMaDtRef.current &&
+                        upper !== lastWarnedMaDtRef.current
+                      ) {
                         handleSelectCustomer(v);
                       }
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        const v = maDtValueRef.current;
-                        if (v.trim()) {
+                        const v = maDtValueRef.current.trim();
+                        lastWarnedMaDtRef.current = "";
+                        if (v) {
                           handleSelectCustomer(v);
                         }
                         tenDtInputRef.current?.focus();
@@ -1223,17 +1284,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                         : "text-primary-800"
                     }`}
                   />
-                  {maDtError && (
-                    <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-danger-700">
-                      <AlertTriangle className="w-3 h-3 shrink-0" />
-                      <span className="truncate" title={maDtError}>
-                        Mã KH không hợp lệ
-                      </span>
-                    </div>
-                  )}
                 </div>
               ) : (
-                <div className="w-28 shrink-0">
+                <div className="w-40 shrink-0">
                   <input
                     className={disabledLookupField + " font-mono font-bold"}
                     value={maDt}
@@ -1302,18 +1355,21 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 />
               </div>
 
-              <label className="erp-label shrink-0 ml-1 text-neutral-500">
-                Bộ phận:
-              </label>
-              <div className="w-16 shrink-0">
-                <input
-                  className={
-                    disabledLookupField + " font-mono font-semibold text-center"
-                  }
-                  value={maBp || ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly
-                />
+              <div className="flex items-center gap-2 ml-1 w-36 shrink-0">
+                <label className="erp-label shrink-0 text-neutral-500">
+                  Bộ phận:
+                </label>
+                <div className="flex-1 min-w-0">
+                  <input
+                    className={
+                      disabledLookupField +
+                      " font-mono font-semibold text-center"
+                    }
+                    value={maBp || ""}
+                    onFocus={(e) => e.currentTarget.select()}
+                    readOnly
+                  />
+                </div>
               </div>
               <div className="w-96 shrink-0">
                 <input
@@ -1363,88 +1419,95 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 />
               </div>
 
-              <label className="erp-label shrink-0 ml-1">Xe:</label>
-              {isEditable ? (
-                <div className="w-24 shrink-0">
-                  <Autocomplete
-                    inputRef={maXeInputRef}
-                    selectOnFocus
-                    value={maXe || ""}
-                    onChange={(val) => setMaXe(val)}
-                    onSelect={(opt) => handleSelectXe(opt.value, opt.hint)}
-                    onBlur={() => handleSelectXe(maXe)}
+              <div className="flex items-center gap-2 ml-1 w-36 shrink-0">
+                <label className="erp-label shrink-0">Xe:</label>
+                {isEditable ? (
+                  <div className="flex-1 min-w-0">
+                    <Autocomplete
+                      inputRef={maXeInputRef}
+                      selectOnFocus
+                      value={maXe || ""}
+                      onChange={(val) => setMaXe(val)}
+                      onSelect={(opt) => handleSelectXe(opt.value, opt.hint)}
+                      onBlur={() => handleSelectXe(maXe)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (maXe.trim()) {
+                            handleSelectXe(maXe);
+                          }
+                          pickupBtnRef.current?.focus();
+                          return;
+                        }
+                        handleHeaderArrowNav(e, 5);
+                      }}
+                      fetcher={fetchXeOptionsLocal}
+                      openOnTypeOnly
+                      debounceMs={30}
+                      maxResults={30}
+                      dropdownMinWidth={360}
+                      placeholder="Mã xe..."
+                      className="font-mono font-semibold text-neutral-800 uppercase"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex-1 min-w-0">
+                    <input
+                      className={
+                        disabledLookupField + " font-mono text-center"
+                      }
+                      value={maXe || ""}
+                      onFocus={(e) => e.currentTarget.select()}
+                      readOnly
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="w-96 shrink-0 flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <input
+                    className={disabledLookupField}
+                    value={tenXe || ""}
+                    onFocus={(e) => e.currentTarget.select()}
+                    readOnly
+                    title={tenXe || ""}
+                  />
+                </div>
+
+                {isEditable && (
+                  <button
+                    ref={pickupBtnRef}
+                    type="button"
+                    onClick={() => onOpenPickup(maDt, ngayCt)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
-                        if (maXe.trim()) {
-                          handleSelectXe(maXe);
+                        e.stopPropagation();
+                        onOpenPickup(maDt, ngayCt);
+                      } else if (
+                        (e.key === "Tab" && !e.shiftKey) ||
+                        e.key === "ArrowDown" ||
+                        e.key === "ArrowRight"
+                      ) {
+                        if (firstMaVtRef.current) {
+                          e.preventDefault();
+                          firstMaVtRef.current.focus();
+                          firstMaVtRef.current.select();
                         }
-                        pickupBtnRef.current?.focus();
-                        return;
-                      }
-                      handleHeaderArrowNav(e, 5);
-                    }}
-                    fetcher={fetchXeOptionsLocal}
-                    openOnTypeOnly
-                    debounceMs={30}
-                    maxResults={30}
-                    dropdownMinWidth={360}
-                    placeholder="Mã xe..."
-                    className="font-mono font-semibold text-neutral-800 uppercase"
-                  />
-                </div>
-              ) : (
-                <div className="w-20 shrink-0">
-                  <input
-                    className={disabledLookupField + " font-mono text-center"}
-                    value={maXe || ""}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                  />
-                </div>
-              )}
-              <div className="w-64 shrink-0">
-                <input
-                  className={disabledLookupField}
-                  value={tenXe || ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly
-                  title={tenXe || ""}
-                />
-              </div>
-
-              {isEditable && (
-                <button
-                  ref={pickupBtnRef}
-                  type="button"
-                  onClick={() => onOpenPickup(maDt, ngayCt)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onOpenPickup(maDt, ngayCt);
-                    } else if (
-                      (e.key === "Tab" && !e.shiftKey) ||
-                      e.key === "ArrowDown" ||
-                      e.key === "ArrowRight"
-                    ) {
-                      if (firstMaVtRef.current) {
+                      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
                         e.preventDefault();
-                        firstMaVtRef.current.focus();
-                        firstMaVtRef.current.select();
+                        focusHeaderControl(maXeInputRef.current);
                       }
-                    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-                      e.preventDefault();
-                      focusHeaderControl(maXeInputRef.current);
-                    }
-                  }}
-                  className="inline-flex items-center px-2.5 py-0.5 rounded bg-secondary-50 hover:bg-secondary-100 focus:ring-2 focus:ring-primary-600 focus:outline-none text-secondary-700 border border-secondary-300 shadow-sm font-semibold text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
-                  title="Chọn phiếu xuất từ kho (ctbhch)"
-                >
-                  <FileText className="w-3.5 h-3.5 mr-1.5 text-secondary-600" />
-                  Chọn phiếu xuất
-                </button>
-              )}
+                    }}
+                    className="inline-flex items-center px-2.5 py-0.5 rounded bg-secondary-50 hover:bg-secondary-100 focus:ring-2 focus:ring-primary-600 focus:outline-none text-secondary-700 border border-secondary-300 shadow-sm font-semibold text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                    title="Chọn phiếu xuất từ kho (ctbhch)"
+                  >
+                    <FileText className="w-3.5 h-3.5 mr-1.5 text-secondary-600" />
+                    Chọn phiếu xuất
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1665,7 +1728,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() => setDebtDialog(null)}
+                onClick={closeDebtDialog}
                 className="text-white/80 hover:text-white"
               >
                 <X className="w-4 h-4" />
@@ -1678,7 +1741,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               <button
                 type="button"
                 data-autofocus
-                onClick={() => setDebtDialog(null)}
+                onClick={closeDebtDialog}
                 className="px-4 py-1.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-xs font-semibold cursor-pointer"
               >
                 Đã hiểu

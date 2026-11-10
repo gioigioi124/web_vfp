@@ -210,6 +210,8 @@ const NumCell: React.FC<NumCellProps> = ({
 
 export interface DetailGridHandle {
   focusMaVt: (rowIndex: number) => void;
+  getFocusedColumnIndex: () => number | undefined;
+  scheduleFocusCell: (rowIndex: number, colIndex?: number) => void;
 }
 
 interface DetailGridProps {
@@ -279,12 +281,162 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
   const tableRef = useRef<HTMLTableElement | null>(null);
   const maVtInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const pendingFocusRowRef = useRef<number | null>(null);
+  const pendingFocusCellRef = useRef<{
+    rowIdx: number;
+    colIdx?: number;
+  } | null>(null);
+  const [internalActiveRow, setInternalActiveRow] = useState<number>(0);
+
+  useEffect(() => {
+    setInternalActiveRow(0);
+  }, [items]);
+
+  const currentActiveRow = onSelectRow ? activeRowIndex : internalActiveRow;
+  const handleSelectRow = useCallback(
+    (idx: number) => {
+      setInternalActiveRow(idx);
+      onSelectRow?.(idx);
+    },
+    [onSelectRow],
+  );
+
+  const ensureTrVisible = useCallback((tr: HTMLTableRowElement | null) => {
+    if (!tr) return;
+    const table = tr.closest("table");
+    const container = table?.parentElement;
+    if (!table || !container) return;
+    const thead = table.querySelector("thead");
+    const headerHeight = thead ? thead.getBoundingClientRect().height : 0;
+    const cRect = container.getBoundingClientRect();
+    const rRect = tr.getBoundingClientRect();
+    const visibleTop = cRect.top + headerHeight;
+    const visibleBottom = cRect.top + container.clientHeight;
+    if (rRect.top < visibleTop) {
+      container.scrollTop -= visibleTop - rRect.top;
+    } else if (rRect.bottom > visibleBottom) {
+      container.scrollTop += rRect.bottom - visibleBottom;
+    }
+  }, []);
+
+  const handleReadOnlyCopy = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const el = e.currentTarget;
+      if (el.selectionStart === el.selectionEnd && el.value) {
+        e.clipboardData.setData("text/plain", el.value);
+        e.preventDefault();
+      }
+    },
+    [],
+  );
+
+  // Điều hướng bằng phím mũi tên / Tab cho các ô chỉ đọc (readOnly)
+  const handleReadOnlyCellKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && variant === "form" && editable) {
+        e.preventDefault();
+        e.stopPropagation();
+        const el = e.currentTarget;
+        const tr = el.closest("tr");
+        const td = el.closest("td");
+        if (!tr || !td) return;
+        const cells = Array.from(tr.children);
+        const currCol = cells.indexOf(td);
+        for (let i = currCol + 1; i < cells.length; i++) {
+          const nextEditable = cells[i].querySelector<HTMLInputElement>(
+            "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
+          );
+          if (nextEditable) {
+            nextEditable.focus({ preventScroll: true });
+            nextEditable.select();
+            return;
+          }
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.blur();
+        return;
+      }
+
+      const dir = arrowDir(e.key);
+      if (dir === "up" || dir === "down") {
+        e.preventDefault();
+        e.stopPropagation();
+        const el = e.currentTarget;
+        const tr = el.closest("tr");
+        const tbody = tr?.parentElement;
+        if (!tr || !tbody) return;
+        const rows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>("tr"));
+        const rowIdx = rows.indexOf(tr);
+        const targetRow = rows[rowIdx + (dir === "down" ? 1 : -1)];
+        if (!targetRow) return;
+        const td = el.closest("td");
+        const cellIdx = td ? Array.from(tr.children).indexOf(td) : -1;
+        if (cellIdx < 0) return;
+        const targetCell = targetRow.children[cellIdx] as HTMLElement | undefined;
+        const targetInput =
+          targetCell?.querySelector<HTMLInputElement>("input");
+        if (targetInput) {
+          targetInput.focus({ preventScroll: true });
+          targetInput.select();
+          ensureTrVisible(targetRow);
+        }
+        return;
+      }
+
+      if (dir === "left" || dir === "right" || e.key === "Tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        const el = e.currentTarget;
+        const tr = el.closest("tr");
+        if (!tr) return;
+        const rowInputs = Array.from(
+          tr.querySelectorAll<HTMLInputElement>("input:not([disabled])"),
+        );
+        const idx = rowInputs.indexOf(el);
+        if (idx < 0) return;
+        const forward =
+          dir === "right" || (e.key === "Tab" && !e.shiftKey);
+        const targetIdx = forward ? idx + 1 : idx - 1;
+        if (targetIdx >= 0 && targetIdx < rowInputs.length) {
+          rowInputs[targetIdx].focus({ preventScroll: true });
+          rowInputs[targetIdx].select();
+          return;
+        }
+        if (e.key === "Tab") {
+          const tbody = tr.parentElement;
+          if (!tbody) return;
+          const rows = Array.from(
+            tbody.querySelectorAll<HTMLTableRowElement>("tr"),
+          );
+          const rowIdx = rows.indexOf(tr);
+          const targetRow = rows[rowIdx + (forward ? 1 : -1)];
+          if (!targetRow) return;
+          const nextRowInputs = Array.from(
+            targetRow.querySelectorAll<HTMLInputElement>("input:not([disabled])"),
+          );
+          const wrapInput = forward
+            ? nextRowInputs[0]
+            : nextRowInputs[nextRowInputs.length - 1];
+          if (wrapInput) {
+            wrapInput.focus({ preventScroll: true });
+            wrapInput.select();
+            ensureTrVisible(targetRow);
+          }
+        }
+      }
+    },
+    [ensureTrVisible],
+  );
   // Luôn giữ bản mới nhất của danh sách dòng để tránh callback async (lookup DmVt)
   // ghi đè các ô người dùng đã nhập (Đơn giá/Số lượng/CK...) bằng snapshot cũ.
   const itemsRef = useRef<VoucherDetail[]>(items);
   itemsRef.current = items;
 
-  // Cho phép component cha (VoucherForm) gọi trực tiếp để focus vào ô Mã vật tư của bất kỳ dòng nào (khi Ctrl +)
+  // Cho phép component cha (VoucherForm) gọi trực tiếp để focus vào ô Mã vật tư hoặc khôi phục focus sau khi xóa dòng
   useEffect(() => {
     if (gridRef) {
       (gridRef as React.MutableRefObject<DetailGridHandle | null>).current = {
@@ -309,6 +461,25 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
           doFocus();
           setTimeout(doFocus, 25);
         },
+        getFocusedColumnIndex: () => {
+          const activeEl = document.activeElement;
+          const table = tableRef.current;
+          if (
+            !table ||
+            !(activeEl instanceof HTMLInputElement) ||
+            !table.contains(activeEl)
+          ) {
+            return undefined;
+          }
+          const td = activeEl.closest("td");
+          const tr = td?.closest("tr");
+          if (!td || !tr) return undefined;
+          const idx = Array.from(tr.children).indexOf(td);
+          return idx >= 0 ? idx : undefined;
+        },
+        scheduleFocusCell: (rowIndex: number, colIndex?: number) => {
+          pendingFocusCellRef.current = { rowIdx: rowIndex, colIdx: colIndex };
+        },
       };
     }
     return () => {
@@ -321,10 +492,61 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
 
   const prevItemsLenRef = useRef<number>(items.length);
 
-  // Khi tạo dòng mới (từ phím Enter tại ô TT, Ctrl++, hoặc nút Thêm dòng), tự động focus ngay vào ô Mã vật tư của dòng vừa tạo
+  // Tự động focus sau khi xóa dòng hoặc khi thêm dòng mới
   useEffect(() => {
     const prevLen = prevItemsLenRef.current;
     prevItemsLenRef.current = items.length;
+
+    if (pendingFocusCellRef.current !== null) {
+      const { rowIdx, colIdx } = pendingFocusCellRef.current;
+      pendingFocusCellRef.current = null;
+      pendingFocusRowRef.current = null;
+
+      const focusTargetCell = () => {
+        const rows = tableRef.current?.querySelectorAll<HTMLTableRowElement>(
+          "tbody tr",
+        );
+        const targetRow = rows?.[rowIdx];
+        if (!targetRow) return;
+
+        let targetInput: HTMLInputElement | null = null;
+        if (colIdx !== undefined) {
+          const td = targetRow.children[colIdx] as HTMLElement | undefined;
+          targetInput =
+            td?.querySelector<HTMLInputElement>(
+              "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
+            ) || null;
+        }
+        if (!targetInput) {
+          targetInput =
+            targetRow.querySelector<HTMLInputElement>(
+              "input[data-vfp-lookup='true']:not([disabled]):not([data-readonly='true'])",
+            ) ||
+            maVtInputRefs.current[rowIdx] ||
+            targetRow.querySelector<HTMLInputElement>(
+              "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
+            ) ||
+            targetRow.querySelector<HTMLInputElement>("input");
+        }
+        if (targetInput) {
+          targetInput.focus({ preventScroll: true });
+          targetInput.select();
+          ensureTrVisible(targetRow);
+        }
+      };
+
+      focusTargetCell();
+      window.requestAnimationFrame(() => {
+        if (
+          tableRef.current &&
+          !tableRef.current.contains(document.activeElement)
+        ) {
+          focusTargetCell();
+        }
+      });
+      return;
+    }
+
     const targetIdx =
       pendingFocusRowRef.current !== null
         ? pendingFocusRowRef.current
@@ -341,7 +563,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
         }
       }, 20);
     }
-  }, [items.length]);
+  }, [items, ensureTrVisible]);
 
   // Kiểm tra dữ liệu dòng trước khi cho phép tạo dòng mới
   const validateRow = (
@@ -792,14 +1014,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
   if (variant === "form") {
     return (
       <div className="w-full h-full flex flex-col bg-white overflow-hidden">
-        <div className="overflow-auto flex-1">
+        <div className="overflow-auto flex-1 table-sticky-header">
           <table
             ref={tableRef}
-            className={`w-full text-left dense-table border-collapse text-[11.5px] ${
-              editable ? "xl-grid" : ""
-            }`}
+            className="w-full text-left dense-table border-collapse text-[11.5px] xl-grid"
           >
-            <thead className="sticky top-0 z-10 bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wide select-none border-b border-neutral-300">
+            <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 font-semibold text-[11px] uppercase tracking-wide select-none border-b border-neutral-300">
               <tr className="divide-x divide-neutral-200">
                 <th className="w-9 text-center" scope="col">
                   #
@@ -822,13 +1042,13 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 <th className="w-24 text-center" scope="col">
                   Kho
                 </th>
-                <th className={`w-24 text-right ${amber}`} scope="col">
+                <th className="w-24 text-right" scope="col">
                   Số tấm
                 </th>
-                <th className={`w-16 text-right ${amber}`} scope="col">
+                <th className="w-16 text-right" scope="col">
                   Hệ số
                 </th>
-                <th className={`w-24 text-right ${amber}`} scope="col">
+                <th className="w-24 text-right" scope="col">
                   SL bán
                 </th>
                 <th className="w-40 text-right" scope="col">
@@ -854,7 +1074,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 )}
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-200 font-mono text-neutral-700">
+            <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
               {items.length === 0 ? (
                 <tr>
                   <td
@@ -875,13 +1095,13 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 </tr>
               ) : (
                 items.map((it, idx) => {
-                  const isActive = editable && idx === activeRowIndex;
+                  const isActive = idx === currentActiveRow;
 
                   if (editable) {
                     return (
                       <tr
                         key={it.stt0 || idx}
-                        onClick={() => onSelectRow?.(idx)}
+                        onClick={() => handleSelectRow(idx)}
                         className={isActive ? "xl-row-active" : undefined}
                       >
                         {/* Số dòng (kiểu tiêu đề dòng Excel) */}
@@ -920,12 +1140,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            onFocusRow={() => onSelectRow?.(idx)}
+                            onFocusRow={() => handleSelectRow(idx)}
                             fetcher={fetchVatTuOptions}
                             debounceMs={30}
                             maxResults={30}
                             dropdownMinWidth={420}
-                            className="xl-input font-mono font-bold text-primary-800 uppercase grid-cell-input"
+                            className="xl-input font-mono font-semibold text-blue-900 uppercase grid-cell-input"
                           />
                         </td>
                         {/* Tên vật tư (chỉ đọc — click chọn/copy được) */}
@@ -937,11 +1157,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             data-readonly="true"
                             value={it.ten_vt || ""}
                             title={it.ten_vt || ""}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
                             }}
-                            className="xl-ro-input font-sans text-neutral-700 truncate"
+                            onKeyDown={handleReadOnlyCellKeyDown}
+                            onCopy={handleReadOnlyCopy}
+                            className="xl-ro-input font-sans font-semibold text-neutral-600 truncate"
                           />
                         </td>
                         {/* Đvt (chỉ đọc — click chọn/copy được) */}
@@ -952,11 +1178,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             tabIndex={-1}
                             data-readonly="true"
                             value={it.dvt || ""}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
                             }}
-                            className="xl-ro-input text-center font-sans"
+                            onKeyDown={handleReadOnlyCellKeyDown}
+                            onCopy={handleReadOnlyCopy}
+                            className="xl-ro-input text-center font-sans font-semibold text-neutral-600"
                           />
                         </td>
                         {/* Số lượng (chỉ đọc — click chọn/copy được) */}
@@ -967,11 +1199,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             tabIndex={-1}
                             data-readonly="true"
                             value={formatNumber2(it.so_luong9 ?? 0)}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
                             }}
-                            className="xl-ro-input text-right font-bold"
+                            onKeyDown={handleReadOnlyCellKeyDown}
+                            onCopy={handleReadOnlyCopy}
+                            className="xl-ro-input text-right font-semibold text-neutral-600 tabular-nums"
                           />
                         </td>
                         {/* TK Có (chỉ đọc — click chọn/copy được) */}
@@ -982,11 +1220,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             tabIndex={-1}
                             data-readonly="true"
                             value={it.tk_du2 || it.tk_du || "5111"}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
                             }}
-                            className="xl-ro-input text-center font-semibold text-primary-700"
+                            onKeyDown={handleReadOnlyCellKeyDown}
+                            onCopy={handleReadOnlyCopy}
+                            className="xl-ro-input text-center font-semibold text-neutral-600"
                           />
                         </td>
                         {/* Kho (VfpLookupCell DmKho) */}
@@ -1020,10 +1264,10 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            onFocusRow={() => onSelectRow?.(idx)}
+                            onFocusRow={() => handleSelectRow(idx)}
                             fetcher={fetchKhoOptionsLocal}
                             dropdownMinWidth={300}
-                            className="xl-input text-center font-mono font-semibold text-neutral-800 uppercase grid-cell-input"
+                            className="xl-input text-center font-mono font-semibold text-blue-900 uppercase grid-cell-input"
                           />
                         </td>
                         {/* Số tấm */}
@@ -1037,12 +1281,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 "SO_TAM",
                               )
                             }
-                            onFocus={() => onSelectRow?.(idx)}
+                            onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-right font-semibold text-amber-950 grid-cell-input"
+                            className="xl-input text-right font-bold text-blue-900 tabular-nums grid-cell-input"
                           />
                         </td>
                         {/* Hệ số (Loại 4: khóa, luôn = 1) */}
@@ -1066,12 +1310,16 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 "HE_SO8",
                               )
                             }
-                            onFocus={() => onSelectRow?.(idx)}
+                            onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-right font-medium text-amber-950 grid-cell-input"
+                            className={`xl-input text-right font-bold tabular-nums grid-cell-input ${
+                              it.loai_vt === "4"
+                                ? "text-neutral-600"
+                                : "text-blue-900"
+                            }`}
                           />
                         </td>
                         {/* SL bán (chỉ đọc — click chọn/copy được) */}
@@ -1082,11 +1330,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             tabIndex={-1}
                             data-readonly="true"
                             value={formatNumber2(it.so_luong8 ?? 0)}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
                             }}
-                            className="xl-ro-input text-right font-bold text-amber-950"
+                            onKeyDown={handleReadOnlyCellKeyDown}
+                            onCopy={handleReadOnlyCopy}
+                            className="xl-ro-input text-right font-semibold text-neutral-600 tabular-nums"
                           />
                         </td>
                         {/* Đơn giá */}
@@ -1100,12 +1354,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 "GIA_NT9",
                               )
                             }
-                            onFocus={() => onSelectRow?.(idx)}
+                            onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-right font-medium text-neutral-800 grid-cell-input"
+                            className="xl-input text-right font-semibold text-blue-900 tabular-nums grid-cell-input"
                           />
                         </td>
                         {/* Thành tiền */}
@@ -1119,12 +1373,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 "TIEN_NT9",
                               )
                             }
-                            onFocus={() => onSelectRow?.(idx)}
+                            onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-right font-bold text-neutral-900 grid-cell-input"
+                            className="xl-input text-right font-semibold text-blue-900 tabular-nums grid-cell-input"
                           />
                         </td>
                         {/* CK % */}
@@ -1140,12 +1394,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 "CHIET_KHAU",
                               )
                             }
-                            onFocus={() => onSelectRow?.(idx)}
+                            onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-center font-medium text-neutral-700 grid-cell-input"
+                            className="xl-input text-center font-semibold text-blue-900 tabular-nums grid-cell-input"
                           />
                         </td>
                         {/* TT: luôn cố định là "C" (ô chỉ-chọn), bấm Enter tại ô này sẽ kiểm tra dòng và tạo dòng mới */}
@@ -1157,12 +1411,13 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             data-mode="select"
                             onMouseDown={(e) => handleExcelMouseDown(e, "select")}
                             onFocus={(e) => {
-                              onSelectRow?.(idx);
+                              handleSelectRow(idx);
                               selectAllLater(e.currentTarget);
                             }}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, true)}
+                            onCopy={handleReadOnlyCopy}
                             title="Cố định là C — Bấm Enter để tạo dòng mới"
-                            className="xl-input text-center font-bold text-success-700 uppercase grid-cell-input"
+                            className="xl-input text-center font-semibold text-neutral-600 uppercase grid-cell-input"
                           />
                         </td>
                         <td className="xl-ro text-center !px-0">
@@ -1184,58 +1439,243 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                     );
                   }
 
-                  // Non-editable form row
+                  // Non-editable form row (View mode): cho phép click chọn/copy từng ô và di chuyển bằng mũi tên
                   return (
                     <tr
                       key={it.stt0 || idx}
-                      className="hover:bg-secondary-50/40 transition-colors divide-x divide-neutral-100"
+                      onClick={() => handleSelectRow(idx)}
+                      className={isActive ? "xl-row-active" : undefined}
                     >
-                      <td className="py-1 text-center font-sans text-neutral-400 font-medium">
-                        {idx + 1}
+                      <td className="xl-rowhead">{idx + 1}</td>
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={it.ma_vt || ""}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 px-2.5 font-bold text-primary-800">
-                        {it.ma_vt}
+                      <td className="xl-cell min-w-[200px] max-w-[320px]">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={it.ten_vt || ""}
+                          placeholder="—"
+                          title={it.ten_vt || ""}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
+                        />
                       </td>
-                      <td
-                        className="py-1 px-3 font-sans font-medium text-neutral-800 truncate max-w-[320px]"
-                        title={it.ten_vt || ""}
-                      >
-                        {it.ten_vt || "—"}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={it.dvt || ""}
+                          placeholder="—"
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-center font-sans font-semibold text-neutral-900 grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-center font-sans text-neutral-600">
-                        {it.dvt || "—"}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatQuantity(it.so_luong9)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-right font-semibold text-neutral-900">
-                        {formatQuantity(it.so_luong9)}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={it.tk_du || it.tk_du2 || ""}
+                          placeholder="—"
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-center font-semibold text-neutral-900 grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-center text-primary-700 font-medium">
-                        {it.tk_du || it.tk_du2 || "—"}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={it.ma_kho || ""}
+                          placeholder="—"
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-center font-semibold text-neutral-900 grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-center font-medium text-neutral-600">
-                        {it.ma_kho || "—"}
+                      <td className="xl-cell xl-amber">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatQuantity(it.so_tam)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-bold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className={`py-1 text-right font-medium ${amber}`}>
-                        {formatQuantity(it.so_tam)}
+                      <td className="xl-cell xl-amber">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatQuantity(it.he_so8)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-bold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className={`py-1 text-right font-medium ${amber}`}>
-                        {formatQuantity(it.he_so8)}
+                      <td className="xl-cell xl-amber">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatQuantity(it.so_luong8)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className={`py-1 text-right font-semibold ${amber}`}>
-                        {formatQuantity(it.so_luong8)}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatCurrency(it.gia_nt9, currency)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-right text-neutral-700">
-                        {formatCurrency(it.gia_nt9, currency)}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={formatCurrency(it.tien_nt9, currency)}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-right font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-right font-bold text-neutral-900 bg-neutral-50/60">
-                        {formatCurrency(it.tien_nt9, currency)}
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={
+                            it.chiet_khau && Number(it.chiet_khau) !== 0
+                              ? String(Math.round(Number(it.chiet_khau)))
+                              : ""
+                          }
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-center font-sans font-semibold text-neutral-900 tabular-nums grid-cell-input"
+                        />
                       </td>
-                      <td className="py-1 text-center font-sans text-neutral-400">
-                        {it.chiet_khau && Number(it.chiet_khau) !== 0
-                          ? Math.round(Number(it.chiet_khau))
-                          : ""}
-                      </td>
-                      <td className="py-1 text-center font-bold text-success-700 font-sans">
-                        C
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value="C"
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) => {
+                            handleSelectRow(idx);
+                            e.currentTarget.select();
+                            selectAllLater(e.currentTarget);
+                          }}
+                          onKeyDown={handleReadOnlyCellKeyDown}
+                          onCopy={handleReadOnlyCopy}
+                          className="xl-input text-center font-semibold text-neutral-900 font-sans grid-cell-input"
+                        />
                       </td>
                     </tr>
                   );
@@ -1259,11 +1699,16 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
     >
       <div
         className={
-          embedded ? "overflow-auto flex-1" : "overflow-x-auto max-h-[360px]"
+          embedded
+            ? "overflow-auto flex-1 table-sticky-header"
+            : "overflow-x-auto max-h-[360px] table-sticky-header"
         }
       >
-        <table className="w-full text-left dense-table border-collapse text-[12.5px]">
-          <thead className="bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
+        <table
+          ref={tableRef}
+          className="w-full text-left dense-table border-collapse text-[12.5px] xl-grid"
+        >
+          <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
             <tr>
               <th
                 className="w-10 text-center border-r border-neutral-200"
@@ -1296,7 +1741,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 SL xuất
               </th>
               <th
-                className="w-20 text-right border-r border-neutral-200 font-mono"
+                className={`w-20 text-right border-r border-neutral-200 font-mono ${amber}`}
                 scope="col"
               >
                 Số tấm
@@ -1308,13 +1753,13 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 Đvt
               </th>
               <th
-                className="w-24 text-right border-r border-neutral-200 font-mono"
+                className={`w-24 text-right border-r border-neutral-200 font-mono ${amber}`}
                 scope="col"
               >
                 Hệ số
               </th>
               <th
-                className="w-24 text-right border-r border-neutral-200 font-mono"
+                className={`w-24 text-right border-r border-neutral-200 font-mono ${amber}`}
                 scope="col"
               >
                 SL bán
@@ -1341,46 +1786,192 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                 </td>
               </tr>
             ) : (
-              items.map((it, idx) => (
-                <tr
-                  key={it.stt0 || idx}
-                  className="hover:bg-neutral-50 transition"
-                >
-                  <td className="text-center font-mono text-neutral-400 border-r border-neutral-200 text-xs">
-                    {idx + 1}
-                  </td>
-                  <td className="font-mono text-primary-800 font-semibold border-r border-neutral-200">
-                    {it.ma_vt}
-                  </td>
-                  <td className="font-medium text-neutral-900 border-r border-neutral-200">
-                    {it.ten_vt || "—"}
-                  </td>
-                  <td className="text-center font-mono text-neutral-700 border-r border-neutral-200 font-medium bg-neutral-50/50">
-                    {it.ma_kho || "—"}
-                  </td>
-                  <td className="text-right font-mono text-neutral-800 border-r border-neutral-200">
-                    {formatQuantity(it.so_luong9)}
-                  </td>
-                  <td className="text-right font-mono text-neutral-800 border-r border-neutral-200">
-                    {formatQuantity(it.so_tam)}
-                  </td>
-                  <td className="text-center text-neutral-700 border-r border-neutral-200">
-                    {it.dvt || "—"}
-                  </td>
-                  <td className="text-right font-mono text-neutral-700 border-r border-neutral-200">
-                    {formatQuantity(it.he_so8)}
-                  </td>
-                  <td className="text-right font-mono text-neutral-800 border-r border-neutral-200 font-medium">
-                    {formatQuantity(it.so_luong8)}
-                  </td>
-                  <td className="text-right font-mono text-neutral-800 border-r border-neutral-200">
-                    {formatCurrency(it.gia_nt9, currency)}
-                  </td>
-                  <td className="text-right font-mono font-semibold text-neutral-900 pr-3">
-                    {formatCurrency(it.tien_nt9, currency)}
-                  </td>
-                </tr>
-              ))
+              items.map((it, idx) => {
+                const isActive = idx === currentActiveRow;
+                return (
+                  <tr
+                    key={it.stt0 || idx}
+                    onClick={() => handleSelectRow(idx)}
+                    className={isActive ? "xl-row-active" : undefined}
+                  >
+                    <td className="xl-rowhead">{idx + 1}</td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={it.ma_vt || ""}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input font-mono text-primary-800 font-semibold grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell min-w-[320px]">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={it.ten_vt || ""}
+                        placeholder="—"
+                        title={it.ten_vt || ""}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input font-medium text-neutral-900 truncate grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={it.ma_kho || ""}
+                        placeholder="—"
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-center font-mono text-neutral-700 font-medium grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatQuantity(it.so_luong9)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono text-neutral-800 grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell xl-amber">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatQuantity(it.so_tam)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono text-neutral-800 grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={it.dvt || ""}
+                        placeholder="—"
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-center text-neutral-700 grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell xl-amber">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatQuantity(it.he_so8)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono text-neutral-700 grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell xl-amber">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatQuantity(it.so_luong8)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono text-neutral-800 font-medium grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatCurrency(it.gia_nt9, currency)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono text-neutral-800 grid-cell-input"
+                      />
+                    </td>
+                    <td className="xl-cell">
+                      <input
+                        type="text"
+                        readOnly
+                        data-mode="select"
+                        value={formatCurrency(it.tien_nt9, currency)}
+                        onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                        onFocus={(e) => {
+                          handleSelectRow(idx);
+                          e.currentTarget.select();
+                          selectAllLater(e.currentTarget);
+                        }}
+                        onKeyDown={handleReadOnlyCellKeyDown}
+                        onCopy={handleReadOnlyCopy}
+                        className="xl-input text-right font-mono font-semibold text-neutral-900 pr-3 grid-cell-input"
+                      />
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
