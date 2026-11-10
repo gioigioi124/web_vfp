@@ -1,0 +1,300 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-surface text-on-surface font-sans text-[13px];
+  }
+}
+
+/* ===== Scrollbar thanh mảnh chuẩn desktop app ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== Bảng dữ liệu độ nén cao (data dense) ===== */
+.dense-table td,
+.dense-table th {
+  padding-top: 0.38rem;
+  padding-bottom: 0.38rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  white-space: nowrap;
+}
+
+/* Header cố định khi cuộn */
+.table-sticky-header thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: inset 0 -1px 0 #cbd5e1;
+}
+
+/* Dòng đang chọn — Navy Deep highlight */
+.selected-row {
+  background-color: #e0f2fe !important;
+  position: relative;
+}
+.selected-row td:first-child::before {
+  content: "▶";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 8px;
+  color: #0284c7;
+}
+
+/* ===== Keyboard shortcut badge (<kbd>) ===== */
+kbd {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid #cbd5e1;
+  background-color: #f8fafc;
+  color: #334155;
+  font-weight: 600;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+}
+
+/* Compact table cells — giảm tối đa padding để tăng số dòng hiển thị */
+.vfp-cell {
+  @apply px-1.5 py-[1px] border-r border-b border-neutral-200 text-xs truncate leading-tight;
+}
+
+.vfp-header {
+  @apply px-1.5 py-[2px] bg-neutral-100 font-semibold text-neutral-600 text-[11px] uppercase tracking-wider border-r border-b border-neutral-300 text-left select-none leading-tight;
+}
+
+/* ===== Form field dày đặc cho màn Sửa/Thêm chứng từ (ctbhd) ===== */
+.erp-input {
+  font-size: 0.775rem;
+  line-height: 1.15;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.25rem;
+  transition: all 0.15s ease-in-out;
+}
+.erp-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 1.5px rgba(2, 132, 199, 0.25);
+  outline: none;
+  background-color: #ffffff !important;
+}
+.erp-label {
+  font-size: 0.725rem;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+}
+
+/* Ô đang CHỌN trong grid (kiểu Excel): viền đậm 2px nổi bật */
+.grid-cell-input:focus {
+  outline: none;
+  border-color: #0284c7 !important;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.55);
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== Grid phẳng kiểu Excel (chi tiết hàng hóa ctbhd) ===== */
+.xl-grid {
+  border-collapse: collapse;
+}
+.xl-grid th,
+.xl-grid td {
+  border: 1px solid #d4d4d8; /* đường lưới mảnh như Excel */
+}
+.xl-grid thead th {
+  border-color: #cbd5e1;
+}
+.xl-grid td.xl-cell,
+.xl-grid td.xl-ro,
+.xl-grid td.xl-rowhead {
+  height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: middle;
+}
+.xl-grid td.xl-cell {
+  padding-left: 0;
+  padding-right: 0;
+  position: relative;
+  background-color: #ffffff;
+}
+/* Ô chỉ đọc: nền xám rất nhạt, không có khung input */
+.xl-grid td.xl-ro {
+  padding-left: 0;
+  padding-right: 0;
+  background-color: #f8fafc;
+  color: #475569;
+  cursor: text;
+}
+.xl-grid .xl-ro-input {
+  display: block;
+  width: 100%;
+  height: 23px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0 !important;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  font-size: 12px;
+  line-height: 23px;
+  color: inherit;
+  cursor: text;
+}
+.xl-grid td.xl-ro:focus-within {
+  outline: 1.5px solid #64748b;
+  outline-offset: -1.5px;
+  background-color: #f1f5f9 !important;
+  z-index: 2;
+}
+/* Cột nhóm "bán" (Số tấm / Hệ số / SL bán): nền vàng nhạt */
+.xl-grid td.xl-amber {
+  background-color: #fffbeb;
+}
+.xl-grid td.xl-amber.xl-ro,
+.xl-grid td.xl-locked {
+  background-color: #fef3c7;
+}
+/* Tiêu đề dòng (số thứ tự) kiểu Excel */
+.xl-grid td.xl-rowhead {
+  padding-left: 2px;
+  padding-right: 2px;
+  text-align: center;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  color: #64748b;
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  user-select: none;
+}
+/* Dòng đang chọn: tô nhẹ cả dòng + làm nổi tiêu đề dòng */
+.xl-grid tr.xl-row-active td.xl-cell,
+.xl-grid tr.xl-row-active td.xl-ro {
+  background-color: #eff6ff;
+}
+.xl-grid tr.xl-row-active td.xl-amber {
+  background-color: #fdf3d3;
+}
+.xl-grid tr.xl-row-active td.xl-rowhead {
+  background-color: #1e40af;
+  color: #ffffff;
+  font-weight: 700;
+  border-color: #1e40af;
+}
+
+/* Input trong ô: phẳng hoàn toàn, lấp kín ô (không viền, không bo góc) */
+.xl-grid .xl-input,
+.xl-grid .xl-input.grid-cell-input:focus {
+  display: block;
+  width: 100%;
+  height: 23px;
+  margin: 0;
+  padding: 0 6px;
+  border: 0 !important;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  font-size: 12px;
+  line-height: 23px;
+}
+.xl-grid .xl-input:disabled {
+  cursor: not-allowed;
+  color: #78716c;
+}
+/* Chế độ CHỌN: ẩn con trỏ & vùng bôi đen — trông như ô Excel đang được chọn */
+.xl-grid .xl-input[data-mode="select"] {
+  caret-color: transparent;
+  cursor: cell;
+}
+.xl-grid .xl-input[data-mode="select"]::selection {
+  background: transparent;
+  color: inherit;
+}
+
+/* Ô đang được chọn: khung 2px xanh đậm, nền trắng — độ tương phản cao */
+.xl-grid td.xl-cell:focus-within {
+  outline: 2px solid #1d4ed8;
+  outline-offset: -2px;
+  background-color: #ffffff !important;
+  z-index: 2;
+}
+/* Đang nhập / sửa: nền vàng rất nhạt để phân biệt với chế độ chọn */
+.xl-grid td.xl-cell:has(.xl-input[data-mode="enter"]),
+.xl-grid td.xl-cell:has(.xl-input[data-mode="edit"]) {
+  outline-color: #1e3a8a;
+  background-color: #fffef5 !important;
+}
+
+/* Ẩn mũi tên tăng/giảm của ô số (dùng cho Đơn giá / Thành tiền / Chiết khấu) */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ===== Print styles cho mẫu in phiếu (PrintPreview) ===== */
+@media print {
+  /* Ẩn toàn bộ UI điều khiển, chỉ giữ phần mẫu in */
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Dialog không nên chiếm overlay khi in */
+  .fixed {
+    position: static !important;
+    inset: auto !important;
+  }
+
+  /* Bỏ nền xám của overlay + scrollbar */
+  .bg-neutral-900\/40 {
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}
