@@ -13,7 +13,16 @@ export default {
           "Roboto",
           "sans-serif",
         ],
-        mono: ['"JetBrains Mono"', "Consolas", "Courier New", "monospace"],
+        // Tạm thời dùng chung font với text (sans) để số dễ nhìn hơn
+        mono: [
+          '"Hanken Grotesk"',
+          "Inter",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "sans-serif",
+        ],
       },
       colors: {
         // ===== Design tokens (Design.md — "Ledger & Vector") =====
