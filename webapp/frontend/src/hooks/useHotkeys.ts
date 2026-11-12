@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 export interface HotkeyHandlers {
   onF2?: () => void;
+  onCtrlM?: () => void;
   onCtrlF2?: () => void;
   onF3?: () => void;
   onCtrlF3?: () => void;
@@ -120,6 +121,17 @@ export function useHotkeys(
       if (ctrl && key.toLowerCase() === "f") {
         e.preventDefault();
         h.onCtrlF?.();
+        return;
+      }
+      // Ctrl+M — Tạo đơn mới (tương tự F2 trên danh sách)
+      if (
+        ctrl &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (key.toLowerCase() === "m" || e.code === "KeyM")
+      ) {
+        e.preventDefault();
+        h.onCtrlM?.();
         return;
       }
 

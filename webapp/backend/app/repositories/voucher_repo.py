@@ -693,14 +693,15 @@ class VoucherRepository:
             else:
                 it.so_luong = so_luong_ban
 
-            it.tien_nt9 = round_amount(so_luong_ban * gia_nt9, 2)
+            is_vnd = safe_ma_tte == "VND"
+            it.tien_nt9 = float(round_vnd(so_luong_ban * gia_nt9)) if is_vnd else round_amount(so_luong_ban * gia_nt9, 2)
             it.gia9 = float(round_vnd(gia_nt9 * safe_ty_gia))
             it.tien9 = float(round_vnd(it.tien_nt9 * safe_ty_gia))
 
             if chiet_khau > 0:
-                it.tien_nt4 = round_amount(it.tien_nt9 * chiet_khau / 100.0, 2)
+                it.tien_nt4 = float(round_vnd(it.tien_nt9 * chiet_khau / 100.0)) if is_vnd else round_amount(it.tien_nt9 * chiet_khau / 100.0, 2)
                 it.tien4 = float(round_vnd(it.tien9 * chiet_khau / 100.0))
-                it.tien_nt2 = round_amount(it.tien_nt9 - it.tien_nt4, 2)
+                it.tien_nt2 = float(round_vnd(it.tien_nt9 - it.tien_nt4)) if is_vnd else round_amount(it.tien_nt9 - it.tien_nt4, 2)
                 it.tien2 = float(round_vnd(it.tien9 - it.tien4))
                 it.gia_nt2 = round_amount(gia_nt9 * (100.0 - chiet_khau) / 100.0, 2)
                 it.gia2 = float(round_vnd(it.gia9 * (100.0 - chiet_khau) / 100.0))

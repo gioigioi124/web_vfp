@@ -263,8 +263,11 @@ export function App() {
   // VFP Keyboard Shortcuts Handler (khớp ctbhh / ctbhd / ctbhch)
   useHotkeys(
     {
-      // F2 = Thêm mới (ctbhh Command1)
+      // F2 / Ctrl+M = Thêm mới (ctbhh Command1)
       onF2: () => {
+        if (!sttParam) handleActionNew();
+      },
+      onCtrlM: () => {
         if (!sttParam) handleActionNew();
       },
       // Ctrl+F2 = Sao chép tạo mới

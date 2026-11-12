@@ -3,6 +3,7 @@ import { VoucherDetail } from "../types/voucher";
 import {
   formatCurrency,
   formatQuantity,
+  formatNumber0,
   formatNumber2,
   parseNumberInput,
 } from "../lib/format";
@@ -36,8 +37,10 @@ interface NumCellProps {
   disabled?: boolean;
   /** Khi true: nếu value === 0 (hoặc không có giá trị) thì hiển thị trống (blank) thay vì "0.00". */
   blankWhenZero?: boolean;
-  /** Định dạng số nguyên (không có phần thập phân .00). */
+  /** Định dạng số nguyên (không có phần thập phân .00 và không phân nhóm nghìn). */
   integerOnly?: boolean;
+  /** Làm tròn số nguyên có phân nhóm nghìn bằng dấu cách (VD: Thành tiền VND). */
+  noDecimals?: boolean;
   className?: string;
   title?: string;
   onCommit: (v: number) => void;
@@ -61,6 +64,7 @@ const NumCell: React.FC<NumCellProps> = ({
   disabled,
   blankWhenZero = false,
   integerOnly = false,
+  noDecimals = false,
   className,
   title,
   onCommit,
@@ -83,6 +87,9 @@ const NumCell: React.FC<NumCellProps> = ({
     if (integerOnly) {
       if (v === null || v === undefined || isNaN(v)) return "0";
       return Math.round(Number(v)).toString();
+    }
+    if (noDecimals) {
+      return formatNumber0(v);
     }
     return formatNumber2(v);
   };
@@ -1273,14 +1280,21 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                         {/* Số tấm */}
                         <td className="xl-cell xl-amber">
                           <NumCell
-                            value={it.so_tam ?? 0}
-                            onCommit={(v) =>
+                            value={it.so_tam ?? 1}
+                            onCommit={(v) => {
+                              // Ràng buộc Số tấm không thể <= 0: giữ lại giá trị hợp lệ trước đó (mặc định 1).
+                              const safeSoTam =
+                                v > 0
+                                  ? v
+                                  : it.so_tam && it.so_tam > 0
+                                    ? it.so_tam
+                                    : 1;
                               onChangeItem?.(
                                 idx,
-                                { ...it, so_tam: v },
+                                { ...it, so_tam: safeSoTam },
                                 "SO_TAM",
-                              )
-                            }
+                              );
+                            }}
                             onFocus={() => handleSelectRow(idx)}
                             onKeyDown={(e) => handleCellKeyDown(e, idx, false)}
                             onNavigate={(dir, el) =>
@@ -1366,10 +1380,17 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                         <td className="xl-cell">
                           <NumCell
                             value={it.tien_nt9 ?? 0}
+                            noDecimals={currency.toUpperCase() === "VND"}
                             onCommit={(v) =>
                               onChangeItem?.(
                                 idx,
-                                { ...it, tien_nt9: v },
+                                {
+                                  ...it,
+                                  tien_nt9:
+                                    currency.toUpperCase() === "VND"
+                                      ? Math.round(v)
+                                      : v,
+                                },
                                 "TIEN_NT9",
                               )
                             }

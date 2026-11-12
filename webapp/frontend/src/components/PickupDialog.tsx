@@ -293,7 +293,12 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
       const json = await res.json();
       if (json.success && json.data) {
         const selected = slips.filter((s) => selectedStts.has(s.stt));
-        onAccept(selected, json.data.rows || [], json.data.ma_xe || "");
+        const rows = json.data.rows || [];
+        if (rows.length > 0) {
+          // Chấp nhận xong thì không trả focus về nút mở dialog, để VoucherForm focus xuống dòng cuối grid.
+          prevFocusRef.current = null;
+        }
+        onAccept(selected, rows, json.data.ma_xe || "");
         onClose();
       }
     } catch (err) {

@@ -463,7 +463,7 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                             handleMasterCellKeyDown(e, rowIdx, 4)
                           }
                           onCopy={handleMasterCellCopy}
-                          className="xl-input text-neutral-800 truncate grid-cell-input"
+                          className="xl-input text-black truncate grid-cell-input"
                         />
                       </td>
                       <td className="xl-cell min-w-[220px]">
@@ -485,7 +485,7 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                             handleMasterCellKeyDown(e, rowIdx, 5)
                           }
                           onCopy={handleMasterCellCopy}
-                          className="xl-input text-neutral-700 truncate grid-cell-input"
+                          className="xl-input text-black truncate grid-cell-input"
                         />
                       </td>
                       <td className="xl-cell">

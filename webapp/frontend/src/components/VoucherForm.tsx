@@ -36,7 +36,6 @@ import {
   Ban,
   AlertTriangle,
   RefreshCw,
-  Trash2,
 } from "lucide-react";
 
 interface VoucherFormProps {
@@ -362,12 +361,16 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   // 0. Khi mở form Thêm mới (F2), Sao chép (Ctrl+F2) hoặc Sửa (F3 / Enter), tự động focus vào ô Mã đối tượng và bôi đen nội dung
   const initialFocusedKeyRef = useRef<string>("");
+  const pendingFocusLastRowAfterPickupRef = useRef<boolean>(false);
   useEffect(() => {
     if (!isEditable) return;
+    if (pendingFocusLastRowAfterPickupRef.current || (pickupPayload && pickupPayload.items.length > 0)) {
+      return;
+    }
     const focusKey = isCreate ? "NEW" : voucherStt;
     if (!focusKey || initialFocusedKeyRef.current === focusKey) return;
     const timer = setTimeout(() => {
-      if (isModalOpen()) return;
+      if (isModalOpen() || pendingFocusLastRowAfterPickupRef.current) return;
       if (maDtInputRef.current) {
         // Chỉ đánh dấu đã focus sau khi thực sự chạy xong timer (tránh lỗi cleanup của React.StrictMode làm kẹt ref).
         initialFocusedKeyRef.current = focusKey;
@@ -376,7 +379,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [isEditable, isCreate, voucherStt]);
+  }, [isEditable, isCreate, voucherStt, pickupPayload]);
 
   // 1. Tự động lấy số phiếu tiếp theo (VD: lớn nhất HD1000 -> tự điền HD1001) khi tạo phiếu mới
   useEffect(() => {
@@ -411,15 +414,31 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       const calculatedItems = pickupPayload.items.map((it) =>
         calcLoai2Item({ ...it, gia_tb_tt: "C" }, tyGia, "", maTte),
       );
+      const lastIdx = calculatedItems.length - 1;
+      pendingFocusLastRowAfterPickupRef.current = true;
+      initialFocusedKeyRef.current = isCreate ? "NEW" : voucherStt || "EDIT";
       setItems(calculatedItems);
       // R2.3: Kế thừa ma_xe nếu header đang trống
       if (pickupPayload.ma_xe && !maXe.trim()) {
         setMaXe(pickupPayload.ma_xe);
       }
-      setActiveRowIndex(0);
+      setActiveRowIndex(lastIdx);
       onClearPickupPayload?.();
     }
-  }, [pickupPayload, tyGia, maTte, maXe, onClearPickupPayload]);
+  }, [pickupPayload, tyGia, maTte, maXe, isCreate, voucherStt, onClearPickupPayload]);
+
+  // Sau khi nạp các dòng từ PickupDialog vào grid, focus xuống dòng cuối cùng của grid hàng hóa.
+  useEffect(() => {
+    if (!pendingFocusLastRowAfterPickupRef.current || items.length === 0) return;
+    const lastIdx = items.length - 1;
+    const timer = window.setTimeout(() => {
+      if (isModalOpen()) return;
+      pendingFocusLastRowAfterPickupRef.current = false;
+      setActiveRowIndex(lastIdx);
+      detailGridRef.current?.focusMaVt(lastIdx);
+    }, 40);
+    return () => window.clearTimeout(timer);
+  }, [items]);
 
   // 3. Tự động lookup thông tin Ông/Bà, Địa chỉ, Mã bộ phận, Tên bộ phận, Ma_Vm từ DmDt khi có maDt ban đầu.
   //    Ở chế độ Sửa (S): giữ nguyên các trường đã lưu trên phiếu, chỉ điền Ma_Vm và các trường đang trống.
@@ -810,22 +829,24 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setErrorMessage("Vui lòng nhập Mã nhập xuất.");
       return;
     }
-    if (items.length === 0 || !items.some((it) => it.ma_vt?.trim())) {
+    // Tự động loại bỏ các dòng trống (chưa có Mã vật tư) khi lưu xuống SQL, bỏ qua thanh thông báo lỗi dòng trống.
+    const validItems = items.filter((it) => Boolean(it.ma_vt?.trim()));
+    if (validItems.length === 0) {
       setErrorMessage(
         "Chứng từ phải có ít nhất 1 dòng mặt hàng với Mã vật tư hợp lệ.",
       );
       return;
     }
 
-    // Kiểm tra các dòng hàng trong Grid trước khi lưu
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (!it.ma_vt?.trim()) {
-        setErrorMessage(`Dòng ${i + 1}: Chưa nhập Mã vật tư.`);
-        return;
-      }
+    // Kiểm tra các dòng hàng hợp lệ trong Grid trước khi lưu
+    for (let i = 0; i < validItems.length; i++) {
+      const it = validItems[i];
       if (!it.ma_kho?.trim()) {
         setErrorMessage(`Dòng ${i + 1}: Chưa nhập Mã kho.`);
+        return;
+      }
+      if (Number(it.so_tam ?? 0) <= 0) {
+        setErrorMessage(`Dòng ${i + 1}: Số tấm phải lớn hơn 0.`);
         return;
       }
       if (Number(it.so_luong9 ?? 0) <= 0) {
@@ -833,6 +854,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         return;
       }
     }
+
+    const saveTotals = calcVoucherTotals(validItems, tyGia, thueGtgt, loaiCk);
 
     setSaving(true);
     try {
@@ -889,18 +912,18 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         thue_gtgt: thueGtgt,
         loai_ck: loaiCk,
         ma_dtgtgt: maDtGtGt,
-        ttien_nt: totals.ttien_nt,
-        ttien_nt4: totals.ttien_nt4,
-        ttien_nt2: totals.ttien_nt2,
-        ttien_nt3: totals.ttien_nt3,
-        ttien_nt0: totals.ttien_nt0,
-        ttien: totals.ttien,
-        ttien4: totals.ttien4,
-        ttien2: totals.ttien2,
-        ttien3: totals.ttien3,
-        ttien0: totals.ttien0,
+        ttien_nt: saveTotals.ttien_nt,
+        ttien_nt4: saveTotals.ttien_nt4,
+        ttien_nt2: saveTotals.ttien_nt2,
+        ttien_nt3: saveTotals.ttien_nt3,
+        ttien_nt0: saveTotals.ttien_nt0,
+        ttien: saveTotals.ttien,
+        ttien4: saveTotals.ttien4,
+        ttien2: saveTotals.ttien2,
+        ttien3: saveTotals.ttien3,
+        ttien0: saveTotals.ttien0,
         user_name: "KTCN3",
-        items: items.map((it) => ({
+        items: validItems.map((it) => ({
           ...it,
           ma_vt: (it.ma_vt || "").trim().toUpperCase(),
           ma_kho: (it.ma_kho || "K0101").trim().toUpperCase(),
@@ -973,6 +996,20 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       } else if (e.key === "F4" && isEditable) {
         e.preventDefault();
         setShowAccountPicker(true);
+      } else if (
+        isEditable &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        (e.key.toLowerCase() === "q" || e.code === "KeyQ")
+      ) {
+        // Ctrl+Q = focus và bôi đen ô Mã đối tượng
+        e.preventDefault();
+        e.stopPropagation();
+        if (maDtInputRef.current) {
+          maDtInputRef.current.focus();
+          maDtInputRef.current.select();
+        }
       } else if (
         isEditable &&
         e.ctrlKey &&
@@ -1632,11 +1669,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       {/* ===== Grid Toolbar ===== */}
       <div
-        className="bg-neutral-100 px-4 py-1.5 border-b border-neutral-200 flex items-center justify-between shrink-0"
+        className="bg-neutral-100 px-3 py-1 border-b border-neutral-200 flex items-center justify-between shrink-0"
         data-purpose="grid-actions"
       >
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-xs uppercase tracking-wide text-neutral-700 flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="font-bold text-xs uppercase tracking-wide text-neutral-700 flex items-center gap-1">
             <Table className="w-3.5 h-3.5 text-primary-600" /> Chi tiết hàng hóa
           </span>
           <span className="text-neutral-400">|</span>
@@ -1645,8 +1682,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             <b className="text-neutral-800">{items.length} dòng</b>
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 mr-2 px-2 py-1 rounded bg-white border border-neutral-300 shadow-sm text-xs">
+        <div className="flex items-center">
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-neutral-300 shadow-sm text-xs">
             <span className="text-[11px] text-neutral-500 font-medium">
               Tổng SL:
             </span>
@@ -1654,18 +1691,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               {formatQuantity(totalQty)}
             </span>
           </div>
-          {isEditable && (
-            <button
-              type="button"
-              onClick={() => handleDeleteItem(activeRowIndex)}
-              disabled={items.length <= 1}
-              className="inline-flex items-center px-2 py-1 rounded bg-white border border-neutral-300 text-neutral-700 shadow-sm font-medium hover:border-danger-400 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
-              title="Xóa dòng đang chọn (F8)"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-danger-500 mr-1" /> Xóa dòng
-              <kbd className="ml-1 text-[10px]">F8</kbd>
-            </button>
-          )}
         </div>
       </div>
 
@@ -1693,57 +1718,57 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       {/* ===== Action Footer Bar ===== */}
       <footer
-        className="bg-white border-t border-neutral-300 px-4 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0"
+        className="bg-white border-t border-neutral-300 px-3 py-1 flex flex-wrap items-center justify-between gap-1.5 shrink-0 text-xs"
         data-purpose="footer-controls"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {isEditable ? (
             <button
-              className="inline-flex items-center px-4 py-1.5 bg-primary-700 hover:bg-primary-800 text-white font-semibold rounded shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center px-2.5 py-1 bg-primary-700 hover:bg-primary-800 text-white text-xs font-semibold rounded shadow-sm transition-all disabled:opacity-50 cursor-pointer"
               type="button"
               onClick={handleSave}
               disabled={saving}
               title="Chấp nhận lưu chứng từ (Ctrl + Enter)"
             >
               {saving ? (
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
               ) : (
-                <Check className="w-4 h-4 mr-2" />
+                <Check className="w-3.5 h-3.5 mr-1.5" />
               )}
               {saving ? "Đang lưu..." : "Chấp nhận"}
-              <kbd className="ml-2 bg-primary-900/40 text-primary-100 border-primary-600 text-[10px]">
+              <kbd className="ml-1.5 bg-primary-900/40 text-primary-100 border-primary-600 text-[10px]">
                 Ctrl + Enter
               </kbd>
             </button>
           ) : (
             <button
-              className="inline-flex items-center px-4 py-1.5 bg-neutral-200 text-neutral-500 font-semibold rounded shadow-sm cursor-not-allowed"
+              className="inline-flex items-center px-2.5 py-1 bg-neutral-200 text-neutral-500 text-xs font-semibold rounded shadow-sm cursor-not-allowed"
               type="button"
               disabled
             >
-              <Check className="w-4 h-4 mr-2" />
+              <Check className="w-3.5 h-3.5 mr-1.5" />
               Chấp nhận
             </button>
           )}
 
           <button
-            className="inline-flex items-center px-3.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-medium rounded border border-neutral-300 transition-all cursor-pointer"
+            className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-medium rounded border border-neutral-300 transition-all cursor-pointer"
             type="button"
             onClick={onBack}
           >
-            <Ban className="w-4 h-4 text-neutral-500 mr-2" />
+            <Ban className="w-3.5 h-3.5 text-neutral-500 mr-1.5" />
             Hủy bỏ
-            <kbd className="ml-2 text-[10px]">Esc</kbd>
+            <kbd className="ml-1.5 text-[10px]">Esc</kbd>
           </button>
         </div>
 
         <div className="flex items-center gap-2 text-neutral-600">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-neutral-600 uppercase tracking-tight">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
                 Tiền hàng:
               </span>
-              <div className="flex items-center gap-1 bg-white border border-neutral-200 rounded px-2.5 py-1 shadow-sm">
+              <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
                 <span className="font-mono font-bold text-neutral-900 text-xs">
                   {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9).
                       Không dùng totals.ttien_nt (giá vốn COGS) để tránh hiển thị 0. */}
@@ -1754,33 +1779,23 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-neutral-600 uppercase tracking-tight">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
                 Tiền CK:
               </span>
-              <div className="flex items-center gap-1 bg-white border border-primary-200 rounded px-2.5 py-1 shadow-sm">
+              <div className="flex items-center bg-white border border-primary-200 rounded px-2 py-0.5 shadow-sm">
                 <span className="font-mono font-bold text-primary-900 text-xs">
                   {formatCurrency(totals.ttien_nt4, maTte)}
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-neutral-600 uppercase tracking-tight">
-                Thuế VAT:
-              </span>
-              <div className="flex items-center gap-1 bg-white border border-neutral-200 rounded px-2.5 py-1 shadow-sm">
-                <span className="font-mono font-bold text-neutral-900 text-xs">
-                  {formatCurrency(totals.ttien_nt3, maTte)}
-                </span>
-              </div>
-            </div>
-            <div className="h-5 w-px bg-neutral-300"></div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase font-bold text-neutral-600 tracking-wide">
+            <div className="h-4 w-px bg-neutral-300"></div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs uppercase font-bold text-neutral-600 tracking-tight">
                 Tổng thanh toán:
               </span>
-              <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-3 py-1 shadow-sm">
-                <span className="font-mono font-bold text-primary-900 tracking-tight text-sm">
+              <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-2 py-0.5 shadow-sm">
+                <span className="font-mono font-bold text-primary-900 tracking-tight text-xs">
                   {formatCurrency(totals.ttien_nt0, maTte)}
                 </span>
                 <span className="text-xs font-bold text-primary-700">₫</span>
