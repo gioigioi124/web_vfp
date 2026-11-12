@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useModalLock } from "./lib/modalLock";
+import { peek } from "./lib/apiCache";
 import { VoucherList } from "./components/VoucherList";
 import { VoucherForm } from "./components/VoucherForm";
 import { FilterDialog } from "./components/FilterDialog";
@@ -89,10 +90,31 @@ export function App() {
   const isNew = sttParam === "new";
   const isEditing = Boolean(sttParam && !isNew);
 
-  const navToDetail = (stt: string) =>
+  const navToDetail = (stt: string) => {
+    handleOpenDetail(stt);
     navigate(`/sales-invoices/${encodeURIComponent(stt)}`);
+  };
   const navToNew = () => navigate("/sales-invoices/new");
   const navToList = () => navigate("/sales-invoices");
+
+  // Lấy dữ liệu phiếu tức thì (từ state activeVoucher, cache RAM, hoặc ghép từ dòng đang chọn)
+  // để mở form Sửa (mode="S") không bị trống ở render đầu tiên trước khi useEffect chạy.
+  const editingVoucher: VoucherFullDetail | null = (() => {
+    if (!sttParam || isNew) return null;
+    if (activeVoucher?.stt === sttParam) return activeVoucher;
+    const cached = peek<any>(`voucher:${sttParam}`);
+    if (cached?.success && cached.data?.stt === sttParam) {
+      return cached.data as VoucherFullDetail;
+    }
+    const header = vouchers.find((v) => v.stt === sttParam);
+    if (header) {
+      return {
+        ...header,
+        items: selectedStt === sttParam ? listDetail : [],
+      };
+    }
+    return null;
+  })();
 
   useEffect(() => {
     if (sttParam && !isNew) {
@@ -298,12 +320,6 @@ export function App() {
       },
       onCtrlF: () => {
         if (!sttParam) showToast("Ctrl+F - Đánh số chứng từ tự động.");
-      },
-      // Enter = mở chi tiết dòng đang chọn (tương đương double-click)
-      onEnter: () => {
-        if (!sttParam && selectedStt) {
-          navToDetail(selectedStt);
-        }
       },
       onEscape: () => {
         if (deleteTarget) {
@@ -534,14 +550,17 @@ export function App() {
       <main className="flex-1 overflow-hidden relative min-h-0">
         {sttParam ? (
           <VoucherForm
+            key={isNew ? "new" : sttParam}
+            stt={isNew ? undefined : sttParam}
             mode={isNew ? "M" : "S"}
-            voucher={isNew ? null : activeVoucher}
+            voucher={isNew ? null : editingVoucher}
             initialInherited={inheritedData || undefined}
             pickupPayload={pickupPayload}
             onClearPickupPayload={() => setPickupPayload(null)}
             onBack={navToList}
             onPrint={() => {
-              if (activeVoucher) handleOpenPrint(activeVoucher.stt);
+              const targetStt = editingVoucher?.stt || sttParam;
+              if (targetStt && !isNew) handleOpenPrint(targetStt);
             }}
             onViewDebt={(dt) => handleOpenDebt(dt)}
             onOpenPickup={handleOpenPickup}
@@ -564,7 +583,6 @@ export function App() {
             debtAmount={debtAmount}
             onSelectStt={setSelectedStt}
             onToggleMark={toggleMark}
-            onOpenDetail={navToDetail}
             onOpenFilter={() => setIsFilterOpen(true)}
             onOpenPrint={handleOpenPrint}
             onOpenPickup={() => handleOpenPickup()}

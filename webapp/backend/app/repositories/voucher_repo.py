@@ -679,20 +679,19 @@ class VoucherRepository:
             if safe_ma_tte == "VND" and 1 <= gia_nt9 <= 10:
                 chiet_khau = 0.0
 
-            # Loai_Vt '2' (Mút xốp) và '4' dùng cùng quy cách So_Luong = So_Tam * He_So8
-            if loai_vt in ("2", "4"):
+            # Tất cả loại vật tư trên Grid đều tính So_Luong8 = So_Luong9 = So_Tam * He_So8 (khớp dữ liệu VFP thật)
+            if so_tam > 0:
                 so_luong_ban = round_amount(so_tam * he_so8, 2)
-                it.so_luong8 = so_luong_ban
-                it.so_luong9 = so_luong_ban
-                it.so_luong = so_luong_ban
-            elif loai_vt == "1":
-                it.so_luong8 = 0.0
-                so_luong_ban = so_luong9
-                it.so_luong = round_amount(so_luong9 * he_so9, 2)
             else:
-                it.so_luong8 = 0.0
                 so_luong_ban = so_luong9
-                it.so_luong = so_luong9
+                so_tam = round_amount(so_luong9 / he_so8, 2) if he_so8 > 0 else so_luong9
+            it.so_tam = so_tam
+            it.so_luong8 = so_luong_ban
+            it.so_luong9 = so_luong_ban
+            if loai_vt == "1":
+                it.so_luong = round_amount(so_luong_ban * he_so9, 2)
+            else:
+                it.so_luong = so_luong_ban
 
             it.tien_nt9 = round_amount(so_luong_ban * gia_nt9, 2)
             it.gia9 = float(round_vnd(gia_nt9 * safe_ty_gia))

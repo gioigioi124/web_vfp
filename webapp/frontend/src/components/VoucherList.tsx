@@ -58,7 +58,6 @@ interface VoucherListProps {
   debtAmount?: number | null;
   onSelectStt: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
-  onOpenDetail: (stt: string) => void;
   onOpenFilter: () => void;
   onOpenPrint: (stt: string) => void;
   onOpenPickup: () => void;
@@ -79,7 +78,6 @@ export const VoucherList: React.FC<VoucherListProps> = ({
   debtAmount,
   onSelectStt,
   onToggleMark,
-  onOpenDetail,
   onOpenFilter,
   onOpenPrint,
   onOpenPickup,
@@ -362,7 +360,6 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                         else delete rowRefs.current[v.stt];
                       }}
                       onClick={() => onSelectStt(v.stt)}
-                      onDoubleClick={() => onOpenDetail(v.stt)}
                       className={
                         isSelected
                           ? "xl-row-active"

@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 
 interface VoucherFormProps {
+  stt?: string;
   voucher?: VoucherFullDetail | null;
   mode?: "M" | "S" | "VIEW";
   initialInherited?: Partial<VoucherFullDetail>;
@@ -89,8 +90,9 @@ const emptyDetailRow = (): VoucherDetail => ({
 });
 
 export const VoucherForm: React.FC<VoucherFormProps> = ({
+  stt: sttProp,
   voucher,
-  mode = voucher?.stt ? "S" : "M",
+  mode = voucher?.stt || sttProp ? "S" : "M",
   initialInherited,
   onBack,
   onPrint,
@@ -103,6 +105,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const isCreate = mode === "M";
   const isEdit = mode === "S";
   const isEditable = isCreate || isEdit;
+  const voucherStt = voucher?.stt || sttProp || "";
 
   // Refs for sequential focus & Enter navigation:
   // Ngày -> Số phiếu -> Mã đối tượng -> Diễn giải -> Mã xe -> Chọn phiếu xuất
@@ -160,25 +163,25 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const [tyGia, setTyGia] = useState<number>(
     voucher?.ty_gia ?? initialInherited?.ty_gia ?? 1.0,
   );
-  const [maTte] = useState<string>(
+  const [maTte, setMaTte] = useState<string>(
     voucher?.ma_tte || initialInherited?.ma_tte || "VND",
   );
-  const [maNx] = useState<string>(
+  const [maNx, setMaNx] = useState<string>(
     voucher?.ma_nx || initialInherited?.ma_nx || "131",
   );
   const [tk2, setTk2] = useState<string>(
     voucher?.tk2 || initialInherited?.tk2 || "1311",
   );
-  const [tk3] = useState<string>(
+  const [tk3, setTk3] = useState<string>(
     voucher?.tk3 || initialInherited?.tk3 || "33311",
   );
-  const [thueGtgt] = useState<number>(
+  const [thueGtgt, setThueGtgt] = useState<number>(
     voucher?.thue_gtgt ?? initialInherited?.thue_gtgt ?? 0,
   );
-  const [loaiCk] = useState<string>(
+  const [loaiCk, setLoaiCk] = useState<string>(
     voucher?.loai_ck || initialInherited?.loai_ck || "2",
   );
-  const [maCt] = useState<string>(
+  const [maCt, setMaCt] = useState<string>(
     voucher?.ma_ct || initialInherited?.ma_ct || "X1",
   );
   const [maDtGtGt, setMaDtGtGt] = useState<string>(
@@ -296,17 +299,84 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     maDtValueRef.current = maDt;
   }, [maDt]);
 
-  // 0. Khi F2 tạo phiếu mới (isCreate), tự động focus vào ô Mã đối tượng và bôi đen nội dung có sẵn
+  // Đồng bộ toàn bộ dữ liệu phiếu khi mở chế độ Sửa (mode="S") và prop `voucher` tải xong từ API/cache.
+  const syncedVoucherKeyRef = useRef<string>(
+    voucher?.stt ? `${voucher.stt}:${voucher.items?.length ?? 0}` : "",
+  );
   useEffect(() => {
-    if (!isCreate) return;
+    if (isCreate || !voucher?.stt) return;
+    const nextKey = `${voucher.stt}:${voucher.items?.length ?? 0}`;
+    if (syncedVoucherKeyRef.current === nextKey) return;
+    syncedVoucherKeyRef.current = nextKey;
+
+    const cleanDt = (voucher.ma_dt || "").trim().toUpperCase();
+    setNgayCt(voucher.ngay_ct || getTodayDate());
+    setSoCt(voucher.so_ct || "");
+    setMaDt(cleanDt);
+    maDtValueRef.current = cleanDt;
+    committedMaDtRef.current = cleanDt;
+    lastWarnedMaDtRef.current = "";
+    setMaDtError(null);
+    setTenDt(voucher.ten_dt || "");
+    setOngBa(voucher.ong_ba || voucher.ten_dt || "");
+    setDiaChi(voucher.dia_chi || "");
+    setDienGiai0(voucher.dien_giai0 ?? "");
+    setMaBp(voucher.ma_bp || "");
+    setTenBp(voucher.ten_bp || "");
+    setMaXe(voucher.ma_xe || "");
+    setTenXe(voucher.ten_xe || "");
+    setHanTt(voucher.han_tt ?? 30);
+    setTyGia(voucher.ty_gia ?? 1.0);
+    setMaTte(voucher.ma_tte || "VND");
+    setMaNx(voucher.ma_nx || "131");
+    setTk2(voucher.tk2 || "1311");
+    setTk3(voucher.tk3 || "33311");
+    setThueGtgt(voucher.thue_gtgt ?? 0);
+    setLoaiCk(voucher.loai_ck || "2");
+    setMaCt(voucher.ma_ct || "X1");
+    setMaDtGtGt(voucher.ma_dtgtgt || "");
+
+    if (voucher.items && voucher.items.length > 0) {
+      setItems(
+        voucher.items.map((it) =>
+          calcLoai2Item(
+            { ...it, gia_tb_tt: "C" },
+            voucher.ty_gia || 1.0,
+            "",
+            voucher.ma_tte || "VND",
+          ),
+        ),
+      );
+      setActiveRowIndex(0);
+    }
+
+    // Nếu ô Mã ĐT đang được focus trước khi dữ liệu API đổ về, bôi đen lại mã vừa nạp.
+    if (document.activeElement === maDtInputRef.current) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === maDtInputRef.current) {
+          maDtInputRef.current?.select();
+        }
+      });
+    }
+  }, [isCreate, voucher]);
+
+  // 0. Khi mở form Thêm mới (F2), Sao chép (Ctrl+F2) hoặc Sửa (F3 / Enter), tự động focus vào ô Mã đối tượng và bôi đen nội dung
+  const initialFocusedKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!isEditable) return;
+    const focusKey = isCreate ? "NEW" : voucherStt;
+    if (!focusKey || initialFocusedKeyRef.current === focusKey) return;
     const timer = setTimeout(() => {
+      if (isModalOpen()) return;
       if (maDtInputRef.current) {
+        // Chỉ đánh dấu đã focus sau khi thực sự chạy xong timer (tránh lỗi cleanup của React.StrictMode làm kẹt ref).
+        initialFocusedKeyRef.current = focusKey;
         maDtInputRef.current.focus();
         maDtInputRef.current.select();
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [isCreate]);
+  }, [isEditable, isCreate, voucherStt]);
 
   // 1. Tự động lấy số phiếu tiếp theo (VD: lớn nhất HD1000 -> tự điền HD1001) khi tạo phiếu mới
   useEffect(() => {
@@ -351,35 +421,45 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
   }, [pickupPayload, tyGia, maTte, maXe, onClearPickupPayload]);
 
-  // 3. Tự động lookup thông tin Ông/Bà, Địa chỉ, Mã bộ phận, Tên bộ phận từ DmDt khi có maDt ban đầu.
-  //    Dùng index RAM (tức thì); CHỈ áp kết quả nếu mã khách chưa đổi trong lúc chờ (chống ghi đè).
+  // 3. Tự động lookup thông tin Ông/Bà, Địa chỉ, Mã bộ phận, Tên bộ phận, Ma_Vm từ DmDt khi có maDt ban đầu.
+  //    Ở chế độ Sửa (S): giữ nguyên các trường đã lưu trên phiếu, chỉ điền Ma_Vm và các trường đang trống.
   useEffect(() => {
-    if (!maDt || !maDt.trim()) return;
+    const cleanDt = (voucher?.ma_dt || maDt || "").trim().toUpperCase();
+    if (!cleanDt) {
+      setMaVm("");
+      return;
+    }
     let cancelled = false;
-    const target = maDt.trim().toUpperCase();
     const enrichFromMaDt = async () => {
-      // RAM-only: chờ lần nạp danh mục đầu tiên (đã khởi động từ app) rồi tra trong RAM.
       await initCustomerIndex();
-      const cust = getCustomer(target);
+      const cust = getCustomer(cleanDt);
       if (cancelled || !cust) return;
-      // Người dùng đã đổi sang mã khách khác trong lúc chờ -> bỏ kết quả cũ.
-      if ((maDtRef.current || "").trim().toUpperCase() !== target) return;
-      if (cust.ten_dt) setTenDt(cust.ten_dt);
-      const resolvedOngBa = cust.ong_ba || cust.doi_tac || cust.ten_dt || "";
-      if (resolvedOngBa) setOngBa(resolvedOngBa);
-      if (cust.dia_chi !== undefined && !diaChi) setDiaChi(cust.dia_chi);
-      if (cust.ma_bp) setMaBp(cust.ma_bp);
-      if (cust.ten_bp) setTenBp(cust.ten_bp);
-      if (cust.ms_thue) setMaDtGtGt(cust.ms_thue);
+      if ((maDtRef.current || "").trim().toUpperCase() !== cleanDt) return;
       setMaVm(cust.ma_vm || "");
+      if (isCreate) {
+        if (cust.ten_dt) setTenDt(cust.ten_dt);
+        const resolvedOngBa = cust.ong_ba || cust.doi_tac || cust.ten_dt || "";
+        if (resolvedOngBa) setOngBa(resolvedOngBa);
+        if (cust.dia_chi !== undefined && !diaChi) setDiaChi(cust.dia_chi);
+        if (cust.ma_bp) setMaBp(cust.ma_bp);
+        if (cust.ten_bp) setTenBp(cust.ten_bp);
+        if (cust.ms_thue) setMaDtGtGt(cust.ms_thue);
+      } else {
+        if (cust.ten_dt) setTenDt((prev) => prev || cust.ten_dt || "");
+        const resolvedOngBa = cust.ong_ba || cust.doi_tac || cust.ten_dt || "";
+        if (resolvedOngBa) setOngBa((prev) => prev || resolvedOngBa);
+        if (cust.dia_chi) setDiaChi((prev) => prev || cust.dia_chi || "");
+        if (cust.ma_bp) setMaBp((prev) => prev || cust.ma_bp || "");
+        if (cust.ten_bp) setTenBp((prev) => prev || cust.ten_bp || "");
+        if (cust.ms_thue) setMaDtGtGt((prev) => prev || cust.ms_thue || "");
+      }
     };
     enrichFromMaDt();
     return () => {
       cancelled = true;
     };
-    // Chỉ chạy khi khởi tạo form với maDt ban đầu (không chạy khi đang gõ dở)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [voucher?.stt]);
 
   // 4. Nếu đã có maBp nhưng tenBp đang trống -> tự động lookup tên bộ phận từ DmBp
   useEffect(() => {
@@ -484,13 +564,14 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   // Nạp số liệu hạn mức / dư nợ ban đầu khi mở form (không bật popup cảnh báo tự động khi chưa chọn khách)
   useEffect(() => {
-    if (maDt && maDt.trim()) {
-      loadDebtInfo(maDt, false);
+    const cleanDt = (voucher?.ma_dt || maDt || "").trim();
+    if (cleanDt) {
+      loadDebtInfo(cleanDt, false);
     } else {
       setDebtInfo(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [voucher?.stt]);
 
   // Handle Customer Selection -> tự động điền Tên KH, Ông/Bà (từ Doi_Tac hoặc Ten_Dt), Địa chỉ, Mã bộ phận, Tên bộ phận
   const [maDtError, setMaDtError] = useState<string | null>(null);
@@ -756,31 +837,34 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     setSaving(true);
     try {
       let currentSoCt = soCt.trim().toUpperCase();
+      const origSoCt = (voucher?.so_ct || "").trim().toUpperCase();
 
-      // Tự động kiểm tra lại số phiếu trước khi lưu và thay bằng số gợi ý nếu trùng hoặc đang trống
-      try {
-        const chkRes = await fetch("/api/vouchers/check-number", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ma_dvcs: "S1",
-            moi_sua: isCreate ? "M" : "S",
-            stt: voucher?.stt || "",
-            ma_ct: maCt || "X1",
-            ngay_ct: ngayCt,
-            so_ct: currentSoCt,
-          }),
-        });
-        if (chkRes.ok) {
-          const chkData = await chkRes.json();
-          const suggested = chkData?.data?.valid_so_ct;
-          if (suggested) {
-            currentSoCt = suggested;
-            setSoCt(suggested);
+      // Tự động kiểm tra lại số phiếu trước khi lưu (chỉ gọi khi tạo mới, số phiếu trống, hoặc khi sửa đã đổi sang số phiếu khác)
+      if (isCreate || !currentSoCt || currentSoCt !== origSoCt) {
+        try {
+          const chkRes = await fetch("/api/vouchers/check-number", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ma_dvcs: "S1",
+              moi_sua: isCreate ? "M" : "S",
+              stt: voucherStt,
+              ma_ct: maCt || "X1",
+              ngay_ct: ngayCt,
+              so_ct: currentSoCt,
+            }),
+          });
+          if (chkRes.ok) {
+            const chkData = await chkRes.json();
+            const suggested = chkData?.data?.valid_so_ct;
+            if (suggested) {
+              currentSoCt = suggested;
+              setSoCt(suggested);
+            }
           }
+        } catch {
+          // Nếu check-number gặp lỗi mạng tạm thời, backend save_voucher vẫn kiểm tra trong ACID transaction
         }
-      } catch {
-        // Nếu check-number gặp lỗi mạng tạm thời, backend save_voucher vẫn kiểm tra trong ACID transaction
       }
 
       const payload = {
@@ -830,7 +914,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       const url = isCreate
         ? "/api/vouchers"
-        : `/api/vouchers/${encodeURIComponent(voucher?.stt || "")}`;
+        : `/api/vouchers/${encodeURIComponent(voucherStt)}`;
       const method = isCreate ? "POST" : "PUT";
 
       const res = await fetch(url, {
