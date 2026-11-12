@@ -1,15 +1,21 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useModalLock } from "./lib/modalLock";
 import { peek } from "./lib/apiCache";
+import {
+  initCustomerIndex,
+  searchCustomers,
+  getCustomer,
+} from "./lib/customerIndex";
 import { VoucherList } from "./components/VoucherList";
 import { VoucherForm } from "./components/VoucherForm";
 import { FilterDialog } from "./components/FilterDialog";
 import { PickupDialog } from "./components/PickupDialog";
 import { DebtPanel } from "./components/DebtPanel";
 import { PrintPreview } from "./components/PrintPreview";
+import { Autocomplete } from "./components/ui/Autocomplete";
 import { Badge } from "./components/ui/Badge";
 import { formatDate } from "./lib/format";
 import {
@@ -17,7 +23,7 @@ import {
   VoucherDetail,
   VoucherHeader,
 } from "./types/voucher";
-import { User, ShieldCheck, Search, RefreshCw, Trash2, X } from "lucide-react";
+import { User, ShieldCheck, RefreshCw, Trash2, X } from "lucide-react";
 
 export function App() {
   const {
@@ -40,7 +46,7 @@ export function App() {
     refresh,
     isPrintOpen,
     setIsPrintOpen,
-    printStt,
+    printStts,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,
@@ -51,8 +57,90 @@ export function App() {
   } = useVouchers();
 
   const [notification, setNotification] = useState<string | null>(null);
+  // Tùy chọn in từ thanh đáy danh sách: "1" = In giá bán, "0" = Không in giá.
+  const [printPrice, setPrintPrice] = useState<"1" | "0">("1");
   // Đánh dấu dòng (Mark) giống ctbhh — Space / Ctrl+A / Ctrl+U tác động.
   const [marked, setMarked] = useState<Set<string>>(new Set());
+
+  // Ô tìm kiếm nhanh khách hàng & ngày chứng từ trên header (Enter để di chuyển và tìm kiếm)
+  const [headerNgayCt1, setHeaderNgayCt1] = useState<string>(
+    filters?.ngay_ct1 || "",
+  );
+  const [headerNgayCt2, setHeaderNgayCt2] = useState<string>(
+    filters?.ngay_ct2 || "",
+  );
+  const [headerCustomerQuery, setHeaderCustomerQuery] = useState<string>(
+    filters?.ma_dt || "",
+  );
+  const [headerDienGiai, setHeaderDienGiai] = useState<string>(
+    filters?.dien_giai || "",
+  );
+  const headerCustomerRef = useRef<string>(filters?.ma_dt || "");
+  const headerDienGiaiRef = useRef<string>(filters?.dien_giai || "");
+  const ngayCt1InputRef = useRef<HTMLInputElement | null>(null);
+  const ngayCt2InputRef = useRef<HTMLInputElement | null>(null);
+  const customerSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const dienGiaiInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    void initCustomerIndex();
+  }, []);
+
+  useEffect(() => {
+    setHeaderNgayCt1(filters?.ngay_ct1 || "");
+    setHeaderNgayCt2(filters?.ngay_ct2 || "");
+    const dt = filters?.ma_dt || "";
+    setHeaderCustomerQuery(dt);
+    headerCustomerRef.current = dt;
+    const dg = filters?.dien_giai || "";
+    setHeaderDienGiai(dg);
+    headerDienGiaiRef.current = dg;
+  }, [filters?.ngay_ct1, filters?.ngay_ct2, filters?.ma_dt, filters?.dien_giai]);
+
+  const fetchHeaderKhachHangOptions = useCallback(async (query: string) => {
+    await initCustomerIndex();
+    return searchCustomers(query);
+  }, []);
+
+  const resolveHeaderCustomer = useCallback(async (rawQuery: string) => {
+    const trimmed = rawQuery.trim();
+    if (!trimmed) return "";
+    await initCustomerIndex();
+    const exact = getCustomer(trimmed);
+    return exact
+      ? exact.ma_dt
+      : (searchCustomers(trimmed, 1)[0]?.value ?? trimmed);
+  }, []);
+
+  const handleHeaderSearchSubmit = useCallback(
+    async (overrideMaDt?: string, overrideDienGiai?: string) => {
+      const rawDt =
+        overrideMaDt !== undefined ? overrideMaDt : headerCustomerRef.current;
+      const resolvedDt =
+        overrideMaDt !== undefined
+          ? overrideMaDt
+          : await resolveHeaderCustomer(rawDt);
+      headerCustomerRef.current = resolvedDt;
+      setHeaderCustomerQuery(resolvedDt);
+
+      const dg = (
+        overrideDienGiai !== undefined
+          ? overrideDienGiai
+          : headerDienGiaiRef.current
+      ).trim();
+
+      // Mọi thao tác tìm kiếm hoặc xóa lọc từ header đều reset lọc kho & mã hàng của F9
+      handleApplyFilter({
+        ngay_ct1: headerNgayCt1,
+        ngay_ct2: headerNgayCt2,
+        ma_dt: resolvedDt,
+        dien_giai: dg,
+        ma_kho: "",
+        ma_vt: "",
+      });
+    },
+    [handleApplyFilter, headerNgayCt1, headerNgayCt2, resolveHeaderCustomer],
+  );
 
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<VoucherHeader | null>(null);
@@ -228,6 +316,31 @@ export function App() {
     }
   };
 
+  // Handler for F7 (Print marked vouchers or active voucher)
+  const handleActionPrint = () => {
+    const targets =
+      marked.size > 0
+        ? [
+            ...vouchers.filter((v) => marked.has(v.stt)).map((v) => v.stt),
+            ...Array.from(marked).filter(
+              (s) => !vouchers.some((v) => v.stt === s),
+            ),
+          ]
+        : activeVoucher
+          ? [activeVoucher.stt]
+          : selectedStt
+            ? [selectedStt]
+            : [];
+    if (targets.length > 0) {
+      handleOpenPrint(targets);
+      if (marked.size > 0) {
+        setMarked(new Set());
+      }
+    } else {
+      showToast("Chưa chọn chứng từ để in.");
+    }
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -280,18 +393,10 @@ export function App() {
       },
       onCtrlF3: () => showToast("Ctrl+F3 - Sửa mẫu in."),
       onF6: () => showToast("F6 - Nhập số IMEI."),
-      // F7 = In chứng từ (ctbhh Command5)
-      onF7: () => {
-        if (activeVoucher) handleOpenPrint(activeVoucher.stt);
-        else if (selectedStt) handleOpenPrint(selectedStt);
-        else showToast("Chưa chọn chứng từ để in.");
-      },
-      // Shift+F7 / Ctrl+F7 = Xem trước (ctbhh Command4)
-      onPreview: () => {
-        if (activeVoucher) handleOpenPrint(activeVoucher.stt);
-        else if (selectedStt) handleOpenPrint(selectedStt);
-        else showToast("Chưa chọn chứng từ để xem trước.");
-      },
+      // F7 = In chứng từ trực tiếp (nếu đã Space đánh dấu nhiều phiếu -> in toàn bộ phiếu đã chọn và bỏ chọn)
+      onF7: handleActionPrint,
+      // Tắt dialog preview khi ấn Ctrl+F7 / Shift+F7 (không mở cửa sổ xem trước)
+      onPreview: () => {},
       // F8 = Xóa (ctbhh Command3)
       onF8: () => {
         if (!sttParam) handleActionDelete();
@@ -376,10 +481,7 @@ export function App() {
         setIsFilterOpen(true);
         break;
       case "PRINT":
-      case "PREVIEW":
-        if (activeVoucher) handleOpenPrint(activeVoucher.stt);
-        else if (selectedStt) handleOpenPrint(selectedStt);
-        else showToast("Chưa chọn chứng từ.");
+        handleActionPrint();
         break;
       case "TOGGLE_MARK":
         toggleMark(selectedStt);
@@ -404,8 +506,9 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface">
-      {/* Toast Notification */}
+    <>
+      <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface print:hidden">
+        {/* Toast Notification */}
       {notification && (
         <div className="fixed top-4 right-4 z-50 bg-neutral-900 text-white px-4 py-2 rounded shadow-lg text-xs flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
           <ShieldCheck className="w-4 h-4 text-tertiary-300" />
@@ -477,8 +580,8 @@ export function App() {
       {!sttParam && (
         <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 flex-shrink-0 z-30">
           <div className="px-3.5 py-1.5 flex items-center justify-between gap-4">
-            {/* Logo, Breadcrumb & Tiêu đề màn hình */}
-            <div className="flex items-center gap-3">
+            {/* Logo, Breadcrumb, Tiêu đề & Khung lọc nhanh (dịch sang trái để dropdown KH rộng rãi) */}
+            <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center justify-center w-7 h-7 rounded bg-primary-700 text-white font-bold text-sm shadow">
                 PX
               </div>
@@ -491,38 +594,138 @@ export function App() {
                   GĐ2: PERSISTENCE (ACID)
                 </Badge>
               </div>
+
+              {/* Khung tìm kiếm & bộ lọc ngày (Enter để di chuyển & tìm kiếm) */}
+              <div className="flex items-center gap-2 ml-2">
+                <div className="flex items-center gap-1.5 bg-neutral-800 border border-neutral-700 px-2 py-0.5 rounded text-xs text-neutral-300">
+                  <label
+                    htmlFor="header-ngay-ct1"
+                    className="text-[11px] text-neutral-400 select-none"
+                  >
+                    Từ
+                  </label>
+                  <input
+                    ref={ngayCt1InputRef}
+                    id="header-ngay-ct1"
+                    type="date"
+                    value={headerNgayCt1}
+                    onChange={(e) => setHeaderNgayCt1(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        ngayCt2InputRef.current?.focus();
+                      }
+                    }}
+                    className="bg-transparent text-white font-mono text-[11px] outline-none [color-scheme:dark] cursor-pointer"
+                    title="Từ ngày chứng từ (Enter sang Đến ngày)"
+                  />
+                  <span className="text-neutral-600">-</span>
+                  <label
+                    htmlFor="header-ngay-ct2"
+                    className="text-[11px] text-neutral-400 select-none"
+                  >
+                    Đến
+                  </label>
+                  <input
+                    ref={ngayCt2InputRef}
+                    id="header-ngay-ct2"
+                    type="date"
+                    value={headerNgayCt2}
+                    onChange={(e) => setHeaderNgayCt2(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        customerSearchInputRef.current?.focus();
+                        customerSearchInputRef.current?.select();
+                      }
+                    }}
+                    className="bg-transparent text-white font-mono text-[11px] outline-none [color-scheme:dark] cursor-pointer"
+                    title="Đến ngày chứng từ (Enter sang ô Khách hàng)"
+                  />
+                </div>
+
+                {/* Input tìm kiếm khách hàng (RAM index, dropdown 680px, Enter để tìm) */}
+                <div className="relative w-48">
+                  <Autocomplete
+                    inputRef={customerSearchInputRef}
+                    selectOnFocus
+                    value={headerCustomerQuery}
+                    onChange={(val) => {
+                      headerCustomerRef.current = val;
+                      setHeaderCustomerQuery(val);
+                    }}
+                    fetcher={fetchHeaderKhachHangOptions}
+                    openOnTypeOnly
+                    debounceMs={30}
+                    maxResults={30}
+                    dropdownMinWidth={680}
+                    hideIcon={!!headerCustomerQuery}
+                    placeholder="Mã/Tên KH (Enter tìm)"
+                    className="w-full !pr-7 py-1 text-xs rounded bg-white text-neutral-900 border-neutral-300 font-medium placeholder-neutral-400"
+                    onSelect={(opt) => {
+                      void handleHeaderSearchSubmit(opt.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.defaultPrevented) {
+                        e.preventDefault();
+                        void handleHeaderSearchSubmit();
+                      }
+                    }}
+                  />
+                  {headerCustomerQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleHeaderSearchSubmit("");
+                      }}
+                      className="absolute inset-y-0 right-1.5 flex items-center text-neutral-400 hover:text-neutral-700 cursor-pointer z-10"
+                      title="Xóa lọc khách hàng (xóa cả kho & mã hàng)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Input tìm kiếm theo diễn giải (Enter để tìm) */}
+                <div className="relative w-48">
+                  <input
+                    ref={dienGiaiInputRef}
+                    type="text"
+                    value={headerDienGiai}
+                    onChange={(e) => {
+                      headerDienGiaiRef.current = e.target.value;
+                      setHeaderDienGiai(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleHeaderSearchSubmit();
+                      }
+                    }}
+                    placeholder="Diễn giải (Enter tìm)..."
+                    className="erp-input w-full !pr-7 py-1 text-xs rounded bg-white text-neutral-900 border-neutral-300 font-medium placeholder-neutral-400"
+                    title="Tìm theo diễn giải (Enter để tìm)"
+                  />
+                  {headerDienGiai && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        headerDienGiaiRef.current = "";
+                        setHeaderDienGiai("");
+                        void handleHeaderSearchSubmit(undefined, "");
+                      }}
+                      className="absolute inset-y-0 right-1.5 flex items-center text-neutral-400 hover:text-neutral-700 cursor-pointer z-10"
+                      title="Xóa lọc diễn giải (xóa cả kho & mã hàng)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Khung tìm kiếm & bộ lọc kỳ kế toán nhanh */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 px-2 py-0.5 rounded text-xs text-neutral-300">
-                <span className="font-mono text-[11px]">
-                  {filters?.ngay_ct1 ? formatDate(filters.ngay_ct1) : "Tất cả"}
-                  {filters?.ngay_ct2 && filters.ngay_ct2 !== filters.ngay_ct1
-                    ? ` - ${formatDate(filters.ngay_ct2)}`
-                    : ""}
-                </span>
-              </div>
-
-              {/* Input tìm kiếm nhanh */}
-              <div className="relative w-64">
-                <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-neutral-400">
-                  <Search className="w-3.5 h-3.5" />
-                </span>
-                <input
-                  className="w-full pl-8 pr-12 py-1 text-xs rounded bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-400 focus:border-secondary-500 focus:ring-1 focus:ring-secondary-500 outline-none"
-                  placeholder="Tìm số phiếu, khách hàng, diễn giải..."
-                  type="text"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") setIsFilterOpen(true);
-                  }}
-                />
-                <span className="absolute inset-y-0 right-1.5 flex items-center">
-                  <kbd className="text-[9px] bg-neutral-700 border-neutral-600 text-neutral-300 py-0.5 px-1">
-                    F9
-                  </kbd>
-                </span>
-              </div>
+            {/* Nút chức năng & thông tin người dùng */}
+            <div className="flex items-center gap-2 flex-shrink-0">
 
               {/* Nút làm mới */}
               <button
@@ -605,7 +808,8 @@ export function App() {
               <span className="font-medium text-neutral-300">Tùy chọn in:</span>
               <label className="inline-flex items-center gap-1 cursor-pointer font-medium text-white">
                 <input
-                  defaultChecked
+                  checked={printPrice === "1"}
+                  onChange={() => setPrintPrice("1")}
                   className="h-2.5 w-2.5 accent-primary-600"
                   name="print_price"
                   type="radio"
@@ -620,6 +824,8 @@ export function App() {
               </label>
               <label className="inline-flex items-center gap-1 cursor-pointer text-neutral-300 hover:text-white">
                 <input
+                  checked={printPrice === "0"}
+                  onChange={() => setPrintPrice("0")}
                   className="h-2.5 w-2.5 accent-primary-600"
                   name="print_price"
                   type="radio"
@@ -666,13 +872,6 @@ export function App() {
                   F7
                 </kbd>
                 <span>In phiếu</span>
-              </button>
-              <button
-                onClick={() => handleHotkeyBarAction("PREVIEW")}
-                className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 transition flex items-center gap-1 cursor-pointer"
-              >
-                <kbd className="text-[9px] py-0 px-1">Ctrl+F7</kbd>
-                <span>Xem phiếu</span>
               </button>
               <button
                 onClick={() => handleHotkeyBarAction("FILTER")}
@@ -735,13 +934,18 @@ export function App() {
         onClose={() => setIsDebtOpen(false)}
         maDt={debtMaDt}
       />
+      </div>
 
       <PrintPreview
         isOpen={isPrintOpen}
-        onClose={() => setIsPrintOpen(false)}
-        stt={printStt}
+        onClose={() => {
+          setIsPrintOpen(false);
+          if (sttParam) navToList();
+        }}
+        stts={printStts}
+        inGia={printPrice}
       />
-    </div>
+    </>
   );
 }
 

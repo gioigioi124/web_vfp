@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
+import { HighlightText } from "./HighlightText";
 import {
   arrowDir,
   caretToEndLater,
@@ -410,11 +411,15 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
               )}
             >
               <span className="font-mono font-bold text-primary-800 shrink-0">
-                {opt.label}
+                <HighlightText
+                  text={opt.label}
+                  query={value}
+                  className="text-red-600 font-bold"
+                />
               </span>
               {opt.hint && (
                 <span className="text-neutral-600 font-sans truncate text-right flex-1">
-                  {opt.hint}
+                  <HighlightText text={opt.hint} query={value} />
                 </span>
               )}
             </li>

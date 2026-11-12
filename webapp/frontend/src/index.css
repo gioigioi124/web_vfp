@@ -127,6 +127,16 @@ kbd {
   outline: none;
   background-color: #ffffff !important;
 }
+.erp-input.erp-input-danger {
+  border-color: #f87171 !important;
+  background-color: #fef2f2 !important;
+  color: #991b1b;
+}
+.erp-input.erp-input-danger:focus {
+  border-color: #ef4444 !important;
+  background-color: #fef2f2 !important;
+  box-shadow: 0 0 0 1.5px rgba(239, 68, 68, 0.25);
+}
 .erp-label {
   font-size: 0.725rem;
   font-weight: 600;
@@ -297,41 +307,75 @@ kbd {
   appearance: textfield;
 }
 
-/* ===== Print styles cho mẫu in phiếu (PrintPreview) ===== */
+/* ===== Print styles cho mẫu in phiếu (PrintPreview - ctpxg.frx) ===== */
 @media print {
-  /* Ẩn toàn bộ UI điều khiển, chỉ giữ phần mẫu in */
-  body * {
-    visibility: hidden;
-  }
-
-  .print-area,
-  .print-area * {
-    visibility: visible;
+  html,
+  body,
+  #root {
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
   }
 
   .print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
     padding: 0 !important;
     margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
   }
 
-  /* Dialog không nên chiếm overlay khi in */
-  .fixed {
-    position: static !important;
-    inset: auto !important;
+  /* Ngắt sang trang mới khi in hàng loạt nhiều phiếu liên tiếp */
+  .print-doc-page-break {
+    break-before: page !important;
+    page-break-before: always !important;
   }
 
-  /* Bỏ nền xám của overlay + scrollbar */
-  .bg-neutral-900\/40 {
-    background: transparent !important;
-    backdrop-filter: none !important;
+  /* Giữ dòng hàng cuối cùng đi kèm khối Tổng cộng & Chữ ký trên cùng một trang */
+  .print-keep-with-last {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-page-table thead {
+    display: table-header-group !important;
+  }
+
+  .print-page-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   @page {
-    size: A4;
-    margin: 12mm;
+    size: A4 portrait;
+    margin: 5mm 6mm 6mm 5mm;
+    @top-left {
+      content: "";
+    }
+    @top-center {
+      content: "";
+    }
+    @top-right {
+      content: "";
+    }
+    @bottom-left {
+      content: "";
+    }
+    @bottom-center {
+      content: "";
+    }
+    @bottom-right {
+      content: "";
+    }
   }
 }

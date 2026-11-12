@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
+import { HighlightText } from "./HighlightText";
 import { Loader2, Search } from "lucide-react";
 
 export interface AutocompleteOption {
@@ -288,7 +289,11 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
               )}
             >
               <span className="font-mono font-bold text-primary-800 shrink-0 min-w-[76px]">
-                {opt.label}
+                <HighlightText
+                  text={opt.label}
+                  query={value}
+                  className="text-red-600 font-bold"
+                />
               </span>
               {opt.hint && (
                 <span
@@ -300,7 +305,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
                   )}
                   title={opt.hint}
                 >
-                  {opt.hint}
+                  <HighlightText text={opt.hint} query={value} />
                 </span>
               )}
               {opt.extra !== undefined && (
@@ -308,7 +313,11 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
                   className="text-neutral-500 font-sans truncate text-left flex-1 min-w-[140px] pl-2 border-l border-neutral-200 text-[11px]"
                   title={opt.extra}
                 >
-                  {opt.extra || "—"}
+                  {opt.extra ? (
+                    <HighlightText text={opt.extra} query={value} />
+                  ) : (
+                    "—"
+                  )}
                 </span>
               )}
             </li>

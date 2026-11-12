@@ -139,6 +139,7 @@ export interface VoucherFilterParams {
   ma_kho?: string;
   ma_vt?: string;
   ma_tte?: string;
+  dien_giai?: string;
   page?: number;
   page_size?: number;
 }

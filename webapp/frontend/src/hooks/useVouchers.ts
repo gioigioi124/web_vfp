@@ -19,8 +19,8 @@ const listKey = (f: VoucherFilterParams) =>
   `list:${f.ma_ct || ""}:${f.ngay_ct1 || ""}:${f.ngay_ct2 || ""}:${f.so_ct1 || ""}:${
     f.so_ct2 || ""
   }:${f.ma_dt || ""}:${f.ma_kho || ""}:${f.ma_vt || ""}:${f.ma_tte || ""}:${
-    f.page || 1
-  }:${f.page_size || 50}`;
+    f.dien_giai || ""
+  }:${f.page || 1}:${f.page_size || 50}`;
 const voucherKey = (stt: string) => `voucher:${stt}`;
 const debtKey = (maDt: string) => `debt:${maDt}`;
 
@@ -73,7 +73,7 @@ export function useVouchers() {
   const [isPrintOpen, setIsPrintOpen] = useState<boolean>(false);
   const [isPickupOpen, setIsPickupOpen] = useState<boolean>(false);
   const [isDebtOpen, setIsDebtOpen] = useState<boolean>(false);
-  const [printStt, setPrintStt] = useState<string>("");
+  const [printStts, setPrintStts] = useState<string[]>([]);
   const [debtMaDt, setDebtMaDt] = useState<string>("");
 
   const applyListData = useCallback((data: any) => {
@@ -125,6 +125,7 @@ export function useVouchers() {
         if (filters.ma_kho) q.append("ma_kho", filters.ma_kho);
         if (filters.ma_vt) q.append("ma_vt", filters.ma_vt);
         if (filters.ma_tte) q.append("ma_tte", filters.ma_tte);
+        if (filters.dien_giai) q.append("dien_giai", filters.dien_giai);
         q.append("page", String(filters.page || 1));
         q.append("page_size", String(filters.page_size || 50));
 
@@ -301,8 +302,12 @@ export function useVouchers() {
     fetchVouchers({ force: true });
   }, [fetchVouchers]);
 
-  const handleOpenPrint = (stt: string) => {
-    setPrintStt(stt);
+  const handleOpenPrint = (target: string | string[]) => {
+    const list = (Array.isArray(target) ? target : [target])
+      .map((s) => (s || "").trim())
+      .filter(Boolean);
+    if (list.length === 0) return;
+    setPrintStts(list);
     setIsPrintOpen(true);
   };
 
@@ -334,7 +339,7 @@ export function useVouchers() {
     refresh,
     isPrintOpen,
     setIsPrintOpen,
-    printStt,
+    printStts,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,

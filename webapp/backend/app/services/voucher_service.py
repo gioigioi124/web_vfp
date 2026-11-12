@@ -30,6 +30,7 @@ class VoucherService:
         tien_nt1: Optional[float] = None,
         tien_nt2: Optional[float] = None,
         filter_by_user: Optional[str] = None,
+        dien_giai: Optional[str] = None,
         page: int = 1,
         page_size: int = 50
     ) -> VoucherListResponse:
@@ -51,6 +52,7 @@ class VoucherService:
             tien_nt1=tien_nt1,
             tien_nt2=tien_nt2,
             filter_by_user=filter_by_user,
+            dien_giai=dien_giai,
             page=page,
             page_size=page_size
         )

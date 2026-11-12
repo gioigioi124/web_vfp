@@ -54,14 +54,14 @@ interface VoucherListProps {
   selectedStt: string | null;
   markedStts?: Set<string>;
   detailItems: VoucherDetail[];
-  detailLoading: boolean;
+  detailLoading?: boolean;
   debtAmount?: number | null;
   onSelectStt: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
   onOpenFilter: () => void;
-  onOpenPrint: (stt: string) => void;
-  onOpenPickup: () => void;
-  onOpenDebt: (maDt: string) => void;
+  onOpenPrint: (stt: string | string[]) => void;
+  onOpenPickup?: () => void;
+  onOpenDebt?: (maDt: string) => void;
   onRefresh: () => void;
   onChangePage: (page: number) => void;
 }
@@ -74,14 +74,11 @@ export const VoucherList: React.FC<VoucherListProps> = ({
   selectedStt,
   markedStts,
   detailItems,
-  detailLoading,
   debtAmount,
   onSelectStt,
   onToggleMark,
   onOpenFilter,
   onOpenPrint,
-  onOpenPickup,
-  onOpenDebt,
   onRefresh,
   onChangePage,
 }) => {
@@ -518,12 +515,12 @@ export const VoucherList: React.FC<VoucherListProps> = ({
       </section>
 
       {/* ===== THANH SPLITTER & THÔNG TIN DƯ NỢ KHÁCH HÀNG ===== */}
-      <div className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 px-3.5 py-1.5 flex items-center justify-between border-y border-neutral-300 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-5 h-5 rounded-full bg-info-100 text-primary-700">
-            <Info className="w-3 h-3" />
+      <div className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 px-2.5 py-0.5 flex items-center justify-between border-y border-neutral-300 flex-shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="flex items-center justify-center w-4 h-4 rounded-full bg-info-100 text-primary-700 shrink-0">
+            <Info className="w-2.5 h-2.5" />
           </div>
-          <span className="font-semibold text-xs text-neutral-800">
+          <span className="font-semibold text-xs text-neutral-800 truncate">
             Khách hàng:{" "}
             <span className="text-primary-700 font-mono">
               {activeVoucher?.ma_dt || "—"}
@@ -531,44 +528,36 @@ export const VoucherList: React.FC<VoucherListProps> = ({
             {activeVoucher?.ten_dt ? ` - ${activeVoucher.ten_dt}` : ""}
           </span>
           <span className="text-neutral-400">||</span>
-          <span className="text-xs text-neutral-600">Dư nợ tài khoản:</span>
-          <span className="px-2 py-0.5 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs">
+          <span className="text-xs text-neutral-600 shrink-0">
+            Dư nợ tài khoản:
+          </span>
+          <span className="px-1.5 py-0 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs shrink-0">
             {debtAmount != null
               ? `${formatCurrency(debtAmount, "VND")} ₫`
               : "—"}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-neutral-500 text-[11px] font-mono">
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-neutral-500 text-[11px] font-mono mr-0.5">
             Trang {pagination.page} / {pagination.total_pages || 1}
           </span>
           <Button
             variant="outline"
             size="sm"
+            className="h-5 px-1.5"
             onClick={() => onChangePage(pagination.page - 1)}
             disabled={pagination.page <= 1 || loading}
           >
-            <ChevronLeft className="w-3.5 h-3.5" />
+            <ChevronLeft className="w-3 h-3" />
           </Button>
           <Button
             variant="outline"
             size="sm"
+            className="h-5 px-1.5"
             onClick={() => onChangePage(pagination.page + 1)}
             disabled={!pagination.has_next || loading}
           >
-            <ChevronRight className="w-3.5 h-3.5" />
-          </Button>
-          <span className="w-px h-4 bg-neutral-300 mx-0.5" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => activeVoucher && onOpenDebt(activeVoucher.ma_dt)}
-            disabled={!activeVoucher}
-          >
-            Chi tiết công nợ
-          </Button>
-          <Button variant="secondary" size="sm" onClick={onOpenPickup}>
-            Chọn phiếu xuất
+            <ChevronRight className="w-3 h-3" />
           </Button>
         </div>
       </div>
@@ -578,12 +567,6 @@ export const VoucherList: React.FC<VoucherListProps> = ({
         ref={detailSectionRef}
         className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden"
       >
-        {detailLoading && (
-          <div className="shrink-0 bg-neutral-50 border-b border-neutral-200 px-2 py-0.5 text-[10px] text-neutral-400 flex items-center gap-1">
-            <RefreshCw className="w-3 h-3 animate-spin" />
-            Đang tải chi tiết...
-          </div>
-        )}
         <div className="flex-1 overflow-auto table-sticky-header">
           <DetailGrid items={detailItems} currency={detailCurrency} embedded />
         </div>

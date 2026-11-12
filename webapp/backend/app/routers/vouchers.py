@@ -30,6 +30,7 @@ def list_vouchers(
     tien_nt1: Optional[float] = Query(None, description="Tổng tiền từ"),
     tien_nt2: Optional[float] = Query(None, description="Tổng tiền đến"),
     filter_by_user: Optional[str] = Query(None, description="Lọc theo người lập"),
+    dien_giai: Optional[str] = Query(None, description="Tìm theo diễn giải"),
     page: int = Query(1, ge=1, description="Trang hiện tại"),
     page_size: int = Query(50, ge=1, le=500, description="Kích thước trang")
 ):
@@ -55,6 +56,7 @@ def list_vouchers(
         tien_nt1=tien_nt1,
         tien_nt2=tien_nt2,
         filter_by_user=filter_by_user,
+        dien_giai=dien_giai,
         page=page,
         page_size=page_size
     )

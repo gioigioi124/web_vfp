@@ -292,6 +292,10 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
     rowIdx: number;
     colIdx?: number;
   } | null>(null);
+  const lastFocusedCellRef = useRef<{
+    rowIdx: number;
+    colIdx?: number;
+  } | null>(null);
   const [internalActiveRow, setInternalActiveRow] = useState<number>(0);
 
   useEffect(() => {
@@ -1017,13 +1021,114 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
     }
   };
 
+  const handleFormTableFocusCapture = useCallback(
+    (e: React.FocusEvent<HTMLTableElement>) => {
+      const target = e.target;
+      const table = tableRef.current;
+      if (!table || !(target instanceof HTMLElement)) return;
+      const tr = target.closest("tbody tr");
+      const td = target.closest("td");
+      if (!tr || !td) return;
+      const rowIdx = Array.from(table.querySelectorAll("tbody tr")).indexOf(
+        tr as HTMLTableRowElement,
+      );
+      if (rowIdx < 0) return;
+      const colIdx = Array.from(tr.children).indexOf(td);
+      lastFocusedCellRef.current = {
+        rowIdx,
+        colIdx: colIdx >= 0 ? colIdx : undefined,
+      };
+    },
+    [],
+  );
+
+  const handleFormGridMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Không chặn thao tác kéo thanh cuộn dọc/ngang
+      const container = e.currentTarget;
+      const rect = container.getBoundingClientRect();
+      if (
+        e.clientX - rect.left >= container.clientWidth ||
+        e.clientY - rect.top >= container.clientHeight
+      ) {
+        return;
+      }
+
+      // Chỉ xử lý khi click vào vùng trống bên ngoài các dòng dữ liệu và control tương tác
+      const target = e.target as HTMLElement | null;
+      if (
+        !target ||
+        target.closest("tbody tr") ||
+        target.closest("button, input, select, textarea, a, [role='button']")
+      ) {
+        return;
+      }
+
+      // Giữ nguyên focus nếu đang ở trong grid
+      e.preventDefault();
+
+      const table = tableRef.current;
+      if (!table) return;
+      const activeEl = document.activeElement;
+      if (activeEl && table.contains(activeEl)) {
+        return;
+      }
+
+      // Nếu focus trước đó nằm ngoài grid (Header / body), khôi phục về ô cuối cùng hoặc dòng đang chọn
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      if (rows.length === 0) return;
+
+      const tryFocusInRow = (rowIdx: number, colIdx?: number): boolean => {
+        const row = rows[rowIdx];
+        if (!row) return false;
+        if (typeof colIdx === "number") {
+          const cell = row.children[colIdx];
+          const input = cell?.querySelector<HTMLInputElement>(
+            "input:not(:disabled)",
+          );
+          if (input) {
+            input.focus({ preventScroll: true });
+            return true;
+          }
+        }
+        const maVt = maVtInputRefs.current[rowIdx];
+        if (maVt && !maVt.disabled) {
+          maVt.focus({ preventScroll: true });
+          return true;
+        }
+        const anyInput = row.querySelector<HTMLInputElement>(
+          "input:not(:disabled)",
+        );
+        if (anyInput) {
+          anyInput.focus({ preventScroll: true });
+          return true;
+        }
+        return false;
+      };
+
+      const last = lastFocusedCellRef.current;
+      if (last && tryFocusInRow(last.rowIdx, last.colIdx)) {
+        return;
+      }
+      if (tryFocusInRow(currentActiveRow)) {
+        return;
+      }
+      tryFocusInRow(0);
+    },
+    [currentActiveRow],
+  );
+
   // ===== Biến thể FORM (ctbhd): đã bỏ cột Đvt bán; Disable Đvt & TK Có; TT cố định là "C" =====
   if (variant === "form") {
     return (
       <div className="w-full h-full flex flex-col bg-white overflow-hidden">
-        <div className="overflow-auto flex-1 table-sticky-header">
+        <div
+          className="overflow-auto flex-1 table-sticky-header"
+          onMouseDown={handleFormGridMouseDown}
+        >
           <table
             ref={tableRef}
+            onFocusCapture={handleFormTableFocusCapture}
             className="w-full text-left dense-table border-collapse text-[11.5px] xl-grid"
           >
             <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 font-semibold text-[11px] uppercase tracking-wide select-none border-b border-neutral-300">

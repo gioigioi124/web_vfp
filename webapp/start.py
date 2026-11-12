@@ -31,6 +31,13 @@ def main():
         print(f"[ERROR] Khong tim thay {vite_js}. Vui long kiem tra npm install.")
         sys.exit(1)
 
+    if is_port_ready("http://127.0.0.1:8000/"):
+        print("[ERROR] Cong 8000 da co tien trinh khac su dung. Vui long tat Backend cu truoc khi chay run.bat.")
+        sys.exit(1)
+    if is_port_ready("http://127.0.0.1:5173"):
+        print("[ERROR] Cong 5173 da co tien trinh khac su dung. Vui long tat Frontend cu truoc khi chay run.bat.")
+        sys.exit(1)
+
     print("[1/2] Khoi dong Backend FastAPI (Port 8000)...")
     backend_proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
@@ -48,8 +55,17 @@ def main():
 
     backend_ok = False
     frontend_ok = False
+    exit_code = 0
     for i in range(60):
         time.sleep(0.15)
+        if backend_proc.poll() is not None:
+            print(f"[CANH BAO] Backend da thoat som khi khoi dong (exit code {backend_proc.returncode})")
+            exit_code = 1
+            break
+        if frontend_proc.poll() is not None:
+            print(f"[CANH BAO] Frontend da thoat som khi khoi dong (exit code {frontend_proc.returncode})")
+            exit_code = 1
+            break
         if not backend_ok and is_port_ready("http://127.0.0.1:8000/"):
             backend_ok = True
             print("  [OK] Backend FastAPI da san sang: http://localhost:8000/docs")
@@ -59,28 +75,31 @@ def main():
         if backend_ok and frontend_ok:
             break
 
-    print()
-    print("=" * 65)
-    print("  HE THONG DA KHOI DONG THANH CONG!")
-    print("  - Frontend App:         http://localhost:5173")
-    print("  - Backend Swagger Docs: http://localhost:8000/docs")
-    print("  (Nhan Ctrl+C hoac dong cua so nay de tat ung dung)")
-    print("=" * 65)
-    print()
+    if exit_code == 0:
+        print()
+        print("=" * 65)
+        print("  HE THONG DA KHOI DONG THANH CONG!")
+        print("  - Frontend App:         http://localhost:5173")
+        print("  - Backend Swagger Docs: http://localhost:8000/docs")
+        print("  (Nhan Ctrl+C hoac dong cua so nay de tat ung dung)")
+        print("=" * 65)
+        print()
 
-    # Automatically open browser
-    try:
-        webbrowser.open("http://localhost:5173")
-    except Exception:
-        pass
+        # Automatically open browser
+        try:
+            webbrowser.open("http://localhost:5173")
+        except Exception:
+            pass
 
     try:
-        while True:
+        while exit_code == 0:
             if backend_proc.poll() is not None:
                 print(f"[CANH BAO] Backend da thoat (exit code {backend_proc.returncode})")
+                exit_code = 1
                 break
             if frontend_proc.poll() is not None:
                 print(f"[CANH BAO] Frontend da thoat (exit code {frontend_proc.returncode})")
+                exit_code = 1
                 break
             time.sleep(1)
     except KeyboardInterrupt:
@@ -96,6 +115,9 @@ def main():
                 except Exception:
                     pass
         print("Da tat toan bo he thong.")
+
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

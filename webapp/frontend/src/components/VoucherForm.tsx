@@ -1038,6 +1038,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   const readonlyField =
     "erp-input w-full font-mono text-neutral-800 bg-neutral-100 border-neutral-200 cursor-text select-text";
+  const isOverDebtLimit = !!debtInfo?.is_over_limit;
   const disabledLookupField =
     "erp-input w-full text-xs py-0.5 bg-neutral-100 text-neutral-700 border-neutral-200 cursor-text select-text";
 
@@ -1400,8 +1401,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                     maxResults={30}
                     dropdownMinWidth={680}
                     className={`font-mono font-bold uppercase ${
-                      maDtError
-                        ? "text-danger-700 border-danger-400 bg-danger-50"
+                      maDtError || isOverDebtLimit
+                        ? "erp-input-danger"
                         : "text-primary-800"
                     }`}
                   />
@@ -1409,9 +1410,12 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               ) : (
                 <div className="w-40 shrink-0">
                   <input
-                    className={disabledLookupField + " font-mono font-bold"}
+                    className={`${disabledLookupField} font-mono font-bold ${
+                      isOverDebtLimit ? "erp-input-danger" : ""
+                    }`}
                     value={maDt}
                     onFocus={(e) => e.currentTarget.select()}
+                    title={isOverDebtLimit ? debtInfo?.status_message : maDt}
                     readOnly
                   />
                 </div>
@@ -1420,7 +1424,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 {isEditable ? (
                   <input
                     ref={tenDtInputRef}
-                    className="erp-input w-full font-semibold text-neutral-800 text-xs py-0.5 bg-white border-neutral-300"
+                    className={`erp-input w-full font-semibold text-neutral-800 text-xs py-0.5 bg-white border-neutral-300 ${
+                      isOverDebtLimit ? "erp-input-danger" : ""
+                    }`}
                     value={tenDt || ""}
                     onChange={(e) => setTenDt(e.target.value)}
                     onFocus={(e) => e.currentTarget.select()}
@@ -1433,17 +1439,22 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                       }
                       handleHeaderArrowNav(e, 3);
                     }}
+                    title={
+                      isOverDebtLimit ? debtInfo?.status_message : tenDt || ""
+                    }
                     placeholder="Tên khách hàng"
                   />
                 ) : (
                   <input
-                    className={
-                      disabledLookupField + " font-semibold text-neutral-800"
-                    }
+                    className={`${disabledLookupField} font-semibold text-neutral-800 ${
+                      isOverDebtLimit ? "erp-input-danger" : ""
+                    }`}
                     value={tenDt || ""}
                     onFocus={(e) => e.currentTarget.select()}
                     readOnly
-                    title={tenDt || ""}
+                    title={
+                      isOverDebtLimit ? debtInfo?.status_message : tenDt || ""
+                    }
                     placeholder="Tên khách hàng"
                   />
                 )}

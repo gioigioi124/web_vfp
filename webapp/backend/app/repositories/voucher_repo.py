@@ -58,6 +58,7 @@ class VoucherRepository:
         tien_nt1: Optional[float] = None,
         tien_nt2: Optional[float] = None,
         filter_by_user: Optional[str] = None,
+        dien_giai: Optional[str] = None,
     ) -> Tuple[str, List[Any]]:
         """
         Dựng mệnh đề WHERE dùng lại được (alias `h` = CtBH) + danh sách params.
@@ -114,6 +115,9 @@ class VoucherRepository:
         if filter_by_user and filter_by_user.strip():
             where_clauses.append("h.UserName = ?")
             params.append(filter_by_user.strip())
+        if dien_giai and dien_giai.strip():
+            where_clauses.append("dbo.fn_TCVNToUnicode(h.Dien_Giai0) LIKE ?")
+            params.append(f"%{dien_giai.strip()}%")
 
         # Bộ lọc liên quan chi tiết (ma_kho, ma_vt). Alias `dv` để không đụng các query khác.
         detail_filters = []
@@ -155,6 +159,7 @@ class VoucherRepository:
         tien_nt1: Optional[float] = None,
         tien_nt2: Optional[float] = None,
         filter_by_user: Optional[str] = None,
+        dien_giai: Optional[str] = None,
         page: int = 1,
         page_size: int = 50
     ) -> VoucherListResponse:
@@ -183,6 +188,7 @@ class VoucherRepository:
             tien_nt1=tien_nt1,
             tien_nt2=tien_nt2,
             filter_by_user=filter_by_user,
+            dien_giai=dien_giai,
         )
 
         # 1. Total counts and summary totals
