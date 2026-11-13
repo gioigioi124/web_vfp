@@ -47,6 +47,8 @@ export function App() {
     isPrintOpen,
     setIsPrintOpen,
     printStts,
+    printInGia,
+    printCopies,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,
@@ -316,8 +318,8 @@ export function App() {
     }
   };
 
-  // Handler for F7 (Print marked vouchers or active voucher)
-  const handleActionPrint = () => {
+  // Handler for F7 / quick print (Print marked vouchers or active voucher)
+  const handleActionPrint = (options?: { inGia?: "1" | "0"; copies?: number }) => {
     const targets =
       marked.size > 0
         ? [
@@ -332,7 +334,7 @@ export function App() {
             ? [selectedStt]
             : [];
     if (targets.length > 0) {
-      handleOpenPrint(targets);
+      handleOpenPrint(targets, options);
       if (marked.size > 0) {
         setMarked(new Set());
       }
@@ -394,7 +396,21 @@ export function App() {
       onCtrlF3: () => showToast("Ctrl+F3 - Sửa mẫu in."),
       onF6: () => showToast("F6 - Nhập số IMEI."),
       // F7 = In chứng từ trực tiếp (nếu đã Space đánh dấu nhiều phiếu -> in toàn bộ phiếu đã chọn và bỏ chọn)
-      onF7: handleActionPrint,
+      onF7: () => handleActionPrint(),
+      // Alt+Numpad3 / Alt+Numpad4 = In không giá (3 / 4 bản copy) trên VoucherList
+      onAltNumpad3: () => {
+        if (!sttParam) handleActionPrint({ inGia: "0", copies: 3 });
+      },
+      onAltNumpad4: () => {
+        if (!sttParam) handleActionPrint({ inGia: "0", copies: 4 });
+      },
+      // Ctrl+Numpad3 / Ctrl+Numpad4 = In có giá (3 / 4 bản copy) trên VoucherList
+      onCtrlNumpad3: () => {
+        if (!sttParam) handleActionPrint({ inGia: "1", copies: 3 });
+      },
+      onCtrlNumpad4: () => {
+        if (!sttParam) handleActionPrint({ inGia: "1", copies: 4 });
+      },
       // Tắt dialog preview khi ấn Ctrl+F7 / Shift+F7 (không mở cửa sổ xem trước)
       onPreview: () => {},
       // F8 = Xóa (ctbhh Command3)
@@ -943,7 +959,8 @@ export function App() {
           if (sttParam) navToList();
         }}
         stts={printStts}
-        inGia={printPrice}
+        inGia={printInGia ?? printPrice}
+        copies={printCopies}
       />
     </>
   );

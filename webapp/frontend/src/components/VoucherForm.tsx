@@ -25,6 +25,7 @@ import {
 } from "../lib/catalogCache";
 import { calcLoai2Item, calcVoucherTotals } from "../lib/calc";
 import { isModalOpen, useModalLock } from "../lib/modalLock";
+import { PriceCalculatorModal } from "./PriceCalculatorModal";
 import {
   Printer,
   CreditCard,
@@ -36,6 +37,7 @@ import {
   Ban,
   AlertTriangle,
   RefreshCw,
+  Calculator,
 } from "lucide-react";
 
 interface VoucherFormProps {
@@ -241,6 +243,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   } | null>(null);
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
+  const [showPriceCalc, setShowPriceCalc] = useState<boolean>(false);
+  const beforeCalcFocusRef = useRef<HTMLElement | null>(null);
   useModalLock(!!debtDialog, debtDialogRef);
   useModalLock(showAccountPicker, accountPickerRef);
 
@@ -1036,6 +1040,58 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditable, activeRowIndex, items, maDt, ngayCt, soCt, totals]);
 
+  // Khóa hẳn phím F5 tải lại trang trong VoucherForm; khi đang thêm/sửa sẽ mở Máy tính đơn giá cho dòng đang chọn.
+  const handleOpenPriceCalc = useCallback(() => {
+    if (!isEditable || items.length === 0) return;
+    if (showPriceCalc || isModalOpen()) return;
+    beforeCalcFocusRef.current = document.activeElement as HTMLElement | null;
+    setShowPriceCalc(true);
+  }, [isEditable, items.length, showPriceCalc]);
+
+  useEffect(() => {
+    const handleF5Capture = (e: KeyboardEvent) => {
+      if (
+        e.key !== "F5" ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        e.shiftKey
+      ) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenPriceCalc();
+    };
+    window.addEventListener("keydown", handleF5Capture, true);
+    return () => window.removeEventListener("keydown", handleF5Capture, true);
+  }, [handleOpenPriceCalc]);
+
+  const handleClosePriceCalc = useCallback(() => {
+    setShowPriceCalc(false);
+    const prevEl = beforeCalcFocusRef.current;
+    beforeCalcFocusRef.current = null;
+    if (prevEl && document.contains(prevEl)) {
+      window.setTimeout(() => prevEl.focus(), 0);
+    }
+  }, []);
+
+  const handleApplyCalculatedPrice = (calculatedPrice: number) => {
+    const safeIdx = Math.max(0, Math.min(activeRowIndex, items.length - 1));
+    const targetRow = items[safeIdx];
+    beforeCalcFocusRef.current = null;
+    setShowPriceCalc(false);
+    if (targetRow) {
+      // Cột 10 trong DetailGrid (variant="form") là ô Đơn giá (gia_nt9)
+      detailGridRef.current?.scheduleFocusCell(safeIdx, 10);
+      handleItemChange(
+        safeIdx,
+        { ...targetRow, gia_nt9: calculatedPrice },
+        "GIA_NT9",
+      );
+    }
+  };
+
   const readonlyField =
     "erp-input w-full font-mono text-neutral-800 bg-neutral-100 border-neutral-200 cursor-text select-text";
   const isOverDebtLimit = !!debtInfo?.is_over_limit;
@@ -1771,6 +1827,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             Hủy bỏ
             <kbd className="ml-1.5 text-[10px]">Esc</kbd>
           </button>
+
+          {isEditable && (
+            <button
+              className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-primary-50 text-neutral-700 hover:text-primary-800 text-xs font-medium rounded border border-neutral-300 hover:border-primary-300 transition-all cursor-pointer"
+              type="button"
+              onClick={handleOpenPriceCalc}
+              title="Mở máy tính tính đơn giá cho dòng đang chọn (F5)"
+            >
+              <Calculator className="w-3.5 h-3.5 text-primary-700 mr-1.5" />
+              Tính giá
+              <kbd className="ml-1.5 text-[10px]">F5</kbd>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-neutral-600">
@@ -1920,6 +1989,32 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           </div>
         </div>
       )}
+
+      {/* Price Calculator Modal (F5) */}
+      <PriceCalculatorModal
+        isOpen={showPriceCalc}
+        rowNumber={
+          Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1))) +
+          1
+        }
+        itemCode={
+          items[
+            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
+          ]?.ma_vt
+        }
+        itemName={
+          items[
+            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
+          ]?.ten_vt
+        }
+        initialValue={Number(
+          items[
+            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
+          ]?.gia_nt9 ?? 0,
+        )}
+        onApply={handleApplyCalculatedPrice}
+        onClose={handleClosePriceCalc}
+      />
     </div>
   );
 };

@@ -20,6 +20,10 @@ export interface HotkeyHandlers {
   onCtrlHome?: () => void;
   onCtrlEnd?: () => void;
   onCtrlF?: () => void;
+  onAltNumpad3?: () => void;
+  onAltNumpad4?: () => void;
+  onCtrlNumpad3?: () => void;
+  onCtrlNumpad4?: () => void;
 }
 
 function isTextInput(el: Element | null): boolean {
@@ -133,6 +137,24 @@ export function useHotkeys(
         e.preventDefault();
         h.onCtrlM?.();
         return;
+      }
+
+      // Alt+Numpad3/4 và Ctrl+Numpad3/4 — in nhanh theo tùy chọn giá và số bản copy
+      if (!e.shiftKey && (e.code === "Numpad3" || e.code === "Numpad4")) {
+        if (e.altKey && !ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.code === "Numpad3") h.onAltNumpad3?.();
+          else h.onAltNumpad4?.();
+          return;
+        }
+        if (ctrl && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.code === "Numpad3") h.onCtrlNumpad3?.();
+          else h.onCtrlNumpad4?.();
+          return;
+        }
       }
 
       // 7. Các phím chức năng đơn (luôn chặn hành vi mặc định của trình duyệt)

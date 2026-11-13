@@ -74,6 +74,8 @@ export function useVouchers() {
   const [isPickupOpen, setIsPickupOpen] = useState<boolean>(false);
   const [isDebtOpen, setIsDebtOpen] = useState<boolean>(false);
   const [printStts, setPrintStts] = useState<string[]>([]);
+  const [printInGia, setPrintInGia] = useState<"1" | "0" | undefined>(undefined);
+  const [printCopies, setPrintCopies] = useState<number>(1);
   const [debtMaDt, setDebtMaDt] = useState<string>("");
 
   const applyListData = useCallback((data: any) => {
@@ -302,12 +304,19 @@ export function useVouchers() {
     fetchVouchers({ force: true });
   }, [fetchVouchers]);
 
-  const handleOpenPrint = (target: string | string[]) => {
+  const handleOpenPrint = (
+    target: string | string[],
+    options?: { inGia?: "1" | "0"; copies?: number },
+  ) => {
     const list = (Array.isArray(target) ? target : [target])
       .map((s) => (s || "").trim())
       .filter(Boolean);
     if (list.length === 0) return;
     setPrintStts(list);
+    setPrintInGia(options?.inGia);
+    setPrintCopies(
+      options?.copies && options.copies > 1 ? Math.floor(options.copies) : 1,
+    );
     setIsPrintOpen(true);
   };
 
@@ -340,6 +349,8 @@ export function useVouchers() {
     isPrintOpen,
     setIsPrintOpen,
     printStts,
+    printInGia,
+    printCopies,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,

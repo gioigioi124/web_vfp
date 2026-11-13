@@ -6,8 +6,10 @@ interface PrintPreviewProps {
   onClose: () => void;
   stt?: string;
   stts?: string[];
-  /** "1" = In giá bán, "0" = Không in giá (lấy từ thanh đáy VoucherList) */
+  /** "1" = In giá bán, "0" = Không in giá (lấy từ thanh đáy VoucherList hoặc phím tắt in nhanh) */
   inGia?: "1" | "0";
+  /** Số bản copy cần in cho mỗi phiếu (mặc định 1; Alt/Ctrl + Numpad3/4 dùng 3 hoặc 4) */
+  copies?: number;
 }
 
 /**
@@ -55,6 +57,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   stt,
   stts,
   inGia = "1",
+  copies = 1,
 }) => {
   const [printDocs, setPrintDocs] = useState<any[]>([]);
   const [loadedKey, setLoadedKey] = useState<string>("");
@@ -66,7 +69,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const targetStts =
     stts && stts.length > 0 ? stts : stt ? [stt] : [];
   const joinedStts = targetStts.join(",");
-  const requestKey = isOpen && joinedStts ? `${joinedStts}|${inGia}` : "";
+  const safeCopies = Math.max(1, Math.floor(copies || 1));
+  const requestKey =
+    isOpen && joinedStts ? `${joinedStts}|${inGia}|${safeCopies}` : "";
 
   useEffect(() => {
     if (!isOpen || targetStts.length === 0) {
@@ -77,7 +82,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     }
 
     let cancelled = false;
-    const targetKey = `${joinedStts}|${inGia}`;
+    const targetKey = `${joinedStts}|${inGia}|${safeCopies}`;
 
     const fetchPrintAll = async () => {
       try {
@@ -108,7 +113,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, joinedStts, inGia]);
+  }, [isOpen, joinedStts, inGia, safeCopies]);
 
   // Khi dữ liệu in đã nạp vào DOM, chờ toàn bộ ảnh logo tải xong rồi mở thẳng trang in (window.print),
   // lắng nghe afterprint để quay trở về màn hình danh sách ngay khi hoàn tất/đóng trang in.
@@ -194,7 +199,11 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     return null;
   }
 
-  const renderVoucherDoc = (printData: any, docIdx: number) => {
+  const renderVoucherDoc = (
+    printData: any,
+    renderIdx: number,
+    copySuffix: string,
+  ) => {
     const header = printData?.header || {};
     const company = printData?.company || {};
     const items = printData?.items || [];
@@ -293,8 +302,8 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
 
     return (
       <div
-        key={header.stt || docIdx}
-        className={docIdx > 0 ? "print-doc-page-break" : undefined}
+        key={`${header.stt || renderIdx}-${copySuffix}`}
+        className={renderIdx > 0 ? "print-doc-page-break" : undefined}
       >
         {/* Dùng 1 bảng thống nhất có thead lặp lại Page Header + Tiêu đề 9 cột khi qua trang */}
         <table
@@ -692,6 +701,13 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     );
   };
 
+  const expandedDocs = printDocs.flatMap((doc, docIdx) =>
+    Array.from({ length: safeCopies }, (_, copyIdx) => ({
+      doc,
+      keySuffix: `d${docIdx}-c${copyIdx}`,
+    })),
+  );
+
   return (
     <div
       ref={printAreaRef}
@@ -703,7 +719,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       }}
       aria-hidden="true"
     >
-      {printDocs.map((doc, idx) => renderVoucherDoc(doc, idx))}
+      {expandedDocs.map((entry, renderIdx) =>
+        renderVoucherDoc(entry.doc, renderIdx, entry.keySuffix),
+      )}
     </div>
   );
 };
