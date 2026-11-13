@@ -1208,13 +1208,26 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
               ) : (
                 items.map((it, idx) => {
                   const isActive = idx === currentActiveRow;
+                  const isManualRow = !(it.stt_px && it.stt_px.trim());
+                  const rowClassName =
+                    [
+                      isActive ? "xl-row-active" : "",
+                      isManualRow ? "xl-row-manual" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined;
 
                   if (editable) {
                     return (
                       <tr
                         key={it.stt0 || idx}
                         onClick={() => handleSelectRow(idx)}
-                        className={isActive ? "xl-row-active" : undefined}
+                        className={rowClassName}
+                        title={
+                          isManualRow
+                            ? "Dòng nhập trực tiếp (không lấy từ Chọn phiếu xuất)"
+                            : undefined
+                        }
                       >
                         {/* Số dòng (kiểu tiêu đề dòng Excel) */}
                         <td className="xl-rowhead">{idx + 1}</td>
@@ -1570,7 +1583,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                     <tr
                       key={it.stt0 || idx}
                       onClick={() => handleSelectRow(idx)}
-                      className={isActive ? "xl-row-active" : undefined}
+                      className={rowClassName}
+                      title={
+                        isManualRow
+                          ? "Dòng nhập trực tiếp (không lấy từ Chọn phiếu xuất)"
+                          : undefined
+                      }
                     >
                       <td className="xl-rowhead">{idx + 1}</td>
                       <td className="xl-cell">

@@ -250,6 +250,17 @@ kbd {
   font-weight: 700;
   border-color: #1e40af;
 }
+/* Dòng thêm thủ công trong VoucherForm (không lấy từ PickupDialog): border màu vàng để phân biệt */
+.xl-grid tbody tr.xl-row-manual td {
+  border-top: 2px solid #eab308 !important;
+  border-bottom: 2px solid #eab308 !important;
+}
+.xl-grid tbody tr.xl-row-manual td:first-child {
+  border-left: 3px solid #eab308 !important;
+}
+.xl-grid tbody tr.xl-row-manual td:last-child {
+  border-right: 2px solid #eab308 !important;
+}
 
 /* Input trong ô: phẳng hoàn toàn, lấp kín ô (không viền, không bo góc) */
 .xl-grid .xl-input,
