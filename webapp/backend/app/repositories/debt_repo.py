@@ -3,7 +3,13 @@ from typing import List, Optional
 from app.config import settings
 from app.database import get_db_cursor
 from app.utils.unicode import tcvn_to_unicode
-from app.schemas.debt import CustomerDebtSummary, DebtDetailResponse, DebtTransaction
+from app.schemas.debt import (
+    CustomerDebtSummary,
+    DebtDetailResponse,
+    DebtTransaction,
+    DebtLedgerEntry,
+    DebtLedgerResponse,
+)
 
 logger = logging.getLogger("app.repositories.debt")
 
@@ -266,6 +272,155 @@ class DebtRepository:
             da_thanh_toan=da_thanh_toan,
             con_lai=con_lai,
             transactions=transactions
+        )
+
+    def get_customer_debt_ledger(
+        self,
+        ma_dt: str = "",
+        ngay_bd: Optional[str] = None,
+        ngay_kt: Optional[str] = None,
+        tk: str = "131",
+    ) -> DebtLedgerResponse:
+        """
+        Sổ chi tiết công nợ phải thu theo khoảng ngày (Dư đầu kỳ, phát sinh trong kỳ, dư cuối kỳ).
+        100% READ-ONLY (SELECT only).
+        """
+        import calendar
+        from datetime import date
+
+        today = date.today()
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        start_str = (ngay_bd or "").strip()[:10] or f"{today.year:04d}-{today.month:02d}-01"
+        end_str = (ngay_kt or "").strip()[:10] or f"{today.year:04d}-{today.month:02d}-{last_day:02d}"
+        clean_ma_dt = (ma_dt or "").strip().upper()
+        tk_clean = (tk or "131").strip() or "131"
+        tk_param = f"{tk_clean}%"
+
+        if not clean_ma_dt:
+            return DebtLedgerResponse(
+                ma_dt="",
+                ten_dt="",
+                tk=tk_clean,
+                ngay_bd=start_str,
+                ngay_kt=end_str,
+            )
+
+        ten_dt = ""
+        try:
+            with get_db_cursor(self.sys_db) as cur:
+                cur.execute(
+                    f"SELECT TOP 1 {self.fn_uni}(Ten_Dt) FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt = ?",
+                    [clean_ma_dt],
+                )
+                r = cur.fetchone()
+                if r and r[0]:
+                    ten_dt = r[0].strip()
+        except Exception as e:
+            logger.warning(f"Error querying DmDt in debt ledger: {e}")
+
+        du_dau = 0.0
+        entries: List[DebtLedgerEntry] = []
+        tong_ps_tang = 0.0
+        tong_ps_giam = 0.0
+
+        opening_sql = f"""
+            SELECT
+                ISNULL((
+                    SELECT SUM(ISNULL(Du_No, 0) - ISNULL(Du_Co, 0))
+                    FROM {self.vp_db}.dbo.CdK WITH (NOLOCK)
+                    WHERE Tk LIKE ? AND Ma_Dt = ?
+                ), 0)
+                +
+                ISNULL((
+                    SELECT
+                        ISNULL(SUM(CASE WHEN Tk_No LIKE ? AND Ma_Dt_No = ? THEN Tien ELSE 0 END), 0)
+                      - ISNULL(SUM(CASE WHEN Tk_Co LIKE ? AND Ma_Dt_Co = ? THEN Tien ELSE 0 END), 0)
+                    FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                    WHERE Ngay_Ct < ?
+                      AND ((Tk_No LIKE ? AND Ma_Dt_No = ?) OR (Tk_Co LIKE ? AND Ma_Dt_Co = ?))
+                ), 0)
+        """
+
+        ledger_sql = f"""
+            SELECT
+                RTRIM(Stt) AS Stt,
+                RTRIM(Ma_Ct) AS Ma_Ct,
+                Ngay_Ct,
+                RTRIM(So_Ct) AS So_Ct,
+                {self.fn_uni}(Dien_Giai) AS Dien_Giai,
+                CASE WHEN Tk_No LIKE ? AND Ma_Dt_No = ? THEN ISNULL(Tien, 0) ELSE 0 END AS Ps_Tang,
+                CASE WHEN Tk_Co LIKE ? AND Ma_Dt_Co = ? THEN ISNULL(Tien, 0) ELSE 0 END AS Ps_Giam
+            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+            WHERE Ngay_Ct >= ? AND Ngay_Ct <= ?
+              AND ((Tk_No LIKE ? AND Ma_Dt_No = ?) OR (Tk_Co LIKE ? AND Ma_Dt_Co = ?))
+            ORDER BY Ngay_Ct ASC, So_Ct ASC, Stt ASC, Stt_Bt ASC
+        """
+
+        try:
+            with get_db_cursor(self.vp_db) as cur:
+                cur.execute(
+                    opening_sql,
+                    [
+                        tk_param, clean_ma_dt,
+                        tk_param, clean_ma_dt,
+                        tk_param, clean_ma_dt,
+                        start_str,
+                        tk_param, clean_ma_dt,
+                        tk_param, clean_ma_dt,
+                    ],
+                )
+                r_open = cur.fetchone()
+                if r_open:
+                    du_dau = float(r_open[0] or 0.0)
+
+                cur.execute(
+                    ledger_sql,
+                    [
+                        tk_param, clean_ma_dt,
+                        tk_param, clean_ma_dt,
+                        start_str, end_str,
+                        tk_param, clean_ma_dt,
+                        tk_param, clean_ma_dt,
+                    ],
+                )
+                for row in cur.fetchall():
+                    ps_tang = float(row[5] or 0.0)
+                    ps_giam = float(row[6] or 0.0)
+                    if ps_tang == 0 and ps_giam == 0:
+                        continue
+                    tong_ps_tang += ps_tang
+                    tong_ps_giam += ps_giam
+                    entries.append(
+                        DebtLedgerEntry(
+                            stt=(row[0] or "").strip(),
+                            ma_ct=(row[1] or "").strip(),
+                            ngay_ct=row[2].strftime("%Y-%m-%d") if row[2] else "",
+                            so_ct=(row[3] or "").strip(),
+                            dien_giai=(row[4] or "").strip(),
+                            ps_tang=ps_tang,
+                            ps_giam=ps_giam,
+                        )
+                    )
+        except Exception as e:
+            logger.warning(f"Error querying debt ledger ({clean_ma_dt}): {e}")
+
+        du_cuoi = du_dau + tong_ps_tang - tong_ps_giam
+
+        return DebtLedgerResponse(
+            ma_dt=clean_ma_dt,
+            ten_dt=ten_dt,
+            tk=tk_clean,
+            ngay_bd=start_str,
+            ngay_kt=end_str,
+            du_dau=du_dau,
+            du_dau_tang=du_dau if du_dau > 0 else 0.0,
+            du_dau_giam=-du_dau if du_dau < 0 else 0.0,
+            tong_ps_tang=tong_ps_tang,
+            tong_ps_giam=tong_ps_giam,
+            du_cuoi=du_cuoi,
+            du_cuoi_tang=du_cuoi if du_cuoi > 0 else 0.0,
+            du_cuoi_giam=-du_cuoi if du_cuoi < 0 else 0.0,
+            entries=entries,
         )
 
 debt_repository = DebtRepository()

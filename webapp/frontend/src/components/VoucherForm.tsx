@@ -1064,6 +1064,29 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       ) {
         e.preventDefault();
         handleSave(true);
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        !e.altKey &&
+        (e.key.toLowerCase() === "e" || e.code === "KeyE")
+      ) {
+        if (!onViewDebt) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const candidate = (maDtValueRef.current || maDt || "")
+          .trim()
+          .toUpperCase();
+        if (!candidate || maDtError) {
+          onViewDebt("");
+          return;
+        }
+        void (async () => {
+          await initCustomerIndex();
+          const valid = isCustomerIndexReady()
+            ? Boolean(getCustomer(candidate))
+            : Boolean(tenDt.trim());
+          onViewDebt(valid ? candidate : "");
+        })();
       } else if (e.key === "Escape") {
         e.preventDefault();
         onBack();
@@ -1111,7 +1134,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditable, isSuspended, isWarehouse, activeRowIndex, items, maDt, ngayCt, soCt, totals]);
+  }, [isEditable, isSuspended, isWarehouse, activeRowIndex, items, maDt, tenDt, maDtError, ngayCt, soCt, totals, onViewDebt]);
 
   // Khóa hẳn phím F5 tải lại trang trong VoucherForm; khi đang thêm/sửa sẽ mở Máy tính đơn giá cho dòng đang chọn.
   const handleOpenPriceCalc = useCallback(() => {

@@ -1,0 +1,410 @@
+<!DOCTYPE html><html lang="vi"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Sổ Chi Tiết Công Nợ Phải Thu - Tra Cứu Công Nợ</title>
+<!-- Tailwind CSS v3 with Forms & Container Queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Font Awesome CDN for ERP Icons -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<!-- Custom Font & Number Tabular Styling -->
+<style data-purpose="typography">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .font-mono-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+<!-- Table and Scrollbar Styling -->
+<style data-purpose="table-layout">
+    /* Custom scrollbar for ERP tables */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Accounting Grid Line Exact Styles */
+    .erp-table th, .erp-table td {
+      border-right: 1px solid #e2e8f0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .erp-table tr:hover td {
+      background-color: #f8fafc;
+    }
+    .erp-table tr.active-row td {
+      background-color: #e0f2fe !important;
+    }
+  </style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" data-snapdom="injected-import"></head>
+<body class="bg-slate-900 text-slate-800 antialiased min-h-screen flex items-center justify-center p-2 sm:p-4 overflow-x-hidden selection:bg-blue-600 selection:text-white">
+<!-- BEGIN: ERPBackgroundSimulation -->
+<!-- Simulated ERP dashboard background layer behind dialog -->
+<div aria-hidden="true" class="fixed inset-0 opacity-20 pointer-events-none flex flex-col z-0">
+<div class="h-12 bg-slate-800 border-b border-slate-700 flex items-center px-6 text-slate-400 text-sm">
+<span class="font-semibold text-white mr-6"><i class="fa-solid fa-cube text-blue-500 mr-2"></i>Ledger &amp; Vector ERP v12.4</span>
+<span class="mr-4">Hệ thống</span>
+<span class="mr-4">Kế toán tổng hợp</span>
+<span class="mr-4 font-medium text-white border-b-2 border-blue-500 pb-3 mt-3">Bán hàng &amp; Công nợ</span>
+<span>Báo cáo tài chính</span>
+</div>
+<div class="flex-1 p-6 grid grid-cols-4 gap-4">
+<div class="bg-slate-800/50 rounded-lg border border-slate-700 p-4"></div>
+<div class="bg-slate-800/50 rounded-lg border border-slate-700 p-4 col-span-3"></div>
+<div class="bg-slate-800/50 rounded-lg border border-slate-700 p-4 col-span-4 h-96"></div>
+</div>
+</div>
+<!-- END: ERPBackgroundSimulation -->
+<!-- BEGIN: MainModalContainer -->
+<main class="relative z-10 w-full max-w-[1360px] bg-white rounded-lg shadow-2xl border border-slate-300 flex flex-col max-h-[96vh] overflow-hidden" data-purpose="debt-inquiry-modal">
+<!-- BEGIN: ModalHeader -->
+<header class="bg-[#1e3a8a] text-white px-5 py-3 flex items-center justify-between shadow-sm select-none border-b border-blue-950">
+<!-- Title & Object Info -->
+<div class="flex items-center space-x-3">
+<div class="w-8 h-8 rounded bg-blue-800 border border-blue-600 flex items-center justify-center text-blue-200">
+<i class="fa-solid fa-book-bookmark text-sm"></i>
+</div>
+<div>
+<div class="flex items-center space-x-2">
+<h1 class="text-base font-bold tracking-wide uppercase">SỔ CHI TIẾT CÔNG NỢ PHẢI THU</h1>
+<span class="bg-blue-900 text-blue-200 text-xs px-2 py-0.5 rounded font-mono font-medium border border-blue-700">TK 131</span>
+
+</div>
+
+</div>
+</div>
+<!-- Window Actions / Shortcuts -->
+<div class="flex items-center space-x-1 sm:space-x-2">
+<button class="p-1.5 text-blue-200 hover:text-white hover:bg-blue-800 rounded transition" title="Thu nhỏ" type="button">
+<i class="fa-solid fa-minus text-xs w-4 h-4 flex items-center justify-center"></i>
+</button>
+<button class="p-1.5 text-blue-200 hover:text-white hover:bg-blue-800 rounded transition" title="Phóng to" type="button">
+<i class="fa-regular fa-square text-xs w-4 h-4 flex items-center justify-center"></i>
+</button>
+<button class="p-1.5 text-blue-200 hover:bg-red-600 hover:text-white rounded transition ml-1" title="Đóng [Esc]" type="button">
+<i class="fa-solid fa-xmark text-sm w-4 h-4 flex items-center justify-center"></i>
+</button>
+</div>
+</header>
+<!-- END: ModalHeader -->
+<!-- BEGIN: FilterToolBar -->
+<section class="bg-slate-50 border-b border-slate-200 px-5 py-3 text-xs" data-purpose="query-filter-bar">
+<div class="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
+<!-- Search Criteria Inputs -->
+<div class="flex flex-wrap items-center gap-3">
+<!-- Date Range: From Date -->
+<div class="flex items-center space-x-1.5">
+<label class="font-medium text-slate-700 whitespace-nowrap" for="filter-from-date">Từ ngày:</label>
+<div class="relative">
+<input class="w-28 h-8 text-xs border-slate-300 rounded px-2.5 py-1 focus:ring-1 focus:ring-blue-800 focus:border-blue-800 font-mono-num font-medium text-slate-800 bg-white" id="filter-from-date" type="text" value="01/11/2026">
+<i class="fa-regular fa-calendar absolute right-2.5 top-2 text-slate-400 pointer-events-none"></i>
+</div>
+</div>
+<!-- Date Range: To Date -->
+<div class="flex items-center space-x-1.5">
+<label class="font-medium text-slate-700 whitespace-nowrap" for="filter-to-date">Đến ngày:</label>
+<div class="relative">
+<input class="w-28 h-8 text-xs border-slate-300 rounded px-2.5 py-1 focus:ring-1 focus:ring-blue-800 focus:border-blue-800 font-mono-num font-medium text-slate-800 bg-white" id="filter-to-date" type="text" value="30/11/2026">
+<i class="fa-regular fa-calendar absolute right-2.5 top-2 text-slate-400 pointer-events-none"></i>
+</div>
+</div>
+<!-- Object Code (HN5) & Name -->
+<div class="flex items-center space-x-1.5">
+<label class="font-medium text-slate-700 whitespace-nowrap" for="customer-code">Mã ĐT:</label>
+<div class="relative flex items-center">
+<input class="w-24 h-8 uppercase font-bold text-xs border-slate-300 rounded-l px-2.5 py-1 focus:ring-1 focus:ring-blue-800 focus:border-blue-800 bg-white text-blue-900" id="customer-code" type="text" value="HN5">
+<button class="h-8 px-2 bg-slate-200 hover:bg-slate-300 border-y border-r border-slate-300 text-slate-600 rounded-r flex items-center justify-center" title="Tìm đối tượng [F4]" type="button">
+<i class="fa-solid fa-magnifying-glass text-xs"></i>
+</button>
+</div>
+<!-- Customer Name Display -->
+<input class="h-8 w-44 sm:w-56 text-xs bg-slate-100 border border-slate-300 rounded px-2.5 py-1 text-slate-700 font-medium truncate select-all cursor-default" readonly="" type="text" value="Chị Phương - Đống Đa">
+</div>
+</div>
+<!-- Action Buttons Bar -->
+<div class="flex items-center space-x-2">
+<!-- Button: Filter / Search -->
+<button class="h-8 px-3.5 bg-[#1e3a8a] hover:bg-blue-950 text-white rounded text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95" type="button">
+<i class="fa-solid fa-filter text-xs"></i>
+<span>Tìm kiếm</span>
+<span class="text-[10px] bg-blue-950/70 text-blue-200 px-1 py-0.2 rounded font-normal font-mono ml-0.5">Enter</span>
+</button>
+<!-- Button: Print -->
+
+<!-- Button: Export Excel -->
+<button class="h-8 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition active:scale-95" type="button">
+<i class="fa-regular fa-file-excel"></i>
+<span>Xuất Excel</span>
+<span class="text-[10px] bg-emerald-900/60 px-1 py-0.2 rounded font-mono font-normal">Ctrl+E</span>
+</button>
+<!-- Button: Refresh -->
+<button class="h-8 px-2.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded text-xs font-medium flex items-center justify-center shadow-sm transition" title="Làm mới [F5]" type="button">
+<i class="fa-solid fa-rotate-right text-xs"></i>
+</button>
+</div>
+</div>
+</section>
+<!-- END: FilterToolBar -->
+<!-- BEGIN: DataTableSection -->
+<section class="flex-1 overflow-auto bg-white relative" data-purpose="ledger-grid-container">
+<table class="w-full erp-table text-left border-collapse text-xs select-text">
+<!-- Table Column Headers Matching IMAGE_2 Exactly -->
+<thead class="sticky top-0 bg-[#e2e8f0] text-slate-900 font-semibold z-10 shadow-[0_1px_2px_rgba(0,0,0,0.06)]">
+<tr class="divide-x divide-slate-300 h-8 text-[11px] uppercase tracking-wider">
+<th class="w-14 px-3 py-1.5 text-center font-bold text-slate-800">Mã CT</th>
+<th class="w-28 px-3 py-1.5 text-center font-bold text-slate-800">Ngày</th>
+<th class="w-28 px-3 py-1.5 text-left font-bold text-slate-800">Số phiếu</th>
+<th class="px-3 py-1.5 text-left font-bold text-slate-800 min-w-[320px]">Diễn giải</th>
+<th class="w-36 px-3 py-1.5 text-right font-bold text-slate-800">Ps tăng</th>
+<th class="w-36 px-3 py-1.5 text-right font-bold text-slate-800">Ps giảm</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-200">
+<!-- DÒNG ĐẶC BIỆT: Dư đầu kỳ (Nền xanh nổi bật y hệt trong ảnh) -->
+<tr class="bg-[#3b82f6] text-white font-bold tracking-wide" style="background-color: #2563eb;">
+<td class="px-3 py-1.5 text-center border-blue-400"></td>
+<td class="px-3 py-1.5 text-center border-blue-400"></td>
+<td class="px-3 py-1.5 text-left border-blue-400"></td>
+<td class="px-3 py-1.5 font-bold border-blue-400">Dư đầu kỳ</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-bold text-white border-blue-400">244 358 800</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-bold text-white border-blue-400"></td>
+</tr>
+<!-- DÒNG 1: X1 | 02/11/2026 | HD0024 | mua hàng | 7 209 004 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">02/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0024</td>
+<td class="px-3 py-1.5 text-slate-800">mua hàng</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">7 209 004</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 2: X1 | 02/11/2026 | HD0180 | HN5 Chị Phương - Đống Đa | 1 314 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">02/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0180</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">1 314 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 3: X1 | 02/11/2026 | HD0188 | HN5 Chị Phương - Đống Đa | 4 846 003 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">02/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0188</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">4 846 003</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 4: X1 | 03/11/2026 | HD0321 | 15C 45492: HN5 Chị Phương - Đống Đa => lào cai | 2 760 000 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">03/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0321</td>
+<td class="px-3 py-1.5 text-slate-800">15C 45492: HN5 Chị Phương - Đống Đa =&gt; lào cai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">2 760 000</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 5: X1 | 03/11/2026 | HD0369 | 29H 27727: HN5 Chị Phương - Đống Đa => minh khai | 1 782 001 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">03/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0369</td>
+<td class="px-3 py-1.5 text-slate-800">29H 27727: HN5 Chị Phương - Đống Đa =&gt; minh khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">1 782 001</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 6: X1 | 04/11/2026 | HD0533 | HN5 Chị Phương - Đống Đa | 3 284 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">04/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0533</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">3 284 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 7: X1 | 05/11/2026 | HD0665 | chuyển Minh Khai / HN5 Chị Phương - Đống Đa | 1 732 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">05/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0665</td>
+<td class="px-3 py-1.5 text-slate-800">chuyển Minh Khai / HN5 Chị Phương - Đống Đa</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">1 732 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 8: X1 | 06/11/2026 | HD0804 | HN5 Chị Phương - Đống Đa => minh khai | 6 860 008 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">06/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0804</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa =&gt; minh khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">6 860 008</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 9: X1 | 07/11/2026 | HD0971 | HN5 Chị Phương - Đống Đa | 3 659 004 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">07/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0971</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">3 659 004</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 10: X1 | 07/11/2026 | HD0947 | HN5 Chị Phương - Đống Đa => minh khai | 1 282 001 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">07/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD0947</td>
+<td class="px-3 py-1.5 text-slate-800">HN5 Chị Phương - Đống Đa =&gt; minh khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">1 282 001</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 11: C3 | 08/11/2026 | 00190 | Ecopillo | Ps giảm: 100 000 000 (DÒNG THU TIỀN) -->
+<tr class="bg-amber-50/50 hover:bg-amber-100/50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-bold text-amber-700">C3</td>
+<td class="px-3 py-1.5 text-center font-mono-num font-medium text-slate-700">08/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-emerald-700 font-semibold hover:underline cursor-pointer">00190</td>
+<td class="px-3 py-1.5 font-medium text-slate-900">Ecopillo</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-400">-</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-bold text-emerald-700">100 000 000</td>
+</tr>
+<!-- DÒNG 12: X1 | 09/11/2026 | HD1022 | mua hàng | 4 174 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">09/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1022</td>
+<td class="px-3 py-1.5 text-slate-800">mua hàng</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">4 174 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 13: X1 | 09/11/2026 | HD1099 | mua hàng | 1 998 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">09/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1099</td>
+<td class="px-3 py-1.5 text-slate-800">mua hàng</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">1 998 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 14: X1 | 10/11/2026 | HD1247 | mua hàng | 3 126 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">10/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1247</td>
+<td class="px-3 py-1.5 text-slate-800">mua hàng</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">3 126 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 15: X1 | 11/11/2026 | HD1317 | 15H 03226: 81 minh khai | 2 436 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">11/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1317</td>
+<td class="px-3 py-1.5 text-slate-800">15H 03226: 81 minh khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">2 436 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 16: X1 | 11/11/2026 | HD1365 | 29H 27727 | 13 966 010 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">11/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1365</td>
+<td class="px-3 py-1.5 text-slate-800">29H 27727</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">13 966 010</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 17: X1 | 11/11/2026 | HD1368 | chuyển nghĩa trụ, văn giang hưng yên | 2 644 002 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">11/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1368</td>
+<td class="px-3 py-1.5 text-slate-800">chuyển nghĩa trụ, văn giang hưng yên</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">2 644 002</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 18: X1 | 11/11/2026 | HD1424 | chuyen Minh Khai | 928 000 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">11/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1424</td>
+<td class="px-3 py-1.5 text-slate-800">chuyen Minh Khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">928 000</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG 19: X1 | 12/11/2026 | HD1485 | 29H 81313: minh khai | 9 983 007 -->
+<tr class="hover:bg-slate-50 transition-colors">
+<td class="px-3 py-1.5 text-center font-mono font-medium text-slate-600">X1</td>
+<td class="px-3 py-1.5 text-center font-mono-num text-slate-700">12/11/2026</td>
+<td class="px-3 py-1.5 font-mono text-blue-700 font-medium hover:underline cursor-pointer">HD1485</td>
+<td class="px-3 py-1.5 text-slate-800">29H 81313: minh khai</td>
+<td class="px-3 py-1.5 text-right font-mono-num font-medium text-slate-900">9 983 007</td>
+<td class="px-3 py-1.5 text-right font-mono-num text-slate-700"></td>
+</tr>
+<!-- DÒNG ĐẶC BIỆT: Phát sinh trong kỳ -->
+<tr class="bg-slate-100 font-bold border-t-2 border-slate-400">
+<td class="px-3 py-2 text-center"></td>
+<td class="px-3 py-2 text-center"></td>
+<td class="px-3 py-2"></td>
+<td class="px-3 py-2 text-blue-900 uppercase font-bold text-xs">Phát sinh trong kỳ</td>
+<td class="px-3 py-2 text-right font-mono-num font-bold text-blue-900 text-xs">73 983 054</td>
+<td class="px-3 py-2 text-right font-mono-num font-bold text-emerald-800 text-xs">100 000 000</td>
+</tr>
+<!-- DÒNG ĐẶC BIỆT: Dư cuối kỳ -->
+<tr class="bg-blue-50/80 font-bold border-b-2 border-blue-900">
+<td class="px-3 py-2 text-center"></td>
+<td class="px-3 py-2 text-center"></td>
+<td class="px-3 py-2"></td>
+<td class="px-3 py-2 text-blue-950 uppercase font-bold text-xs tracking-wide">Dư cuối kỳ</td>
+<td class="px-3 py-2 text-right font-mono-num font-extrabold text-[#1e3a8a] text-sm">218 341 854</td>
+<td class="px-3 py-2 text-right font-mono-num font-bold text-slate-400">0</td>
+</tr>
+</tbody>
+</table>
+</section>
+<!-- END: DataTableSection -->
+<!-- BEGIN: QuickSummaryAndStatusBar -->
+
+<!-- END: QuickSummaryAndStatusBar -->
+</main>
+<!-- END: MainModalContainer -->
+<!-- BEGIN: InteractiveScripts -->
+<script data-purpose="row-selection-and-shortcuts">
+    // Interactive row selection highlight
+    document.addEventListener('DOMContentLoaded', () => {
+      const table = document.querySelector('.erp-table');
+      if (!table) return;
+
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+        row.addEventListener('click', () => {
+          rows.forEach(r => r.classList.remove('active-row'));
+          // Only add highlight if not the special balance rows
+          if (!row.classList.contains('bg-[#3b82f6]') && !row.classList.contains('border-t-2')) {
+            row.classList.add('active-row');
+          }
+        });
+      });
+
+      // Quick ESC hotkey feedback
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          console.log('Phím [Esc] được bấm: Đóng modal sổ công nợ.');
+        }
+      });
+    });
+  </script>
+<!-- END: InteractiveScripts -->
+
+
+</body></html>

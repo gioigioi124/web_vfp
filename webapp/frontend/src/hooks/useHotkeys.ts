@@ -24,6 +24,7 @@ export interface HotkeyHandlers {
   onAltNumpad4?: () => void;
   onCtrlNumpad3?: () => void;
   onCtrlNumpad4?: () => void;
+  onCtrlShiftE?: () => void;
 }
 
 function isTextInput(el: Element | null): boolean {
@@ -71,6 +72,18 @@ export function useHotkeys(
       const key = e.key;
 
       // 1. Ctrl+Home / Ctrl+End — điều hướng danh sách
+      if (
+        ctrl &&
+        e.shiftKey &&
+        !e.altKey &&
+        (key.toLowerCase() === "e" || e.code === "KeyE")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        h.onCtrlShiftE?.();
+        return;
+      }
+
       if (ctrl && key === "Home") {
         e.preventDefault();
         h.onCtrlHome?.();
