@@ -32,7 +32,8 @@ class VoucherService:
         filter_by_user: Optional[str] = None,
         dien_giai: Optional[str] = None,
         page: int = 1,
-        page_size: int = 50
+        page_size: int = 50,
+        db_mode: Optional[str] = "sales",
     ) -> VoucherListResponse:
         return self.repo.list_vouchers(
             ma_ct=ma_ct,
@@ -54,37 +55,57 @@ class VoucherService:
             filter_by_user=filter_by_user,
             dien_giai=dien_giai,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            db_mode=db_mode,
         )
 
-    def get_voucher(self, stt: str) -> Optional[VoucherDetailResponse]:
-        return self.repo.get_voucher_detail(stt)
+    def get_voucher(self, stt: str, db_mode: Optional[str] = "sales") -> Optional[VoucherDetailResponse]:
+        return self.repo.get_voucher_detail(stt, db_mode=db_mode)
 
-    def create_voucher(self, data: VoucherCreateRequest, user_name: str = "KTCN3") -> VoucherSaveResponse:
+    def create_voucher(
+        self, data: VoucherCreateRequest, user_name: str = "KTCN3", db_mode: Optional[str] = "sales"
+    ) -> VoucherSaveResponse:
         """
-        Create a new sales voucher (mode 'M') on VP_2014 with ACID transaction.
+        Create a new voucher (mode 'M') on VP_2014 or KH_2014 with ACID transaction.
         """
-        return self.repo.save_voucher(data, mode="M", user_name=user_name)
+        return self.repo.save_voucher(data, mode="M", user_name=user_name, db_mode=db_mode)
 
-    def update_voucher(self, stt: str, data: VoucherUpdateRequest, user_name: str = "KTCN3") -> VoucherSaveResponse:
+    def update_voucher(
+        self, stt: str, data: VoucherUpdateRequest, user_name: str = "KTCN3", db_mode: Optional[str] = "sales"
+    ) -> VoucherSaveResponse:
         """
-        Update an existing sales voucher (mode 'S') on VP_2014 with ACID transaction.
+        Update an existing voucher (mode 'S') on VP_2014 or KH_2014 with ACID transaction.
         """
-        return self.repo.save_voucher(data, mode="S", stt_override=stt, user_name=user_name)
+        return self.repo.save_voucher(data, mode="S", stt_override=stt, user_name=user_name, db_mode=db_mode)
 
-    def delete_voucher(self, stt: str, user_name: str = "KTCN3") -> VoucherDeleteResponse:
+    def delete_voucher(
+        self, stt: str, user_name: str = "KTCN3", db_mode: Optional[str] = "sales"
+    ) -> VoucherDeleteResponse:
         """
-        Delete an existing voucher from VP_2014 via CtBH_Delete with ACID transaction.
+        Delete an existing voucher from VP_2014 or KH_2014 via CtBH_Delete with ACID transaction.
         """
-        return self.repo.delete_voucher(stt=stt, user_name=user_name)
+        return self.repo.delete_voucher(stt=stt, user_name=user_name, db_mode=db_mode)
 
-    def get_next_number(self, ma_dvcs: str = "S1", ma_ct: str = "X1", ngay_ct: Optional[str] = None) -> str:
+    def get_next_number(
+        self,
+        ma_dvcs: str = "S1",
+        ma_ct: str = "X1",
+        ngay_ct: Optional[str] = None,
+        db_mode: Optional[str] = "sales",
+        prefix_so_ct: Optional[str] = None,
+    ) -> str:
         """
-        Get suggested next voucher number (e.g. HD1000 -> HD1001).
+        Get suggested next voucher number (max in ngay_ct month + 1, e.g. HD1903 -> HD1904 or K01/BH670 -> K01/BH671).
         """
-        return self.repo.get_next_voucher_number(ma_dvcs=ma_dvcs, ma_ct=ma_ct, ngay_ct=ngay_ct)
+        return self.repo.get_next_voucher_number(
+            ma_dvcs=ma_dvcs,
+            ma_ct=ma_ct,
+            ngay_ct=ngay_ct,
+            db_mode=db_mode,
+            prefix_so_ct=prefix_so_ct,
+        )
 
-    def check_number(self, req: CheckNumberRequest) -> CheckNumberResponse:
+    def check_number(self, req: CheckNumberRequest, db_mode: Optional[str] = "sales") -> CheckNumberResponse:
         """
         Check duplicate voucher number and auto-increment if duplicate.
         """
@@ -94,7 +115,8 @@ class VoucherService:
             stt=req.stt or "",
             ma_ct=req.ma_ct or "X1",
             ngay_ct=req.ngay_ct,
-            so_ct=req.so_ct
+            so_ct=req.so_ct,
+            db_mode=db_mode,
         )
         msg = "Số chứng từ hợp lệ." if not is_dup else f"Số chứng từ đã trùng, tự động tăng thành {valid_so_ct}."
         return CheckNumberResponse(is_duplicate=is_dup, valid_so_ct=valid_so_ct, message=msg)

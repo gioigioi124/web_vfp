@@ -14,48 +14,125 @@ class DebtRepository:
         # fn_TCVNToUnicode is defined in VP_2014; qualify it so calls work from any connection.
         self.fn_uni = f"{self.vp_db}.dbo.fn_TCVNToUnicode"
 
-    def get_customer_debt_summary(self, ma_dt: str, tk: str = "131") -> CustomerDebtSummary:
+    def _query_customer_balance(
+        self, ma_dt: str, tk: str, today_str: str, exclude_stt: str = ""
+    ) -> tuple[float, float, float, float, float, str]:
+        """
+        Query customer (du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, ten_dt) up to today_str,
+        optionally excluding voucher `exclude_stt`.
+        """
+        clean_stt = (exclude_stt or "").strip()
+        stt_filter = " AND RTRIM(Stt) <> ?" if clean_stt else ""
+        tk_param = f"{tk}%"
+
+        debit_sql = f"""
+            SELECT
+                ISNULL(SUM(Tien), 0)    AS ps_no,
+                ISNULL(SUM(Tien_Nt), 0) AS ps_no_nt
+            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+            WHERE Tk_No LIKE ? AND Ma_Dt_No = ? AND Ngay_Ct <= ?{stt_filter}
+        """
+        credit_sql = f"""
+            SELECT
+                ISNULL(SUM(Tien), 0)    AS ps_co,
+                ISNULL(SUM(Tien_Nt), 0) AS ps_co_nt
+            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+            WHERE Tk_Co LIKE ? AND Ma_Dt_Co = ? AND Ngay_Ct <= ?{stt_filter}
+        """
+
+        ps_no = 0.0
+        ps_co = 0.0
+        ps_no_nt = 0.0
+        ps_co_nt = 0.0
+        du_cuoi = 0.0
+        sp_ten_dt = ""
+        sp_success = False
+
+        # Try calling standard SP GL_Alert_ClosingAccount4Customer (realtime balance at current date).
+        # NOTE: Mọi EXEC SP PHẢI có SET NOCOUNT ON; nếu không pyodbc sẽ ném
+        # "No results. Previous SQL was not a query" và rơi vào nhánh fallback sai.
+        try:
+            with get_db_cursor(self.vp_db) as cur:
+                sp_sql = f"""
+                    SET NOCOUNT ON;
+                    DECLARE @p_Ten_Tk nvarchar(64), @p_Ten_Tk_E nvarchar(64), @p_Ten_Dt nvarchar(64), @p_Du_No numeric(18,2), @p_Du_Co numeric(18,2);
+                    EXEC {self.vp_db}.dbo.GL_Alert_ClosingAccount4Customer
+                        @p_Ma_Dvcs='S1',
+                        @p_Stt=?,
+                        @p_Ngay_Ct=?,
+                        @p_Tk=?,
+                        @p_Ten_Tk=@p_Ten_Tk OUTPUT,
+                        @p_Ten_Tk_E=@p_Ten_Tk_E OUTPUT,
+                        @p_Ma_Dt=?,
+                        @p_Ten_Dt=@p_Ten_Dt OUTPUT,
+                        @p_Du_No=@p_Du_No OUTPUT,
+                        @p_Du_Co=@p_Du_Co OUTPUT;
+                    SELECT @p_Du_No AS Du_No, @p_Du_Co AS Du_Co, @p_Ten_Dt AS Ten_Dt;
+                """
+                cur.execute(sp_sql, [clean_stt, today_str, tk or "131", ma_dt])
+                row = cur.fetchone()
+                if row:
+                    du_no = float(row[0] or 0.0)
+                    du_co = float(row[1] or 0.0)
+                    du_cuoi = du_no - du_co
+                    ps_no = du_no
+                    ps_co = du_co
+                    if row[2]:
+                        sp_ten_dt = (row[2] or "").strip()
+                    sp_success = True
+        except Exception as e:
+            logger.warning(f"Error calling GL_Alert_ClosingAccount4Customer: {e}")
+
+        if not sp_success:
+            # Fallback: cộng sổ cái TK 131 ĐẾN NGÀY HIỆN TẠI (không lấy toàn bộ lịch sử).
+            try:
+                with get_db_cursor(self.vp_db) as cur:
+                    socai_params = [tk_param, ma_dt, today_str]
+                    if clean_stt:
+                        socai_params.append(clean_stt)
+                    cur.execute(debit_sql, socai_params)
+                    r = cur.fetchone()
+                    if r:
+                        ps_no = float(r[0] or 0.0)
+                        ps_no_nt = float(r[1] or 0.0)
+
+                    cur.execute(credit_sql, socai_params)
+                    r = cur.fetchone()
+                    if r:
+                        ps_co = float(r[0] or 0.0)
+                        ps_co_nt = float(r[1] or 0.0)
+                du_cuoi = ps_no - ps_co
+            except Exception as e:
+                logger.warning(f"Error querying SoCai for balance: {e}")
+                du_cuoi = 0.0
+
+        return du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt
+
+    def get_customer_debt_summary(self, ma_dt: str, tk: str = "131", stt: str = "") -> CustomerDebtSummary:
         """
         Query customer realtime debt and credit limit according to Fix #1, #2, #3.
+        `du_cuoi` always reflects the current balance up to today; when `stt` is passed
+        (edit mode), `du_cuoi_kiem_tra` / `is_over_limit` / `is_near_limit` exclude `stt`.
         100% READ-ONLY (SELECT only).
-
-        NOTE: dbo.SoCai stores Dr/Cr legs as Tk_No/Ma_Dt_No and Tk_Co/Ma_Dt_Co
-        with the VND amount in [Tien] and the foreign amount in [Tien_Nt].
-        There is NO Ps_No/Ps_Co column in SoCai (that belongs to CdCt).
         """
+        import datetime
+
+        ma_dt = (ma_dt or "").strip()
+        if not ma_dt:
+            return CustomerDebtSummary(ma_dt="")
+
+        clean_stt = (stt or "").strip()
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+
         limit_sql = f"""
             SELECT {self.fn_uni}(Ten_Dt) AS Ten_Dt, ISNULL(Gioi_Han, 0) AS Gioi_Han, ISNULL(Toi_Han, 0) AS Toi_Han
             FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK)
             WHERE Ma_Dt = ?
         """
 
-        # Debit leg (TK 131 nợ): Tk_No LIKE '131%' against this customer, đến ngày hiện tại
-        debit_sql = f"""
-            SELECT
-                ISNULL(SUM(Tien), 0)    AS ps_no,
-                ISNULL(SUM(Tien_Nt), 0) AS ps_no_nt
-            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
-            WHERE Tk_No LIKE ? AND Ma_Dt_No = ? AND Ngay_Ct <= ?
-        """
-
-        # Credit leg (TK 131 có): Tk_Co LIKE '131%' against this customer, đến ngày hiện tại
-        credit_sql = f"""
-            SELECT
-                ISNULL(SUM(Tien), 0)    AS ps_co,
-                ISNULL(SUM(Tien_Nt), 0) AS ps_co_nt
-            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
-            WHERE Tk_Co LIKE ? AND Ma_Dt_Co = ? AND Ngay_Ct <= ?
-        """
-
         ten_dt = ""
         gioi_han = 0.0
         toi_han = 0.0
-        ps_no = 0.0
-        ps_co = 0.0
-        ps_no_nt = 0.0
-        ps_co_nt = 0.0
-
-        tk_param = f"{tk}%"
 
         try:
             with get_db_cursor(self.sys_db) as cur:
@@ -68,76 +145,29 @@ class DebtRepository:
         except Exception as e:
             logger.warning(f"Error querying DmDt for debt limit: {e}")
 
-        # Try calling standard SP GL_Alert_ClosingAccount4Customer (realtime balance at current date).
-        # NOTE: Mọi EXEC SP PHẢI có SET NOCOUNT ON; nếu không pyodbc sẽ ném
-        # "No results. Previous SQL was not a query" và rơi vào nhánh fallback sai.
-        sp_success = False
-        try:
-            with get_db_cursor(self.vp_db) as cur:
-                import datetime
-                today_str = datetime.date.today().strftime("%Y-%m-%d")
-                sp_sql = f"""
-                    SET NOCOUNT ON;
-                    DECLARE @p_Ten_Tk nvarchar(64), @p_Ten_Tk_E nvarchar(64), @p_Ten_Dt nvarchar(64), @p_Du_No numeric(18,2), @p_Du_Co numeric(18,2);
-                    EXEC {self.vp_db}.dbo.GL_Alert_ClosingAccount4Customer
-                        @p_Ma_Dvcs='S1',
-                        @p_Stt='',
-                        @p_Ngay_Ct=?,
-                        @p_Tk=?,
-                        @p_Ten_Tk=@p_Ten_Tk OUTPUT,
-                        @p_Ten_Tk_E=@p_Ten_Tk_E OUTPUT,
-                        @p_Ma_Dt=?,
-                        @p_Ten_Dt=@p_Ten_Dt OUTPUT,
-                        @p_Du_No=@p_Du_No OUTPUT,
-                        @p_Du_Co=@p_Du_Co OUTPUT;
-                    SELECT @p_Du_No AS Du_No, @p_Du_Co AS Du_Co, @p_Ten_Dt AS Ten_Dt;
-                """
-                cur.execute(sp_sql, [today_str, tk or "131", ma_dt])
-                row = cur.fetchone()
-                if row:
-                    du_no = float(row[0] or 0.0)
-                    du_co = float(row[1] or 0.0)
-                    du_cuoi = du_no - du_co
-                    ps_no = du_no
-                    ps_co = du_co
-                    if row[2] and not ten_dt:
-                        ten_dt = (row[2] or "").strip()
-                    sp_success = True
-        except Exception as e:
-            logger.warning(f"Error calling GL_Alert_ClosingAccount4Customer: {e}")
+        # 1. Dư nợ hiển thị luôn là công nợ đến hiện tại (bao gồm mọi phiếu đã lưu)
+        du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt = self._query_customer_balance(
+            ma_dt=ma_dt, tk=tk, today_str=today_str, exclude_stt=""
+        )
+        if sp_ten_dt and not ten_dt:
+            ten_dt = sp_ten_dt
 
-        if not sp_success:
-            # Fallback: cộng sổ cái TK 131 ĐẾN NGÀY HIỆN TẠI (không lấy toàn bộ lịch sử).
-            try:
-                import datetime
-                today_str = datetime.date.today().strftime("%Y-%m-%d")
-                with get_db_cursor(self.vp_db) as cur:
-                    cur.execute(debit_sql, [tk_param, ma_dt, today_str])
-                    r = cur.fetchone()
-                    if r:
-                        ps_no = float(r[0] or 0.0)
-                        ps_no_nt = float(r[1] or 0.0)
+        # 2. Dư nợ dùng để kiểm tra quá hạn: khi đang sửa phiếu -> trừ đi chính phiếu đang mở
+        if clean_stt:
+            du_cuoi_check, *_ = self._query_customer_balance(
+                ma_dt=ma_dt, tk=tk, today_str=today_str, exclude_stt=clean_stt
+            )
+        else:
+            du_cuoi_check = du_cuoi
 
-                    cur.execute(credit_sql, [tk_param, ma_dt, today_str])
-                    r = cur.fetchone()
-                    if r:
-                        ps_co = float(r[0] or 0.0)
-                        ps_co_nt = float(r[1] or 0.0)
-                du_cuoi = ps_no - ps_co
-            except Exception as e:
-                logger.warning(f"Error querying SoCai for balance: {e}")
-                du_cuoi = 0.0
-
-        du_cuoi_nt = ps_no_nt - ps_co_nt
-
-        is_over_limit = (gioi_han > 0 and du_cuoi >= gioi_han)
+        is_over_limit = (gioi_han > 0 and du_cuoi_check >= gioi_han)
         # Fix #3: Only warn near limit if Toi_Han <> 0
-        is_near_limit = (toi_han > 0 and du_cuoi >= toi_han and not is_over_limit)
+        is_near_limit = (toi_han > 0 and du_cuoi_check >= toi_han and not is_over_limit)
 
         if is_over_limit:
-            status_msg = f"Quá giới hạn nợ! ({du_cuoi:,.0f} >= {gioi_han:,.0f})"
+            status_msg = f"Quá giới hạn nợ! ({du_cuoi_check:,.0f} >= {gioi_han:,.0f})"
         elif is_near_limit:
-            status_msg = f"Đến hạn mức thanh toán! ({du_cuoi:,.0f} >= {toi_han:,.0f})"
+            status_msg = f"Đến hạn mức thanh toán! ({du_cuoi_check:,.0f} >= {toi_han:,.0f})"
         else:
             status_msg = "Trong hạn mức an toàn"
 
@@ -150,6 +180,7 @@ class DebtRepository:
             du_no_nt=ps_no_nt,
             du_co_nt=ps_co_nt,
             du_cuoi=du_cuoi,
+            du_cuoi_kiem_tra=du_cuoi_check,
             gioi_han=gioi_han,
             toi_han=toi_han,
             is_over_limit=is_over_limit,

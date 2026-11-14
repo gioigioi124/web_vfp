@@ -15,16 +15,20 @@ import { cachedFetch, peek, invalidate } from "../lib/apiCache";
  * Nhờ khóa tách biệt, khi mở form (1 phiếu) chỉ cần làm mới đúng phiếu đó,
  * KHÔNG phải tải lại toàn bộ danh sách (list).
  */
-const listKey = (f: VoucherFilterParams) =>
-  `list:${f.ma_ct || ""}:${f.ngay_ct1 || ""}:${f.ngay_ct2 || ""}:${f.so_ct1 || ""}:${
+const listKey = (mode: "sales" | "warehouse", f: VoucherFilterParams) =>
+  `list:${mode}:${f.ma_ct || ""}:${f.ngay_ct1 || ""}:${f.ngay_ct2 || ""}:${f.so_ct1 || ""}:${
     f.so_ct2 || ""
   }:${f.ma_dt || ""}:${f.ma_kho || ""}:${f.ma_vt || ""}:${f.ma_tte || ""}:${
     f.dien_giai || ""
   }:${f.page || 1}:${f.page_size || 50}`;
-const voucherKey = (stt: string) => `voucher:${stt}`;
+const voucherKey = (mode: "sales" | "warehouse", stt: string) =>
+  `voucher:${mode}:${stt}`;
 const debtKey = (maDt: string) => `debt:${maDt}`;
 
 export function useVouchers() {
+  const [voucherMode, setVoucherModeState] = useState<"sales" | "warehouse">(
+    "sales",
+  );
   const [vouchers, setVouchers] = useState<VoucherHeader[]>([]);
   const [pagination, setPagination] = useState<VoucherPagination>({
     page: 1,
@@ -76,6 +80,7 @@ export function useVouchers() {
   const [printStts, setPrintStts] = useState<string[]>([]);
   const [printInGia, setPrintInGia] = useState<"1" | "0" | undefined>(undefined);
   const [printCopies, setPrintCopies] = useState<number>(1);
+  const [printMode, setPrintMode] = useState<"direct" | "preview">("direct");
   const [debtMaDt, setDebtMaDt] = useState<string>("");
 
   const applyListData = useCallback((data: any) => {
@@ -106,7 +111,7 @@ export function useVouchers() {
 
   const fetchVouchers = useCallback(
     async (opts: { force?: boolean; silent?: boolean } = {}) => {
-      const key = listKey(filters);
+      const key = listKey(voucherMode, filters);
       const cached = peek<any>(key);
       // SWR: có cache → hiển thị ngay.
       if (cached) {
@@ -130,6 +135,7 @@ export function useVouchers() {
         if (filters.dien_giai) q.append("dien_giai", filters.dien_giai);
         q.append("page", String(filters.page || 1));
         q.append("page_size", String(filters.page_size || 50));
+        q.append("db_mode", voucherMode);
 
         const data = await cachedFetch<any>(
           key,
@@ -149,7 +155,7 @@ export function useVouchers() {
         setLoading(false);
       }
     },
-    [filters, applyListData],
+    [voucherMode, filters, applyListData],
   );
 
   useEffect(() => {
@@ -180,15 +186,15 @@ export function useVouchers() {
       setListDetailLoading(true);
       try {
         const data = await cachedFetch<any>(
-          voucherKey(selectedStt),
-          `/api/vouchers/${encodeURIComponent(selectedStt)}`,
+          voucherKey(voucherMode, selectedStt),
+          `/api/vouchers/${encodeURIComponent(selectedStt)}?db_mode=${encodeURIComponent(voucherMode)}`,
           { force: true },
         );
         if (cancelled) return;
         if (data.success && data.data) {
           setListDetail(data.data.items || []);
           const maDt = data.data.ma_dt;
-          if (maDt) {
+          if (maDt && voucherMode === "sales") {
             try {
               const ddata = await cachedFetch<any>(
                 debtKey(maDt),
@@ -229,14 +235,14 @@ export function useVouchers() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStt]);
+  }, [selectedStt, voucherMode]);
 
   const fetchVoucherDetail = async (stt: string): Promise<boolean> => {
     setLoadingDetail(true);
     try {
       const data = await cachedFetch<any>(
-        voucherKey(stt),
-        `/api/vouchers/${encodeURIComponent(stt)}`,
+        voucherKey(voucherMode, stt),
+        `/api/vouchers/${encodeURIComponent(stt)}?db_mode=${encodeURIComponent(voucherMode)}`,
         { force: true },
       );
       if (data.success && data.data) {
@@ -267,7 +273,7 @@ export function useVouchers() {
   const handleOpenDetail = async (stt: string) => {
     setSelectedStt(stt);
     // Hiển thị tức thì từ cache (nếu có) để không nháy trắng, rồi fetch mới.
-    const cachedVoucher = peek<any>(voucherKey(stt));
+    const cachedVoucher = peek<any>(voucherKey(voucherMode, stt));
     if (cachedVoucher?.success && cachedVoucher.data) {
       setActiveVoucher(cachedVoucher.data);
     }
@@ -306,7 +312,11 @@ export function useVouchers() {
 
   const handleOpenPrint = (
     target: string | string[],
-    options?: { inGia?: "1" | "0"; copies?: number },
+    options?: {
+      inGia?: "1" | "0";
+      copies?: number;
+      mode?: "direct" | "preview";
+    },
   ) => {
     const list = (Array.isArray(target) ? target : [target])
       .map((s) => (s || "").trim())
@@ -317,6 +327,7 @@ export function useVouchers() {
     setPrintCopies(
       options?.copies && options.copies > 1 ? Math.floor(options.copies) : 1,
     );
+    setPrintMode(options?.mode === "preview" ? "preview" : "direct");
     setIsPrintOpen(true);
   };
 
@@ -325,7 +336,21 @@ export function useVouchers() {
     setIsDebtOpen(true);
   };
 
+  const setVoucherMode = useCallback(
+    (mode: "sales" | "warehouse") => {
+      if (mode === voucherMode) return;
+      setActiveVoucher(null);
+      setSelectedStt(null);
+      setListDetail([]);
+      setDebtAmount(null);
+      setVoucherModeState(mode);
+    },
+    [voucherMode],
+  );
+
   return {
+    voucherMode,
+    setVoucherMode,
     vouchers,
     pagination,
     summary,
@@ -351,6 +376,7 @@ export function useVouchers() {
     printStts,
     printInGia,
     printCopies,
+    printMode,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,

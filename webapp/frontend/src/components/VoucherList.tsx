@@ -56,6 +56,7 @@ interface VoucherListProps {
   detailItems: VoucherDetail[];
   detailLoading?: boolean;
   debtAmount?: number | null;
+  voucherMode?: "sales" | "warehouse";
   onSelectStt: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
   onOpenFilter: () => void;
@@ -75,6 +76,7 @@ export const VoucherList: React.FC<VoucherListProps> = ({
   markedStts,
   detailItems,
   debtAmount,
+  voucherMode = "sales",
   onSelectStt,
   onToggleMark,
   onOpenFilter,
@@ -82,6 +84,7 @@ export const VoucherList: React.FC<VoucherListProps> = ({
   onRefresh,
   onChangePage,
 }) => {
+  const isWarehouse = voucherMode === "warehouse";
   const activeVoucher =
     vouchers.find((v) => v.stt === selectedStt) || vouchers[0];
   const detailCurrency = activeVoucher?.ma_tte || "VND";
@@ -320,16 +323,18 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                 >
                   Đối tượng
                 </th>
-                <th className="w-36 text-right pr-3" scope="col">
-                  Tổng tiền
-                </th>
+                {!isWarehouse && (
+                  <th className="w-36 text-right pr-3" scope="col">
+                    Tổng tiền
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 font-sans">
               {loading ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={isWarehouse ? 6 : 7}
                     className="px-4 py-12 text-center text-neutral-400"
                   >
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-600" />
@@ -339,7 +344,7 @@ export const VoucherList: React.FC<VoucherListProps> = ({
               ) : vouchers.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={isWarehouse ? 6 : 7}
                     className="px-4 py-12 text-center text-neutral-400 italic"
                   >
                     Không tìm thấy chứng từ nào phù hợp bộ lọc.
@@ -485,26 +490,30 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           className="xl-input text-black truncate grid-cell-input"
                         />
                       </td>
-                      <td className="xl-cell">
-                        <input
-                          type="text"
-                          readOnly
-                          data-mode="select"
-                          value={formatCurrency(v.ttien_nt0, v.ma_tte)}
-                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 6;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
-                          onKeyDown={(e) =>
-                            handleMasterCellKeyDown(e, rowIdx, 6)
-                          }
-                          onCopy={handleMasterCellCopy}
-                          className="xl-input text-right font-mono font-medium text-neutral-900 pr-3 grid-cell-input"
-                        />
-                      </td>
+                      {!isWarehouse && (
+                        <td className="xl-cell">
+                          <input
+                            type="text"
+                            readOnly
+                            data-mode="select"
+                            value={formatCurrency(v.ttien_nt0, v.ma_tte)}
+                            onMouseDown={(e) =>
+                              handleExcelMouseDown(e, "select")
+                            }
+                            onFocus={(e) => {
+                              activeColRef.current = 6;
+                              if (selectedStt !== v.stt) onSelectStt(v.stt);
+                              e.currentTarget.select();
+                              selectAllLater(e.currentTarget);
+                            }}
+                            onKeyDown={(e) =>
+                              handleMasterCellKeyDown(e, rowIdx, 6)
+                            }
+                            onCopy={handleMasterCellCopy}
+                            className="xl-input text-right font-mono font-medium text-neutral-900 pr-3 grid-cell-input"
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -527,15 +536,19 @@ export const VoucherList: React.FC<VoucherListProps> = ({
             </span>
             {activeVoucher?.ten_dt ? ` - ${activeVoucher.ten_dt}` : ""}
           </span>
-          <span className="text-neutral-400">||</span>
-          <span className="text-xs text-neutral-600 shrink-0">
-            Dư nợ tài khoản:
-          </span>
-          <span className="px-1.5 py-0 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs shrink-0">
-            {debtAmount != null
-              ? `${formatCurrency(debtAmount, "VND")} ₫`
-              : "—"}
-          </span>
+          {!isWarehouse && (
+            <>
+              <span className="text-neutral-400">||</span>
+              <span className="text-xs text-neutral-600 shrink-0">
+                Dư nợ tài khoản:
+              </span>
+              <span className="px-1.5 py-0 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs shrink-0">
+                {debtAmount != null
+                  ? `${formatCurrency(debtAmount, "VND")} ₫`
+                  : "—"}
+              </span>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-neutral-500 text-[11px] font-mono mr-0.5">
@@ -568,7 +581,12 @@ export const VoucherList: React.FC<VoucherListProps> = ({
         className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden"
       >
         <div className="flex-1 overflow-auto table-sticky-header">
-          <DetailGrid items={detailItems} currency={detailCurrency} embedded />
+          <DetailGrid
+            items={detailItems}
+            currency={detailCurrency}
+            voucherMode={voucherMode}
+            embedded
+          />
         </div>
       </section>
     </div>

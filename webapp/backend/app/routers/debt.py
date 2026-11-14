@@ -7,13 +7,14 @@ router = APIRouter(prefix="/api/debt", tags=["Debt"])
 @router.get("/customer", response_model=dict)
 def get_customer_debt(
     ma_dt: str = Query(..., description="Mã khách hàng cần kiểm tra công nợ"),
-    tk: str = Query("131", description="Tài khoản công nợ (mặc định 131)")
+    tk: str = Query("131", description="Tài khoản công nợ (mặc định 131)"),
+    stt: Optional[str] = Query("", description="Mã chứng từ cần loại trừ khi đang sửa phiếu"),
 ):
     """
     Tra cứu dư nợ realtime và hạn mức công nợ theo Fix #1, #2, #3.
     100% READ-ONLY.
     """
-    debt_info = debt_service.get_customer_debt(ma_dt=ma_dt, tk=tk)
+    debt_info = debt_service.get_customer_debt(ma_dt=ma_dt, tk=tk, stt=stt or "")
     return {
         "success": True,
         "data": debt_info.model_dump()

@@ -8,14 +8,20 @@ import {
   handleExcelMouseDown,
   selectAllLater,
 } from "./ui/excelCell";
-import { Check, X, Minus, Square, RefreshCw } from "lucide-react";
+import { Check, X, Minus, Square, RefreshCw, Plus, Edit3, Trash2 } from "lucide-react";
 
 interface PickupDialogProps {
   isOpen: boolean;
+  isSuspended?: boolean;
   onClose: () => void;
   maDt?: string;
   ngayCt?: string;
   onAccept: (selectedSlips: PickupSlip[], items: any[], maXe?: string) => void;
+  onCreateWarehouseSlip?: () => void;
+  onEditWarehouseSlip?: (stt: string) => void;
+  onDeleteWarehouseSlip?: (slip: PickupSlip) => void;
+  refreshTrigger?: number;
+  focusStt?: string | null;
 }
 
 /**
@@ -23,14 +29,20 @@ interface PickupDialogProps {
  * Giao diện Master/Detail theo mẫu Pickup.html: header navy gradient,
  * bảng phiếu xuất (Grid1 - K_DsPx) + chi tiết vật tư (Grid2 - K_CtPx),
  * footer đếm "Số phiếu đã chọn [ n ] / [ total ]".
- * Hotkey khớp VFP (plan §7.2.3): Space, Ctrl+A, Ctrl+U, Ctrl+Home/End, Enter, Esc.
+ * Hotkey khớp VFP (plan §7.2.3): Space, Ctrl+A, Ctrl+U, Ctrl+Home/End, Enter, Esc, F2, F3, F8.
  */
 export const PickupDialog: React.FC<PickupDialogProps> = ({
   isOpen,
+  isSuspended = false,
   onClose,
   maDt,
   ngayCt,
   onAccept,
+  onCreateWarehouseSlip,
+  onEditWarehouseSlip,
+  onDeleteWarehouseSlip,
+  refreshTrigger = 0,
+  focusStt = null,
 }) => {
   const [slips, setSlips] = useState<PickupSlip[]>([]);
   const [selectedStts, setSelectedStts] = useState<Set<string>>(new Set());
@@ -90,7 +102,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   }, [isOpen]);
 
   // Khóa modal: giữ focus trong dialog + báo tầng ngoài (VoucherForm/App) khóa phím.
-  useModalLock(isOpen, containerRef);
+  // Khi mở overlay Thêm/Sửa phiếu kho đè lên PickupDialog (isSuspended=true), nhả lock để VoucherForm kho hoạt động.
+  useModalLock(isOpen && !isSuspended, containerRef);
 
   const ensureRowVisible = useCallback(
     (
@@ -144,57 +157,85 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   );
 
   // Fetch slips
-  const loadSlips = useCallback(async () => {
-    setLoading(true);
-    // Xóa chi tiết cũ ngay để không hiển thị dữ liệu cũ trong lúc chờ.
-    setActiveItems([]);
-    try {
-      const q = new URLSearchParams();
-      if (maDt) q.append("ma_dt", maDt);
-      if (ngayCt) {
-        q.append("ngay_ct1", ngayCt);
-        q.append("ngay_ct2", ngayCt);
-      }
-      const url = `/api/pickup/list?${q.toString()}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.success && data.data?.items) {
-        const items: PickupSlip[] = data.data.items;
-        setSlips(items);
-        // Không còn phiếu -> bỏ chọn dòng đang xem (tránh chi tiết cũ còn sót).
-        setActiveStt(items.length > 0 ? items[0].stt : null);
-        // Bỏ các phiếu đã chọn không còn trong danh sách mới.
-        setSelectedStts((prev) => {
-          const valid = new Set(items.map((s) => s.stt));
-          const next = new Set<string>();
-          prev.forEach((s) => {
-            if (valid.has(s)) next.add(s);
+  const loadSlips = useCallback(
+    async (preferredStt?: string | null) => {
+      setLoading(true);
+      // Xóa chi tiết cũ ngay để không hiển thị dữ liệu cũ trong lúc chờ.
+      setActiveItems([]);
+      try {
+        const q = new URLSearchParams();
+        if (maDt) q.append("ma_dt", maDt);
+        if (ngayCt) {
+          q.append("ngay_ct1", ngayCt);
+          q.append("ngay_ct2", ngayCt);
+        }
+        const url = `/api/pickup/list?${q.toString()}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.success && data.data?.items) {
+          const items: PickupSlip[] = data.data.items;
+          setSlips(items);
+          setActiveStt((prev) => {
+            if (preferredStt && items.some((s) => s.stt === preferredStt)) {
+              return preferredStt;
+            }
+            if (prev && items.some((s) => s.stt === prev)) {
+              return prev;
+            }
+            return items.length > 0 ? items[0].stt : null;
           });
-          return next;
-        });
-      } else {
-        setSlips([]);
-        setActiveStt(null);
-        setSelectedStts(new Set());
+          // Bỏ các phiếu đã chọn không còn trong danh sách mới.
+          setSelectedStts((prev) => {
+            const valid = new Set(items.map((s) => s.stt));
+            const next = new Set<string>();
+            prev.forEach((s) => {
+              if (valid.has(s)) next.add(s);
+            });
+            return next;
+          });
+        } else {
+          setSlips([]);
+          setActiveStt(null);
+          setSelectedStts(new Set());
+        }
+      } catch (e) {
+        console.error("Error fetching pickup slips", e);
+      } finally {
+        setLoading(false);
+        // Luôn tăng để effect chi tiết & focus sau tải chạy lại (kể cả activeStt giữ nguyên).
+        setDetailVersion((v) => v + 1);
+        listFetchSeqRef.current += 1;
+        setListFetchSeq(listFetchSeqRef.current);
       }
-    } catch (e) {
-      console.error("Error fetching pickup slips", e);
-    } finally {
-      setLoading(false);
-      // Luôn tăng để effect chi tiết & focus sau tải chạy lại (kể cả activeStt giữ nguyên).
-      setDetailVersion((v) => v + 1);
-      listFetchSeqRef.current += 1;
-      setListFetchSeq(listFetchSeqRef.current);
-    }
-  }, [maDt, ngayCt]);
+    },
+    [maDt, ngayCt],
+  );
 
   useEffect(() => {
     if (isOpen) {
       openAtSeqRef.current = listFetchSeqRef.current;
       pendingInitialFocusRef.current = true;
-      loadSlips();
+      loadSlips(focusStt);
     }
-  }, [isOpen, loadSlips]);
+  }, [isOpen, refreshTrigger, loadSlips, focusStt]);
+
+  // Khi đóng overlay phiếu kho (isSuspended từ true -> false), trả lại focus về dòng đang chọn trên bảng Master
+  const prevSuspendedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (prevSuspendedRef.current && !isSuspended && isOpen && !loading) {
+      const targetStt = focusStt || activeStt || slips[0]?.stt;
+      const timer = window.setTimeout(() => {
+        if (targetStt) {
+          focusMasterCell(targetStt, masterActiveColRef.current);
+        } else {
+          cancelBtnRef.current?.focus({ preventScroll: true });
+        }
+      }, 40);
+      prevSuspendedRef.current = isSuspended;
+      return () => window.clearTimeout(timer);
+    }
+    prevSuspendedRef.current = isSuspended;
+  }, [isSuspended, isOpen, loading, focusStt, activeStt, slips, focusMasterCell]);
 
   // Tự động focus vào ô đầu tiên của grid phiếu (hoặc nút Hủy bỏ nếu không có phiếu nào)
   useEffect(() => {
@@ -461,7 +502,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   // Cho phép các phím grid (↑/↓, Space, Ctrl+A/U, Ctrl+Home/End, Enter, Esc)
   // hoạt động bình thường cả khi đang đứng trong các ô readOnly của grid.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isSuspended) return;
     const isTypingTarget = (el: Element | null): boolean => {
       if (!el) return false;
       if (el instanceof HTMLInputElement) {
@@ -480,6 +521,36 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         (activeEl.getAttribute("type") || "").toLowerCase() === "checkbox";
       const inButton = activeEl instanceof HTMLButtonElement;
       const ctrl = e.ctrlKey || e.metaKey;
+
+      if (e.key === "F2" && !ctrl && !e.altKey && !e.shiftKey) {
+        if (onCreateWarehouseSlip) {
+          e.preventDefault();
+          e.stopPropagation();
+          onCreateWarehouseSlip();
+        }
+        return;
+      }
+
+      if (e.key === "F3" && !ctrl && !e.altKey && !e.shiftKey) {
+        if (onEditWarehouseSlip && activeStt) {
+          e.preventDefault();
+          e.stopPropagation();
+          onEditWarehouseSlip(activeStt);
+        }
+        return;
+      }
+
+      if (e.key === "F8" && !ctrl && !e.altKey && !e.shiftKey) {
+        if (onDeleteWarehouseSlip && activeStt) {
+          const activeSlip = slips.find((s) => s.stt === activeStt);
+          if (activeSlip) {
+            e.preventDefault();
+            e.stopPropagation();
+            onDeleteWarehouseSlip(activeSlip);
+          }
+        }
+        return;
+      }
 
       if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         if (typing || ctrl || e.altKey || e.shiftKey) return;
@@ -539,6 +610,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     isOpen,
+    isSuspended,
     slips,
     activeStt,
     selectedStts,
@@ -548,6 +620,9 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     focusMasterCell,
     handleAccept,
     onClose,
+    onCreateWarehouseSlip,
+    onEditWarehouseSlip,
+    onDeleteWarehouseSlip,
   ]);
 
   if (!isOpen) return null;
@@ -573,10 +648,10 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               Esc: Đóng
             </span>
             <button
-              onClick={loadSlips}
+              onClick={() => loadSlips(activeStt)}
               disabled={loading}
               className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center"
-              title="Làm mới (F5)"
+              title="Làm mới"
               type="button"
             >
               <RefreshCw
@@ -1066,58 +1141,99 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         </main>
 
         {/* ===== Modal Footer ===== */}
-        <footer className="px-4 py-3 bg-neutral-100 border-t border-neutral-300 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+        <footer className="px-3 py-2 bg-neutral-100 border-t border-neutral-300 flex items-center justify-between gap-2 shrink-0">
           {/* Bộ đếm phiếu đã chọn */}
-          <div className="flex items-center space-x-3 w-full sm:w-auto">
-            <div className="flex items-center bg-white px-3 py-1.5 rounded border border-neutral-300 shadow-sm">
-              <label className="text-xs sm:text-sm font-bold text-neutral-700 mr-2 whitespace-nowrap">
-                Số phiếu đã chọn
-              </label>
-              <div className="flex items-center font-mono font-bold text-sm">
-                <input
-                  readOnly
-                  value={selectedStts.size}
-                  className="w-10 h-7 text-center font-bold text-primary-900 bg-primary-50 border border-primary-400 rounded p-0 text-sm focus:outline-none select-all"
-                />
-                <span className="mx-2 text-neutral-400 text-base">/</span>
-                <span className="inline-flex items-center justify-center min-w-[28px] h-7 px-2 bg-neutral-200 text-neutral-700 rounded text-sm">
-                  {slips.length}
-                </span>
-              </div>
+          <div className="flex items-center bg-white px-2.5 py-1 rounded border border-neutral-300 shadow-xs shrink-0">
+            <label className="text-xs font-semibold text-neutral-700 mr-2 whitespace-nowrap">
+              Số phiếu đã chọn
+            </label>
+            <div className="flex items-center font-mono font-bold text-xs">
+              <input
+                readOnly
+                value={selectedStts.size}
+                className="w-8 h-5 text-center font-bold text-primary-900 bg-primary-50 border border-primary-400 rounded p-0 text-xs focus:outline-none select-all"
+              />
+              <span className="mx-1.5 text-neutral-400">/</span>
+              <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 bg-neutral-200 text-neutral-700 rounded text-xs">
+                {slips.length}
+              </span>
             </div>
           </div>
 
-          {/* Hướng dẫn phím tắt & nút thao tác */}
-          <div className="flex items-center justify-end space-x-2.5 w-full sm:w-auto">
-            <div className="hidden lg:flex items-center space-x-2 text-[11px] text-neutral-500 mr-2">
-              <kbd>Space</kbd>
-              <span>Đánh dấu</span>
-              <kbd>Ctrl+A</kbd>
-              <span>Chọn tất cả</span>
-              <kbd>Enter</kbd>
-              <span>Chấp nhận</span>
-            </div>
+          {/* Nhóm nút thao tác nhỏ gọn */}
+          <div className="flex items-center justify-end gap-1.5 shrink-0">
+            {onCreateWarehouseSlip && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCreateWarehouseSlip}
+                type="button"
+                className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
+                title="Thêm mới phiếu xuất kho (F2)"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                Thêm phiếu kho
+              </Button>
+            )}
+
+            {onEditWarehouseSlip && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => activeStt && onEditWarehouseSlip(activeStt)}
+                disabled={!activeStt}
+                type="button"
+                className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"
+                title="Sửa phiếu xuất kho đang chọn (F3)"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-amber-700" />
+                Sửa phiếu kho
+              </Button>
+            )}
+
+            {onDeleteWarehouseSlip && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const activeSlip = slips.find((s) => s.stt === activeStt);
+                  if (activeSlip) onDeleteWarehouseSlip(activeSlip);
+                }}
+                disabled={!activeStt}
+                type="button"
+                className="border-danger-300 bg-danger-50 hover:bg-danger-100 text-danger-800 disabled:opacity-50"
+                title="Xóa phiếu xuất kho đang chọn (F8)"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-danger-600" />
+                Xóa phiếu kho
+              </Button>
+            )}
+
+            {(onCreateWarehouseSlip ||
+              onEditWarehouseSlip ||
+              onDeleteWarehouseSlip) && (
+              <div className="h-4 w-px bg-neutral-300 mx-0.5" />
+            )}
+
             <Button
               ref={cancelBtnRef}
               data-autofocus={slips.length === 0 ? true : undefined}
               variant="outline"
-              size="md"
+              size="sm"
               onClick={onClose}
               type="button"
-              className="min-w-[90px]"
             >
-              <X className="w-3.5 h-3.5 mr-1.5 text-neutral-500" />
+              <X className="w-3.5 h-3.5 text-neutral-500" />
               Hủy bỏ
             </Button>
             <Button
               variant="primary"
-              size="md"
+              size="sm"
               onClick={handleAccept}
               disabled={selectedStts.size === 0}
               type="button"
-              className="min-w-[110px]"
             >
-              <Check className="w-3.5 h-3.5 mr-1.5 text-success-300" />
+              <Check className="w-3.5 h-3.5 text-success-300" />
               Chấp nhận
             </Button>
           </div>

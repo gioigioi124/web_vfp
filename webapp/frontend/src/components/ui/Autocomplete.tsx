@@ -172,7 +172,13 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
       setHighlight((h) => (h - 1 + options.length) % options.length);
       return;
     }
-    if (e.key === "Enter") {
+    if (
+      e.key === "Enter" &&
+      !e.ctrlKey &&
+      !e.shiftKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
       if (
         open &&
         options.length > 0 &&

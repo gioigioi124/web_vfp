@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Printer, X, RefreshCw } from "lucide-react";
 import { formatDate } from "../lib/format";
+import { useModalLock } from "../lib/modalLock";
 
 interface PrintPreviewProps {
   isOpen: boolean;
@@ -10,6 +12,8 @@ interface PrintPreviewProps {
   inGia?: "1" | "0";
   /** Số bản copy cần in cho mỗi phiếu (mặc định 1; Alt/Ctrl + Numpad3/4 dùng 3 hoặc 4) */
   copies?: number;
+  /** "direct": in thẳng bằng hộp thoại trình duyệt (F7); "preview": hiện dialog chọn In nợ cũ & xem trước (Ctrl+F7) */
+  mode?: "direct" | "preview";
 }
 
 /**
@@ -47,9 +51,9 @@ function formatTsoLoai(value?: number | null): string {
 }
 
 /**
- * Thành phần chuẩn bị bản in (RPT\ctpxg.frx / RPT\ctpng.frx) và gọi thẳng hộp thoại in
- * của trình duyệt khi nhấn F7 (không hiện dialog xem trước trên màn hình).
- * Sau khi in hoặc hủy in (`afterprint`), tự động đóng và trả về màn hình VoucherList.
+ * Thành phần chuẩn bị bản in (RPT\ctpxg.frx / RPT\ctpng.frx):
+ * - mode="direct" (F7): gọi thẳng hộp thoại in của trình duyệt (in_no_ck="K"), tự đóng khi afterprint.
+ * - mode="preview" (Ctrl+F7): mở dialog xem trước có tùy chọn "In nợ cũ" (in_no_ck="C"/"K") trước khi bấm In.
  */
 export const PrintPreview: React.FC<PrintPreviewProps> = ({
   isOpen,
@@ -58,38 +62,63 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   stts,
   inGia = "1",
   copies = 1,
+  mode = "direct",
 }) => {
+  const isPreviewMode = mode === "preview";
   const [printDocs, setPrintDocs] = useState<any[]>([]);
   const [loadedKey, setLoadedKey] = useState<string>("");
+  const [isFetching, setIsFetching] = useState<boolean>(false);
+  const [previewInNoCk, setPreviewInNoCk] = useState<"C" | "K">("K");
+  const [previewInGia, setPreviewInGia] = useState<"1" | "0">(inGia);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const printAreaRef = useRef<HTMLDivElement | null>(null);
   const printedKeyRef = useRef<string>("");
+  const wasOpenRef = useRef<boolean>(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+
+  useModalLock(isOpen && isPreviewMode, dialogRef);
+
+  // Khi mở dialog Ctrl+F7 mới, đồng bộ tùy chọn giá từ toolbar và reset In nợ cũ về mặc định ("K")
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      setPreviewInNoCk("K");
+      setPreviewInGia(inGia);
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen, inGia]);
+
+  const effectiveInGia: "1" | "0" = isPreviewMode ? previewInGia : inGia;
+  const effectiveInNoCk: "C" | "K" = isPreviewMode ? previewInNoCk : "K";
 
   const targetStts =
     stts && stts.length > 0 ? stts : stt ? [stt] : [];
   const joinedStts = targetStts.join(",");
   const safeCopies = Math.max(1, Math.floor(copies || 1));
   const requestKey =
-    isOpen && joinedStts ? `${joinedStts}|${inGia}|${safeCopies}` : "";
+    isOpen && joinedStts
+      ? `${joinedStts}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`
+      : "";
 
   useEffect(() => {
     if (!isOpen || targetStts.length === 0) {
       setPrintDocs([]);
       setLoadedKey("");
+      setIsFetching(false);
       printedKeyRef.current = "";
       return;
     }
 
     let cancelled = false;
-    const targetKey = `${joinedStts}|${inGia}|${safeCopies}`;
+    const targetKey = `${joinedStts}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`;
 
     const fetchPrintAll = async () => {
+      setIsFetching(true);
       try {
         const payloads = await Promise.all(
           targetStts.map(async (s) => {
             const res = await fetch(
-              `/api/print/${encodeURIComponent(s)}?loai=hd&in_gia=${inGia}&in_no_ck=K`,
+              `/api/print/${encodeURIComponent(s)}?loai=hd&in_gia=${effectiveInGia}&in_no_ck=${effectiveInNoCk}`,
             );
             const json = await res.json();
             return json?.success && json.data ? json.data : null;
@@ -99,12 +128,14 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
         if (!cancelled && validDocs.length > 0) {
           setPrintDocs(validDocs);
           setLoadedKey(targetKey);
-        } else if (!cancelled) {
+        } else if (!cancelled && !isPreviewMode) {
           onCloseRef.current();
         }
       } catch (e) {
         console.error("Error fetching print payloads", e);
-        if (!cancelled) onCloseRef.current();
+        if (!cancelled && !isPreviewMode) onCloseRef.current();
+      } finally {
+        if (!cancelled) setIsFetching(false);
       }
     };
 
@@ -113,12 +144,19 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, joinedStts, inGia, safeCopies]);
+  }, [
+    isOpen,
+    joinedStts,
+    effectiveInGia,
+    effectiveInNoCk,
+    safeCopies,
+    isPreviewMode,
+  ]);
 
-  // Khi dữ liệu in đã nạp vào DOM, chờ toàn bộ ảnh logo tải xong rồi mở thẳng trang in (window.print),
-  // lắng nghe afterprint để quay trở về màn hình danh sách ngay khi hoàn tất/đóng trang in.
+  // Chế độ in thẳng (F7): tự động gọi window.print() sau khi nạp xong dữ liệu + ảnh và đóng khi afterprint.
   useEffect(() => {
     if (
+      isPreviewMode ||
       !isOpen ||
       !requestKey ||
       loadedKey !== requestKey ||
@@ -193,9 +231,51 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       if (printTimer !== null) window.clearTimeout(printTimer);
       window.removeEventListener("afterprint", handleAfterPrint);
     };
-  }, [isOpen, requestKey, loadedKey, printDocs]);
+  }, [isPreviewMode, isOpen, requestKey, loadedKey, printDocs]);
 
-  if (!isOpen || printDocs.length === 0 || loadedKey !== requestKey) {
+  const handleManualPrint = () => {
+    if (isFetching || printDocs.length === 0) return;
+    window.print();
+  };
+
+  // Phím tắt trong dialog Xem trước (Ctrl+F7): Esc để đóng, F7 hoặc Enter để In phiếu.
+  useEffect(() => {
+    if (!isOpen || !isPreviewMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCloseRef.current();
+      } else if (e.key === "F7") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isFetching && printDocs.length > 0) {
+          window.print();
+        }
+      } else if (e.key === "Enter" && !e.ctrlKey && !e.altKey) {
+        const active = document.activeElement;
+        if (
+          active instanceof HTMLButtonElement &&
+          active.dataset.previewAction === "close"
+        ) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isFetching && printDocs.length > 0) {
+          window.print();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen, isPreviewMode, isFetching, printDocs.length]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  if (!isPreviewMode && (printDocs.length === 0 || loadedKey !== requestKey)) {
     return null;
   }
 
@@ -209,7 +289,8 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     const items = printData?.items || [];
     const maCt = (header.ma_ct || "X1").toString().trim().toUpperCase();
     const isN5 = maCt === "N5";
-    const showPrice = inGia === "1";
+    const showPrice = effectiveInGia === "1";
+    const showNoCu = (printData?.in_no_ck || effectiveInNoCk) === "C";
     const currency = (header.ma_tte || "VND").toUpperCase();
     const tongTien =
       currency === "VND"
@@ -631,9 +712,35 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
               </td>
             </tr>
 
-            {/* Bằng chữ & 4 cột chữ ký */}
+            {/* Bằng chữ, khối Nợ cũ / Tổng nợ (khi In nợ cũ = 'C') & 4 cột chữ ký */}
             <tr>
               <td colSpan={9} className="p-0 pt-1" style={{ border: "none" }}>
+                {showNoCu && (
+                  <div
+                    className="flex flex-col items-end font-bold pr-2 mt-0.5 leading-snug"
+                    style={{ fontSize: "12pt" }}
+                  >
+                    <div className="flex items-baseline gap-3">
+                      <span>Nợ cũ:</span>
+                      <span
+                        className="text-right tabular-nums"
+                        style={{ minWidth: "36mm" }}
+                      >
+                        {formatVfpNum(printData?.du_dau, 0)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-3">
+                      <span>Tổng nợ:</span>
+                      <span
+                        className="text-right tabular-nums"
+                        style={{ minWidth: "36mm" }}
+                      >
+                        {formatVfpNum(printData?.tong_no, 0)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Bằng chữ */}
                 <div
                   className="flex items-baseline gap-2 mt-1.5"
@@ -707,6 +814,127 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       keySuffix: `d${docIdx}-c${copyIdx}`,
     })),
   );
+
+  if (isPreviewMode) {
+    return (
+      <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print-preview-root">
+        <div
+          ref={dialogRef}
+          className="bg-neutral-200 rounded shadow-2xl border border-neutral-400 w-full max-w-5xl h-[94vh] flex flex-col overflow-hidden print-preview-scroll"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Xem trước khi in"
+        >
+          {/* Header Toolbar */}
+          <div className="bg-primary-900 text-white px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0 print:hidden">
+            <div className="flex items-center gap-2">
+              <Printer className="w-4 h-4 text-primary-200" />
+              <span className="font-bold text-xs sm:text-sm tracking-wide">
+                Xem Trước Khi In (Ctrl+F7)
+              </span>
+              {targetStts.length > 1 && (
+                <span className="px-1.5 py-0.5 rounded bg-primary-700 text-[11px] font-semibold">
+                  {targetStts.length} phiếu
+                </span>
+              )}
+              {isFetching && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-primary-200">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Đang tải...
+                </span>
+              )}
+            </div>
+
+            {/* Tùy chọn In nợ cũ & In giá bán */}
+            <div className="flex items-center flex-wrap gap-2">
+              <label
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/25 cursor-pointer select-none text-xs font-semibold"
+                title="Bấm Space hoặc click để bật/tắt In nợ cũ"
+              >
+                <input
+                  data-autofocus
+                  type="checkbox"
+                  checked={previewInNoCk === "C"}
+                  onChange={(e) =>
+                    setPreviewInNoCk(e.target.checked ? "C" : "K")
+                  }
+                  className="h-3.5 w-3.5 accent-amber-400 cursor-pointer"
+                />
+                <span>In nợ cũ</span>
+              </label>
+
+              <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/25 cursor-pointer select-none text-xs font-medium">
+                <input
+                  type="checkbox"
+                  checked={previewInGia === "1"}
+                  onChange={(e) =>
+                    setPreviewInGia(e.target.checked ? "1" : "0")
+                  }
+                  className="h-3.5 w-3.5 accent-primary-300 cursor-pointer"
+                />
+                <span>In giá bán</span>
+              </label>
+
+              <div className="h-4 w-px bg-white/25 mx-0.5" />
+
+              <button
+                type="button"
+                onClick={handleManualPrint}
+                disabled={isFetching || printDocs.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded text-xs font-semibold border border-primary-400 cursor-pointer shadow-xs"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>In phiếu</span>
+                <kbd className="bg-primary-900/50 text-primary-100 border-primary-400 text-[10px] px-1">
+                  Enter
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                data-preview-action="close"
+                onClick={onClose}
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-neutral-700 hover:bg-neutral-600 text-white rounded text-xs font-medium border border-neutral-500 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Đóng</span>
+                <kbd className="bg-neutral-800 text-neutral-200 border-neutral-500 text-[10px] px-1">
+                  Esc
+                </kbd>
+              </button>
+            </div>
+          </div>
+
+          {/* Paper Preview Body */}
+          <div className="flex-1 overflow-auto p-4 bg-neutral-300/80 print-preview-scroll">
+            {isFetching && printDocs.length === 0 ? (
+              <div className="py-16 text-center text-xs text-neutral-600">
+                Đang chuẩn bị bản xem trước...
+              </div>
+            ) : printDocs.length === 0 ? (
+              <div className="py-16 text-center text-xs text-danger-700 font-medium">
+                Không tải được dữ liệu phiếu để xem trước.
+              </div>
+            ) : (
+              <div
+                ref={printAreaRef}
+                className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-[6mm] print-preview-sheet"
+                style={{
+                  width: "210mm",
+                  fontFamily: '"Arial Narrow", Arial, sans-serif',
+                  color: "#000",
+                }}
+              >
+                {expandedDocs.map((entry, renderIdx) =>
+                  renderVoucherDoc(entry.doc, renderIdx, entry.keySuffix),
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

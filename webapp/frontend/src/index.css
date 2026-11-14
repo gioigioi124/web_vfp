@@ -346,6 +346,31 @@ kbd {
     box-shadow: none !important;
   }
 
+  .print-preview-root,
+  .print-preview-scroll {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .print-preview-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
   /* Ngắt sang trang mới khi in hàng loạt nhiều phiếu liên tiếp */
   .print-doc-page-break {
     break-before: page !important;

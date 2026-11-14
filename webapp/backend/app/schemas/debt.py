@@ -10,6 +10,7 @@ class CustomerDebtSummary(BaseModel):
     du_no_nt: float = 0.0
     du_co_nt: float = 0.0
     du_cuoi: float = 0.0
+    du_cuoi_kiem_tra: Optional[float] = None
     gioi_han: float = 0.0
     toi_han: float = 0.0
     is_over_limit: bool = False

@@ -27,6 +27,8 @@ import { User, ShieldCheck, RefreshCw, Trash2, X } from "lucide-react";
 
 export function App() {
   const {
+    voucherMode,
+    setVoucherMode,
     vouchers,
     pagination,
     filters,
@@ -49,6 +51,7 @@ export function App() {
     printStts,
     printInGia,
     printCopies,
+    printMode,
     handleOpenPrint,
     isPickupOpen,
     setIsPickupOpen,
@@ -145,7 +148,12 @@ export function App() {
   );
 
   // Delete modal state
-  const [deleteTarget, setDeleteTarget] = useState<VoucherHeader | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    (Pick<VoucherHeader, "stt" | "so_ct" | "ma_dt" | "ten_dt" | "ngay_ct"> & {
+      dbMode: "sales" | "warehouse";
+      fromPickup?: boolean;
+    }) | null
+  >(null);
   const [deleting, setDeleting] = useState<boolean>(false);
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
   useModalLock(!!deleteTarget, deleteDialogRef);
@@ -192,7 +200,7 @@ export function App() {
   const editingVoucher: VoucherFullDetail | null = (() => {
     if (!sttParam || isNew) return null;
     if (activeVoucher?.stt === sttParam) return activeVoucher;
-    const cached = peek<any>(`voucher:${sttParam}`);
+    const cached = peek<any>(`voucher:${voucherMode}:${sttParam}`);
     if (cached?.success && cached.data?.stt === sttParam) {
       return cached.data as VoucherFullDetail;
     }
@@ -230,6 +238,16 @@ export function App() {
     ngayCt?: string;
   }>({});
 
+  // Overlay Thêm mới (F2) / Sửa (F3) phiếu xuất kho trực tiếp từ PickupDialog
+  const [warehouseOverlay, setWarehouseOverlay] = useState<{
+    mode: "M" | "S";
+    stt?: string;
+    voucher?: VoucherFullDetail | null;
+    initialInherited?: Partial<VoucherFullDetail>;
+  } | null>(null);
+  const [pickupRefreshTrigger, setPickupRefreshTrigger] = useState<number>(0);
+  const [pickupFocusStt, setPickupFocusStt] = useState<string | null>(null);
+
   const handleOpenPickup = (maDt?: string, ngayCt?: string) => {
     setPickupParams({
       maDt: maDt || activeVoucher?.ma_dt || currentSelectedVoucher?.ma_dt || "",
@@ -240,6 +258,71 @@ export function App() {
         undefined,
     });
     setIsPickupOpen(true);
+  };
+
+  const handleCreateWarehouseSlipFromPickup = async () => {
+    const dtCode = (
+      pickupParams.maDt ||
+      activeVoucher?.ma_dt ||
+      currentSelectedVoucher?.ma_dt ||
+      ""
+    ).trim();
+    const ngayCtVal =
+      pickupParams.ngayCt ||
+      activeVoucher?.ngay_ct ||
+      currentSelectedVoucher?.ngay_ct ||
+      undefined;
+
+    let custInfo: Partial<VoucherFullDetail> = {};
+    if (dtCode) {
+      await initCustomerIndex();
+      const hit = getCustomer(dtCode);
+      if (hit) {
+        custInfo = {
+          ma_dt: hit.ma_dt,
+          ten_dt: hit.ten_dt,
+          dia_chi: hit.dia_chi,
+          ong_ba: hit.ong_ba,
+          ma_bp: hit.ma_bp,
+          ten_bp: hit.ten_bp,
+        };
+      } else {
+        custInfo = { ma_dt: dtCode };
+      }
+    }
+
+    setWarehouseOverlay({
+      mode: "M",
+      voucher: null,
+      initialInherited: {
+        ...custInfo,
+        ngay_ct: ngayCtVal,
+        dien_giai0: "xuất bán",
+        ma_ct: "X1",
+      },
+    });
+  };
+
+  const handleEditWarehouseSlipFromPickup = async (stt: string) => {
+    try {
+      const res = await fetch(
+        `/api/vouchers/${encodeURIComponent(stt)}?db_mode=warehouse`,
+      );
+      const data = await res.json();
+      if (res.ok && data?.success && data?.data) {
+        setWarehouseOverlay({
+          mode: "S",
+          stt,
+          voucher: data.data as VoucherFullDetail,
+        });
+      } else {
+        showToast(
+          `Không thể tải phiếu kho ${stt}: ${data?.message || "Lỗi không xác định"}`,
+        );
+      }
+    } catch (err: any) {
+      showToast(`Lỗi tải phiếu kho: ${err.message}`);
+    }
   };
 
   // Handler for F2 (New Voucher)
@@ -312,14 +395,26 @@ export function App() {
   // Handler for F8 (Delete Voucher)
   const handleActionDelete = () => {
     if (currentSelectedVoucher) {
-      setDeleteTarget(currentSelectedVoucher);
+      setDeleteTarget({
+        stt: currentSelectedVoucher.stt,
+        so_ct: currentSelectedVoucher.so_ct,
+        ma_dt: currentSelectedVoucher.ma_dt,
+        ten_dt: currentSelectedVoucher.ten_dt,
+        ngay_ct: currentSelectedVoucher.ngay_ct,
+        dbMode: voucherMode,
+        fromPickup: false,
+      });
     } else {
       showToast("Chưa chọn chứng từ để xóa.");
     }
   };
 
-  // Handler for F7 / quick print (Print marked vouchers or active voucher)
-  const handleActionPrint = (options?: { inGia?: "1" | "0"; copies?: number }) => {
+  // Handler for F7 / Ctrl+F7 / quick print (Print marked vouchers or active voucher)
+  const handleActionPrint = (options?: {
+    inGia?: "1" | "0";
+    copies?: number;
+    mode?: "direct" | "preview";
+  }) => {
     const targets =
       marked.size > 0
         ? [
@@ -345,10 +440,11 @@ export function App() {
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
+    const target = deleteTarget;
     setDeleting(true);
     try {
       const res = await fetch(
-        `/api/vouchers/${encodeURIComponent(deleteTarget.stt)}?user_name=KTCN3`,
+        `/api/vouchers/${encodeURIComponent(target.stt)}?user_name=KTCN3&db_mode=${encodeURIComponent(target.dbMode)}`,
         {
           method: "DELETE",
         },
@@ -360,13 +456,22 @@ export function App() {
         );
         return;
       }
-      showToast(
-        `Đã xóa thành công chứng từ số ${deleteTarget.so_ct || deleteTarget.stt}.`,
-      );
-      setDeleteTarget(null);
-      refresh();
-      if (sttParam) {
-        navToList();
+      if (target.fromPickup) {
+        showToast(
+          `Đã xóa thành công phiếu xuất kho số ${target.so_ct || target.stt}.`,
+        );
+        setDeleteTarget(null);
+        setPickupFocusStt(null);
+        setPickupRefreshTrigger((prev) => prev + 1);
+      } else {
+        showToast(
+          `Đã xóa thành công chứng từ số ${target.so_ct || target.stt}.`,
+        );
+        setDeleteTarget(null);
+        refresh();
+        if (sttParam) {
+          navToList();
+        }
       }
     } catch (err: any) {
       showToast(`Lỗi kết nối: ${err.message}`);
@@ -374,6 +479,24 @@ export function App() {
       setDeleting(false);
     }
   };
+
+  // Phím tắt riêng cho modal xác nhận xóa (Esc hủy, F8/Enter xác nhận) kể cả khi mở từ PickupDialog
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!deleting) setDeleteTarget(null);
+      } else if (e.key === "F8" && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!deleting) void handleConfirmDelete();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  });
 
   // VFP Keyboard Shortcuts Handler (khớp ctbhh / ctbhd / ctbhch)
   useHotkeys(
@@ -411,8 +534,10 @@ export function App() {
       onCtrlNumpad4: () => {
         if (!sttParam) handleActionPrint({ inGia: "1", copies: 4 });
       },
-      // Tắt dialog preview khi ấn Ctrl+F7 / Shift+F7 (không mở cửa sổ xem trước)
-      onPreview: () => {},
+      // Ctrl+F7 / Shift+F7 = Mở dialog PrintPreview (có tùy chọn In nợ cũ) trên VoucherList
+      onPreview: () => {
+        if (!sttParam) handleActionPrint({ mode: "preview" });
+      },
       // F8 = Xóa (ctbhh Command3)
       onF8: () => {
         if (!sttParam) handleActionDelete();
@@ -471,6 +596,7 @@ export function App() {
       // ảnh hưởng tới VoucherList trong lúc thao tác trên PickupDialog/Filter...).
     },
     !(
+      !!warehouseOverlay ||
       isPickupOpen ||
       isFilterOpen ||
       isDebtOpen ||
@@ -499,6 +625,9 @@ export function App() {
       case "PRINT":
         handleActionPrint();
         break;
+      case "PREVIEW":
+        handleActionPrint({ mode: "preview" });
+        break;
       case "TOGGLE_MARK":
         toggleMark(selectedStt);
         break;
@@ -526,7 +655,7 @@ export function App() {
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface print:hidden">
         {/* Toast Notification */}
       {notification && (
-        <div className="fixed top-4 right-4 z-50 bg-neutral-900 text-white px-4 py-2 rounded shadow-lg text-xs flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
+        <div className="fixed top-4 right-4 z-[80] bg-neutral-900 text-white px-4 py-2 rounded shadow-lg text-xs flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
           <ShieldCheck className="w-4 h-4 text-tertiary-300" />
           <span>{notification}</span>
         </div>
@@ -534,7 +663,7 @@ export function App() {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-xs">
           <div
             ref={deleteDialogRef}
             className="bg-white rounded shadow-2xl border border-neutral-300 w-[440px] overflow-hidden animate-in fade-in zoom-in-95"
@@ -542,7 +671,11 @@ export function App() {
             <div className="bg-danger-700 text-white px-4 py-2.5 flex items-center justify-between shadow">
               <div className="flex items-center gap-2">
                 <Trash2 className="w-4 h-4" />
-                <span className="font-bold text-sm">Xác nhận xóa chứng từ</span>
+                <span className="font-bold text-sm">
+                  {deleteTarget.dbMode === "warehouse"
+                    ? "Xác nhận xóa phiếu xuất kho"
+                    : "Xác nhận xóa chứng từ"}
+                </span>
               </div>
               <button
                 onClick={() => setDeleteTarget(null)}
@@ -553,7 +686,11 @@ export function App() {
             </div>
             <div className="p-4 text-xs text-neutral-800 space-y-2.5">
               <p className="text-sm">
-                Bạn có chắc chắn muốn xóa chứng từ số:{" "}
+                Bạn có chắc chắn muốn xóa{" "}
+                {deleteTarget.dbMode === "warehouse"
+                  ? "phiếu xuất kho"
+                  : "chứng từ"}{" "}
+                số:{" "}
                 <b className="font-mono text-primary-800 text-base">
                   {deleteTarget.so_ct || deleteTarget.stt}
                 </b>
@@ -569,7 +706,8 @@ export function App() {
               </div>
               <p className="text-danger-700 font-medium text-[11px]">
                 Lưu ý: Thao tác sẽ gọi thủ tục CtBH_Delete để hoàn nhập kho và
-                xóa bút toán sổ cái trên CSDL VP_2014.
+                xóa bút toán trên CSDL{" "}
+                {deleteTarget.dbMode === "warehouse" ? "KH_2014" : "VP_2014"}.
               </p>
             </div>
             <div className="bg-neutral-100 px-4 py-2 flex justify-end gap-2 border-t border-neutral-200">
@@ -598,16 +736,49 @@ export function App() {
           <div className="px-3.5 py-1.5 flex items-center justify-between gap-4">
             {/* Logo, Breadcrumb, Tiêu đề & Khung lọc nhanh (dịch sang trái để dropdown KH rộng rãi) */}
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center justify-center w-7 h-7 rounded bg-primary-700 text-white font-bold text-sm shadow">
-                PX
+              <div
+                className={`flex items-center justify-center w-7 h-7 rounded text-white font-bold text-sm shadow ${
+                  voucherMode === "warehouse"
+                    ? "bg-emerald-700"
+                    : "bg-primary-700"
+                }`}
+              >
+                {voucherMode === "warehouse" ? "KH" : "PX"}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-neutral-600">/</span>
-                <h1 className="text-sm font-semibold text-white tracking-wide">
-                  Phiếu Xuất Bán
-                </h1>
-                <Badge variant="success" className="ml-1 font-mono text-[10px]">
-                  GĐ2: PERSISTENCE (ACID)
+                {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Phiếu Kho (KH_2014) */}
+                <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded border border-neutral-700">
+                  <button
+                    type="button"
+                    onClick={() => setVoucherMode("sales")}
+                    className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                      voucherMode === "sales"
+                        ? "bg-primary-700 text-white shadow-xs"
+                        : "text-neutral-400 hover:text-neutral-200"
+                    }`}
+                    title="Quản lý Hóa đơn / Phiếu Xuất Bán (CSDL VP_2014)"
+                  >
+                    Phiếu Xuất Bán
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoucherMode("warehouse")}
+                    className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                      voucherMode === "warehouse"
+                        ? "bg-emerald-700 text-white shadow-xs"
+                        : "text-neutral-400 hover:text-neutral-200"
+                    }`}
+                    title="Quản lý Phiếu Xuất Kho (CSDL KH_2014)"
+                  >
+                    Phiếu Xuất Kho
+                  </button>
+                </div>
+                <Badge
+                  variant={voucherMode === "warehouse" ? "info" : "success"}
+                  className="ml-0.5 font-mono text-[10px]"
+                >
+                  {voucherMode === "warehouse" ? "CSDL: KH_2014" : "CSDL: VP_2014"}
                 </Badge>
               </div>
 
@@ -772,9 +943,11 @@ export function App() {
       <main className="flex-1 overflow-hidden relative min-h-0">
         {sttParam ? (
           <VoucherForm
-            key={isNew ? "new" : sttParam}
+            key={`${voucherMode}:${isNew ? "new" : sttParam}`}
             stt={isNew ? undefined : sttParam}
             mode={isNew ? "M" : "S"}
+            voucherMode={voucherMode}
+            isSuspended={!!warehouseOverlay}
             voucher={isNew ? null : editingVoucher}
             initialInherited={inheritedData || undefined}
             pickupPayload={pickupPayload}
@@ -803,6 +976,7 @@ export function App() {
             detailItems={listDetail}
             detailLoading={listDetailLoading}
             debtAmount={debtAmount}
+            voucherMode={voucherMode}
             onSelectStt={setSelectedStt}
             onToggleMark={toggleMark}
             onOpenFilter={() => setIsFilterOpen(true)}
@@ -890,6 +1064,14 @@ export function App() {
                 <span>In phiếu</span>
               </button>
               <button
+                onClick={() => handleHotkeyBarAction("PREVIEW")}
+                className="px-2 py-0.5 bg-neutral-800 hover:bg-primary-700 text-neutral-100 hover:text-white rounded border border-neutral-700 transition flex items-center gap-1 font-medium cursor-pointer"
+                title="Mở hộp thoại xem trước khi in & tùy chọn In nợ cũ (Ctrl+F7)"
+              >
+                <kbd className="text-[9px] py-0 px-1">Ctrl+F7</kbd>
+                <span>Xem trước</span>
+              </button>
+              <button
                 onClick={() => handleHotkeyBarAction("FILTER")}
                 className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 transition flex items-center gap-1 cursor-pointer"
               >
@@ -922,6 +1104,7 @@ export function App() {
 
       <PickupDialog
         isOpen={isPickupOpen}
+        isSuspended={!!warehouseOverlay || !!deleteTarget}
         onClose={() => setIsPickupOpen(false)}
         maDt={
           pickupParams.maDt ||
@@ -935,6 +1118,25 @@ export function App() {
           currentSelectedVoucher?.ngay_ct ||
           undefined
         }
+        refreshTrigger={pickupRefreshTrigger}
+        focusStt={pickupFocusStt}
+        onCreateWarehouseSlip={() => {
+          void handleCreateWarehouseSlipFromPickup();
+        }}
+        onEditWarehouseSlip={(stt) => {
+          void handleEditWarehouseSlipFromPickup(stt);
+        }}
+        onDeleteWarehouseSlip={(slip) => {
+          setDeleteTarget({
+            stt: slip.stt,
+            so_ct: slip.so_ct,
+            ma_dt: slip.ma_dt,
+            ten_dt: slip.ten_dt,
+            ngay_ct: slip.ngay_ct,
+            dbMode: "warehouse",
+            fromPickup: true,
+          });
+        }}
         onAccept={(_slips, items, maXe) => {
           setPickupPayload({ items, ma_xe: maXe });
           if (!sttParam) {
@@ -944,6 +1146,36 @@ export function App() {
           showToast(`Đã lấy ${items.length} dòng hàng từ kho.`);
         }}
       />
+
+      {/* Overlay Thêm / Sửa Phiếu Xuất Kho (KH_2014) mở trực tiếp từ PickupDialog */}
+      {warehouseOverlay && (
+        <div className="fixed inset-0 z-[60] bg-white flex flex-col overflow-hidden shadow-2xl">
+          <VoucherForm
+            key={`wh-overlay:${warehouseOverlay.mode}:${warehouseOverlay.stt || "new"}`}
+            stt={warehouseOverlay.stt}
+            mode={warehouseOverlay.mode}
+            voucherMode="warehouse"
+            voucher={warehouseOverlay.voucher || null}
+            initialInherited={warehouseOverlay.initialInherited}
+            onBack={() => {
+              setWarehouseOverlay(null);
+            }}
+            onPrint={() => {}}
+            onViewDebt={() => {}}
+            onOpenPickup={() => {}}
+            onSaveSuccess={(savedStt) => {
+              setWarehouseOverlay(null);
+              setPickupFocusStt(savedStt);
+              setPickupRefreshTrigger((prev) => prev + 1);
+              showToast(
+                warehouseOverlay.mode === "M"
+                  ? "Đã tạo mới phiếu xuất kho thành công."
+                  : "Đã cập nhật phiếu xuất kho thành công.",
+              );
+            }}
+          />
+        </div>
+      )}
 
       <DebtPanel
         isOpen={isDebtOpen}
@@ -961,6 +1193,7 @@ export function App() {
         stts={printStts}
         inGia={printInGia ?? printPrice}
         copies={printCopies}
+        mode={printMode}
       />
     </>
   );

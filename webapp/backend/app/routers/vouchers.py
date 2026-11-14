@@ -32,10 +32,11 @@ def list_vouchers(
     filter_by_user: Optional[str] = Query(None, description="Lọc theo người lập"),
     dien_giai: Optional[str] = Query(None, description="Tìm theo diễn giải"),
     page: int = Query(1, ge=1, description="Trang hiện tại"),
-    page_size: int = Query(50, ge=1, le=500, description="Kích thước trang")
+    page_size: int = Query(50, ge=1, le=500, description="Kích thước trang"),
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
 ):
     """
-    Danh sách chứng từ bán hàng (ctbhh).
+    Danh sách chứng từ bán hàng (VP_2014) hoặc phiếu xuất kho (KH_2014).
     Hỗ trợ lọc đa tiêu chí, phân trang và dòng tổng cộng.
     """
     res = voucher_service.list_vouchers(
@@ -58,7 +59,8 @@ def list_vouchers(
         filter_by_user=filter_by_user,
         dien_giai=dien_giai,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        db_mode=db_mode or "sales",
     )
     return {
         "success": True,
@@ -70,12 +72,15 @@ def list_vouchers(
     }
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
-def create_voucher(req: VoucherCreateRequest):
+def create_voucher(
+    req: VoucherCreateRequest,
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+):
     """
-    Tạo mới chứng từ bán hàng (mode = 'M') vào VP_2014 với ACID transaction.
+    Tạo mới chứng từ bán hàng (VP_2014) hoặc phiếu xuất kho (KH_2014) với ACID transaction.
     """
     try:
-        res = voucher_service.create_voucher(req, user_name=req.user_name or "KTCN3")
+        res = voucher_service.create_voucher(req, user_name=req.user_name or "KTCN3", db_mode=db_mode or "sales")
         return {
             "success": True,
             "data": res.model_dump()
@@ -95,15 +100,19 @@ def create_voucher(req: VoucherCreateRequest):
 def get_next_voucher_number(
     ma_dvcs: Optional[str] = Query("S1", description="Mã đơn vị cơ sở"),
     ma_ct: Optional[str] = Query("X1", description="Mã chứng từ"),
-    ngay_ct: Optional[str] = Query(None, description="Ngày chứng từ (YYYY-MM-DD)")
+    ngay_ct: Optional[str] = Query(None, description="Ngày chứng từ (YYYY-MM-DD)"),
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+    prefix_so_ct: Optional[str] = Query(None, description="Số phiếu/tiền tố gợi ý (dùng cho KH_2014 nhiều đầu mã)"),
 ):
     """
-    Lấy số chứng từ tự động tiếp theo (ví dụ: lớn nhất là HD1000 -> trả về HD1001).
+    Lấy số chứng từ tự động tiếp theo trong tháng (số lớn nhất trong tháng + 1).
     """
     next_so_ct = voucher_service.get_next_number(
         ma_dvcs=ma_dvcs or "S1",
         ma_ct=ma_ct or "X1",
-        ngay_ct=ngay_ct
+        ngay_ct=ngay_ct,
+        db_mode=db_mode or "sales",
+        prefix_so_ct=prefix_so_ct,
     )
     return {
         "success": True,
@@ -113,12 +122,15 @@ def get_next_voucher_number(
     }
 
 @router.post("/check-number", response_model=dict)
-def check_voucher_number(req: CheckNumberRequest):
+def check_voucher_number(
+    req: CheckNumberRequest,
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+):
     """
     Kiểm tra trùng số chứng từ (ST_Check_Number) và tự tăng nếu trùng.
     """
     try:
-        res = voucher_service.check_number(req)
+        res = voucher_service.check_number(req, db_mode=db_mode or "sales")
         return {
             "success": True,
             "data": res.model_dump()
@@ -142,12 +154,14 @@ def calculate_voucher(req: CalcRequest):
     }
 
 @router.get("/{stt}", response_model=dict)
-def get_voucher_detail(stt: str):
+def get_voucher_detail(
+    stt: str,
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+):
     """
-    Chi tiết 1 chứng từ bán hàng (ctbhd).
-    Trả về toàn bộ 46 cột Header và mảng các dòng với 35 cột Detail.
+    Chi tiết 1 chứng từ bán hàng (VP_2014) hoặc phiếu xuất kho (KH_2014).
     """
-    voucher = voucher_service.get_voucher(stt)
+    voucher = voucher_service.get_voucher(stt, db_mode=db_mode or "sales")
     if not voucher:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -159,12 +173,18 @@ def get_voucher_detail(stt: str):
     }
 
 @router.put("/{stt}", response_model=dict)
-def update_voucher(stt: str, req: VoucherUpdateRequest):
+def update_voucher(
+    stt: str,
+    req: VoucherUpdateRequest,
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+):
     """
-    Sửa chứng từ bán hàng (mode = 'S') trên VP_2014 với ACID transaction.
+    Sửa chứng từ bán hàng (VP_2014) hoặc phiếu xuất kho (KH_2014) với ACID transaction.
     """
     try:
-        res = voucher_service.update_voucher(stt=stt, data=req, user_name=req.user_name or "KTCN3")
+        res = voucher_service.update_voucher(
+            stt=stt, data=req, user_name=req.user_name or "KTCN3", db_mode=db_mode or "sales"
+        )
         return {
             "success": True,
             "data": res.model_dump()
@@ -181,12 +201,18 @@ def update_voucher(stt: str, req: VoucherUpdateRequest):
         )
 
 @router.delete("/{stt}", response_model=dict)
-def delete_voucher(stt: str, user_name: Optional[str] = Query("KTCN3")):
+def delete_voucher(
+    stt: str,
+    user_name: Optional[str] = Query("KTCN3"),
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
+):
     """
-    Xóa chứng từ trên VP_2014 qua CtBH_Delete với ACID transaction.
+    Xóa chứng từ trên VP_2014 hoặc KH_2014 qua CtBH_Delete với ACID transaction.
     """
     try:
-        res = voucher_service.delete_voucher(stt=stt, user_name=user_name or "KTCN3")
+        res = voucher_service.delete_voucher(
+            stt=stt, user_name=user_name or "KTCN3", db_mode=db_mode or "sales"
+        )
         return {
             "success": True,
             "data": res.model_dump()
