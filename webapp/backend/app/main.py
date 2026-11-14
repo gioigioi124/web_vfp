@@ -1,10 +1,13 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import test_db_connection
@@ -72,15 +75,20 @@ app.include_router(print_router.router)
 app.include_router(prices.router)
 app.include_router(products.router)
 
-@app.get("/", tags=["Health"])
-def root():
+def _app_info_payload():
     return {
         "success": True,
         "app": settings.APP_NAME,
         "phase": "Giai đoạn 1 (Read-Only)",
         "version": "1.0.0",
-        "docs_url": "/docs"
+        "docs_url": "/docs",
     }
+
+
+@app.get("/api/info", tags=["Health"])
+def app_info():
+    return _app_info_payload()
+
 
 @app.get("/api/health", tags=["Health"])
 def health_check():
@@ -100,3 +108,31 @@ def health_check():
             "VTSYS": sys_conn
         }
     }
+
+
+# Serve built Frontend SPA (production single-port deployment)
+_FRONTEND_DIST_DIR = (Path(__file__).resolve().parent.parent.parent / "frontend" / "dist").resolve()
+_FRONTEND_INDEX = _FRONTEND_DIST_DIR / "index.html"
+
+if _FRONTEND_INDEX.is_file():
+    _assets_dir = _FRONTEND_DIST_DIR / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    def serve_spa_root():
+        return FileResponse(_FRONTEND_INDEX)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa_fallback(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        if full_path:
+            candidate = (_FRONTEND_DIST_DIR / full_path).resolve()
+            if candidate.is_relative_to(_FRONTEND_DIST_DIR) and candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(_FRONTEND_INDEX)
+else:
+    @app.get("/", tags=["Health"])
+    def root():
+        return _app_info_payload()
