@@ -35,3 +35,30 @@ export interface DebtDetailData {
   con_lai: number;
   transactions: DebtTransactionItem[];
 }
+
+export interface DebtLedgerEntry {
+  stt?: string;
+  ma_ct: string;
+  ngay_ct: string;
+  so_ct: string;
+  dien_giai: string;
+  ps_tang: number;
+  ps_giam: number;
+}
+
+export interface DebtLedgerData {
+  ma_dt: string;
+  ten_dt?: string;
+  tk: string;
+  ngay_bd: string;
+  ngay_kt: string;
+  du_dau: number;
+  du_dau_tang: number;
+  du_dau_giam: number;
+  tong_ps_tang: number;
+  tong_ps_giam: number;
+  du_cuoi: number;
+  du_cuoi_tang: number;
+  du_cuoi_giam: number;
+  entries: DebtLedgerEntry[];
+}

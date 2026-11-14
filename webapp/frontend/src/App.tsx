@@ -570,6 +570,13 @@ export function App() {
       onCtrlF: () => {
         if (!sttParam) showToast("Ctrl+F - Đánh số chứng từ tự động.");
       },
+      onCtrlShiftE: () => {
+        if (!sttParam) {
+          handleOpenDebt(
+            (currentSelectedVoucher?.ma_dt || "").trim().toUpperCase(),
+          );
+        }
+      },
       onEscape: () => {
         if (deleteTarget) {
           setDeleteTarget(null);
@@ -1161,7 +1168,7 @@ export function App() {
               setWarehouseOverlay(null);
             }}
             onPrint={() => {}}
-            onViewDebt={() => {}}
+            onViewDebt={(dt) => handleOpenDebt(dt)}
             onOpenPickup={() => {}}
             onSaveSuccess={(savedStt) => {
               setWarehouseOverlay(null);
