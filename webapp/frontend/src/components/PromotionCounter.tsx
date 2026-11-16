@@ -85,7 +85,13 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
     evaluatedRules,
     matchedRules,
     ignoredGiftRowCount,
+    nominalGiftRows,
+    nominalGiftItems,
+    nominalGiftTotalQty,
   } = evaluation;
+
+  const isVnd = (maTte || "VND").trim().toUpperCase() === "VND";
+  const showNominalGifts = !isWarehouse && isVnd;
 
   const outOfDateAuto = !isDateInRange && programOverride === "AUTO";
   const displayedRules = onlyMatchedInModal
@@ -162,6 +168,38 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
             </button>
           );
         })}
+
+        {/* Đếm hàng mang ra khuyến mại (đơn giá 1–10 đồng VND) */}
+        {showNominalGifts && (
+          <button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] transition-colors cursor-pointer ${
+              nominalGiftTotalQty > 0
+                ? "bg-sky-50 text-sky-900 border-sky-300 hover:bg-sky-100"
+                : "bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50"
+            }`}
+            title={
+              nominalGiftItems.length > 0
+                ? `Hàng mang ra khuyến mại (giá 1–10₫):\n${nominalGiftItems
+                    .map(
+                      (g) =>
+                        `• ${g.ma_vt}${g.ten_vt ? ` - ${g.ten_vt}` : ""}: ${formatQuantity(g.totalQty)} ${g.dvt}`.trim(),
+                    )
+                    .join("\n")}`
+                : "Đếm hàng mang ra khuyến mại có đơn giá từ 1–10₫"
+            }
+          >
+            <span className="font-medium">Hàng KM (1–10₫):</span>
+            <span
+              className={`font-mono font-bold ${
+                nominalGiftTotalQty > 0 ? "text-sky-700" : "text-neutral-600"
+              }`}
+            >
+              {formatQuantity(nominalGiftTotalQty)}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Modal chi tiết các nhóm khuyến mại */}
@@ -265,6 +303,57 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
                 </label>
               </div>
             </div>
+
+            {/* Hàng mang ra khuyến mại (giá 1–10₫) */}
+            {showNominalGifts && (
+              <div className="px-4 py-2 bg-sky-50/60 border-b border-neutral-200 shrink-0 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-sky-900">
+                      Hàng mang ra khuyến mại (đơn giá 1–10₫):
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-900 font-mono font-bold text-xs border border-sky-200">
+                      {formatQuantity(nominalGiftTotalQty)}
+                    </span>
+                    {nominalGiftRows.length > 0 && (
+                      <span className="text-[11px] text-sky-800">
+                        ({nominalGiftRows.length} dòng · {nominalGiftItems.length} mã)
+                      </span>
+                    )}
+                  </div>
+                  {nominalGiftItems.length === 0 && (
+                    <span className="text-[11px] text-neutral-500 italic">
+                      Chưa có dòng hàng giá 1–10₫ trên phiếu.
+                    </span>
+                  )}
+                </div>
+
+                {nominalGiftItems.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {nominalGiftItems.map((g) => (
+                      <div
+                        key={g.ma_vt}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-white border border-sky-200 text-[11px]"
+                        title={g.ten_vt}
+                      >
+                        <span className="font-mono font-semibold text-primary-800">
+                          {g.ma_vt}
+                        </span>
+                        {g.ten_vt && (
+                          <span className="text-neutral-600 max-w-[240px] truncate">
+                            {g.ten_vt}
+                          </span>
+                        )}
+                        <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200">
+                          {formatQuantity(g.totalQty)}
+                          {g.dvt ? ` ${g.dvt}` : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Rules Table */}
             <div className="flex-1 overflow-auto">

@@ -123,6 +123,23 @@ export interface GiftSummaryItem {
   totalGiftQty: number;
 }
 
+export interface NominalGiftRow {
+  rowIndex: number;
+  ma_vt: string;
+  ten_vt: string;
+  dvt: string;
+  qty: number;
+  gia_nt9: number;
+}
+
+export interface NominalGiftSummaryItem {
+  ma_vt: string;
+  ten_vt: string;
+  dvt: string;
+  totalQty: number;
+  rowCount: number;
+}
+
 export interface PromotionEvaluation {
   program: PromotionProgram;
   isDateInRange: boolean;
@@ -132,6 +149,10 @@ export interface PromotionEvaluation {
   totalSets: number;
   giftSummary: GiftSummaryItem[];
   ignoredGiftRowCount: number;
+  /** Các dòng hàng mang ra khuyến mại (đơn giá từ 1–10 đồng VND). */
+  nominalGiftRows: NominalGiftRow[];
+  nominalGiftItems: NominalGiftSummaryItem[];
+  nominalGiftTotalQty: number;
 }
 
 export interface EvaluatePromotionOptions {
@@ -306,6 +327,9 @@ export function evaluatePromotionProgram(
     Boolean(program.excludeNominalGiftRowsByDefault);
 
   let ignoredGiftRowCount = 0;
+  let nominalGiftTotalQty = 0;
+  const nominalGiftRows: NominalGiftRow[] = [];
+  const nominalGiftMap = new Map<string, NominalGiftSummaryItem>();
   const eligibleRows: Array<{
     rowIndex: number;
     item: VoucherDetail;
@@ -320,9 +344,41 @@ export function evaluatePromotionProgram(
     if (qty <= 0) return;
 
     const giaNt9 = Number(item.gia_nt9 ?? 0);
-    if (shouldExcludeNominal && isVnd && giaNt9 >= 1 && giaNt9 <= 10) {
-      ignoredGiftRowCount += 1;
-      return;
+    const isNominalGift = isVnd && giaNt9 >= 1 && giaNt9 <= 10;
+
+    if (isNominalGift) {
+      const upperCode = maVt.toUpperCase();
+      const tenVt = (item.ten_vt || "").trim();
+      const dvt = (item.dvt || "").trim();
+      nominalGiftRows.push({
+        rowIndex,
+        ma_vt: upperCode,
+        ten_vt: tenVt,
+        dvt,
+        qty,
+        gia_nt9: giaNt9,
+      });
+      nominalGiftTotalQty = round(nominalGiftTotalQty + qty, 2);
+
+      const existingGift = nominalGiftMap.get(upperCode);
+      if (existingGift) {
+        existingGift.totalQty = round(existingGift.totalQty + qty, 2);
+        existingGift.rowCount += 1;
+        if (!existingGift.ten_vt && tenVt) existingGift.ten_vt = tenVt;
+      } else {
+        nominalGiftMap.set(upperCode, {
+          ma_vt: upperCode,
+          ten_vt: tenVt,
+          dvt,
+          totalQty: qty,
+          rowCount: 1,
+        });
+      }
+
+      if (shouldExcludeNominal) {
+        ignoredGiftRowCount += 1;
+        return;
+      }
     }
 
     eligibleRows.push({ rowIndex, item, qty, gia_nt9: giaNt9 });
@@ -420,5 +476,8 @@ export function evaluatePromotionProgram(
     totalSets,
     giftSummary: Array.from(giftMap.values()),
     ignoredGiftRowCount,
+    nominalGiftRows,
+    nominalGiftItems: Array.from(nominalGiftMap.values()),
+    nominalGiftTotalQty,
   };
 }
