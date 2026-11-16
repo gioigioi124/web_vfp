@@ -84,7 +84,6 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
     isDateInRange,
     evaluatedRules,
     matchedRules,
-    totalMatchedQty,
     ignoredGiftRowCount,
   } = evaluation;
 
@@ -117,7 +116,7 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* Nút tổng hợp khuyến mại trên thanh Chi tiết hàng hóa */}
+        {/* Nút mở bảng đối chiếu khuyến mại trên thanh Chi tiết hàng hóa */}
         <button
           type="button"
           onClick={() => setIsOpen(true)}
@@ -125,12 +124,7 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
           title={`Xem chi tiết bộ đếm khuyến mại (${program.name})`}
         >
           <Gift className="w-3 h-3 shrink-0" />
-          <span>KM:</span>
-          <span className="font-mono font-bold">
-            {matchedRules.length > 0
-              ? `${formatQuantity(totalMatchedQty)} SL`
-              : "0"}
-          </span>
+          <span>KM</span>
           {outOfDateAuto && (
             <span className="text-[10px] font-normal opacity-80">
               (Ngoài hạn)

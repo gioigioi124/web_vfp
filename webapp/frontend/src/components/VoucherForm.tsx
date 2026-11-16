@@ -93,6 +93,8 @@ const emptyDetailRow = (): VoucherDetail => ({
   gia_tb_tt: "C",
 });
 
+const CURRENT_USER = "KTCN3";
+
 export const VoucherForm: React.FC<VoucherFormProps> = ({
   stt: sttProp,
   voucher,
@@ -113,6 +115,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const isEdit = mode === "S";
   const isEditable = isCreate || isEdit;
   const voucherStt = voucher?.stt || sttProp || "";
+  const voucherCreator = isCreate
+    ? CURRENT_USER
+    : (voucher?.user_name || "").trim();
+  const isDifferentCreator =
+    !isCreate && (!voucher || voucherCreator.toUpperCase() !== CURRENT_USER);
 
   // Refs for sequential focus & Enter navigation:
   // Ngày -> Số phiếu -> Mã đối tượng -> Diễn giải -> Mã xe -> Chọn phiếu xuất
@@ -245,12 +252,12 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     is_near_limit: boolean;
     status_message: string;
   } | null>(null);
-  // Dialog cảnh báo (công nợ, hoặc mã khách hàng không hợp lệ — không làm xô lệch form).
+  // Dialog cảnh báo (công nợ, khác người lập, hoặc mã khách hàng không hợp lệ — không làm xô lệch form).
   const [debtDialog, setDebtDialog] = useState<{
     title: string;
     message: string;
     tone: "danger" | "warning";
-    focusTarget?: "tenDt" | "maDt";
+    focusTarget?: "tenDt" | "maDt" | "none";
   } | null>(null);
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
@@ -263,6 +270,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const closeDebtDialog = useCallback(() => {
     const target = debtDialog?.focusTarget ?? "tenDt";
     setDebtDialog(null);
+    if (target === "none") return;
     const focusField = () => {
       const el =
         target === "maDt" ? maDtInputRef.current : tenDtInputRef.current;
@@ -849,8 +857,20 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   ).size;
 
   // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
-  const handleSave = async (skipDebtCheck: boolean = false) => {
+  const handleSave = async (bypassChecks: boolean = false) => {
     if (saving) return;
+    if (isDifferentCreator && !bypassChecks) {
+      setDebtDialog({
+        title: "Không thể lưu phiếu của người khác",
+        tone: "danger",
+        focusTarget: "none",
+        message: voucher
+          ? `Phiếu này do "${voucherCreator || "(không rõ)"}" lập, không phải phiếu của ${CURRENT_USER}.\n\n` +
+            `Không thể lưu bằng chế độ thường. Vui lòng nhấn Shift + Enter nếu muốn lưu (bỏ qua kiểm tra người lập và công nợ).`
+          : "Đang tải thông tin người lập phiếu, vui lòng thử lại sau giây lát.",
+      });
+      return;
+    }
     setErrorMessage(null);
 
     if (!maDt.trim()) {
@@ -1003,8 +1023,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         ttien2: saveTotals.ttien2,
         ttien3: saveTotals.ttien3,
         ttien0: saveTotals.ttien0,
-        user_name: "KTCN3",
-        skip_debt_check: skipDebtCheck,
+        user_name: isCreate ? CURRENT_USER : (voucher?.user_name ?? ""),
+        skip_debt_check: bypassChecks,
         custom_so_ct: isCustomSoCt,
         items: validItems.map((it) => ({
           ...it,
@@ -1061,6 +1081,24 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
   };
 
+  const openDebtLedger = useCallback(() => {
+    if (!onViewDebt) return;
+    const candidate = (maDtValueRef.current || maDt || "")
+      .trim()
+      .toUpperCase();
+    if (!candidate || maDtError) {
+      onViewDebt("");
+      return;
+    }
+    void (async () => {
+      await initCustomerIndex();
+      const valid = isCustomerIndexReady()
+        ? Boolean(getCustomer(candidate))
+        : Boolean(tenDt.trim());
+      onViewDebt(valid ? candidate : "");
+    })();
+  }, [maDt, maDtError, onViewDebt, tenDt]);
+
   // Keyboard shortcut listener for Ctrl+Enter / Esc / F8 / F4
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1097,20 +1135,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         if (!onViewDebt) return;
         e.preventDefault();
         e.stopPropagation();
-        const candidate = (maDtValueRef.current || maDt || "")
-          .trim()
-          .toUpperCase();
-        if (!candidate || maDtError) {
-          onViewDebt("");
-          return;
-        }
-        void (async () => {
-          await initCustomerIndex();
-          const valid = isCustomerIndexReady()
-            ? Boolean(getCustomer(candidate))
-            : Boolean(tenDt.trim());
-          onViewDebt(valid ? candidate : "");
-        })();
+        openDebtLedger();
       } else if (e.key === "Escape") {
         e.preventDefault();
         onBack();
@@ -1158,7 +1183,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditable, isSuspended, isWarehouse, activeRowIndex, items, maDt, tenDt, maDtError, ngayCt, soCt, totals, onViewDebt]);
+  }, [isEditable, isSuspended, isWarehouse, activeRowIndex, items, maDt, tenDt, maDtError, ngayCt, soCt, totals, onViewDebt, openDebtLedger, voucher?.user_name]);
 
   // Khóa hẳn phím F5 tải lại trang trong VoucherForm; khi đang thêm/sửa sẽ mở Máy tính đơn giá cho dòng đang chọn.
   const handleOpenPriceCalc = useCallback(() => {
@@ -1332,8 +1357,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         <div className="flex items-center gap-4 text-xs">
           <div className="flex items-center gap-1.5">
             <span className="text-primary-200">Người lập:</span>
-            <span className="font-semibold text-white bg-black/25 px-2 py-0.5 rounded border border-white/20">
-              KTCN3
+            <span
+              className={`font-semibold px-2 py-0.5 rounded border ${
+                isDifferentCreator && voucher
+                  ? "text-amber-200 bg-amber-950/60 border-amber-400/50"
+                  : "text-white bg-black/25 border-white/20"
+              }`}
+              title={
+                isDifferentCreator && voucher
+                  ? `Phiếu do ${voucherCreator || "(trống)"} lập — nút Lưu bị khóa (dùng Shift+Enter để lưu bỏ qua kiểm tra)`
+                  : undefined
+              }
+            >
+              {isCreate ? CURRENT_USER : voucher ? voucherCreator || "—" : "..."}
             </span>
           </div>
           <div className="flex items-center gap-1 pl-2 border-l border-white/20">
@@ -1506,33 +1542,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                       <span className="text-neutral-300">|</span>
                       <button
                         type="button"
-                        onClick={() => {
-                          const fmt = (n: number) => formatCurrency(n, "VND");
-                          setDebtDialog({
-                            title: debtInfo.is_over_limit
-                              ? "Vượt quá hạn mức nợ"
-                              : debtInfo.is_near_limit
-                                ? "Đến hạn mức thanh toán"
-                                : "Công nợ khách hàng",
-                            tone: debtInfo.is_over_limit
-                              ? "danger"
-                              : debtInfo.is_near_limit
-                                ? "warning"
-                                : "warning",
-                            message:
-                              `Khách hàng: ${maDt}\n\n` +
-                              `Dư nợ hiện tại: ${fmt(debtInfo.du_cuoi)}\n` +
-                              (!isCreate &&
-                              voucherStt &&
-                              debtInfo.du_cuoi_kiem_tra !== undefined &&
-                              debtInfo.du_cuoi_kiem_tra !== debtInfo.du_cuoi
-                                ? `Dư nợ kiểm tra (trừ đơn đang mở): ${fmt(debtInfo.du_cuoi_kiem_tra)}\n`
-                                : "") +
-                              `Giới hạn nợ: ${fmt(debtInfo.gioi_han)}\n` +
-                              `Ngưỡng cảnh báo: ${fmt(debtInfo.toi_han)}\n\n` +
-                              `${debtInfo.status_message}`,
-                          });
-                        }}
+                        onClick={openDebtLedger}
                         className={`inline-flex items-center gap-1 text-xs cursor-pointer hover:underline ${
                           debtInfo.is_over_limit
                             ? "text-danger-700 font-bold"
@@ -1540,7 +1550,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                               ? "text-amber-700 font-semibold"
                               : "text-neutral-700 font-medium"
                         }`}
-                        title="Xem chi tiết công nợ"
+                        title="Mở sổ chi tiết công nợ [Ctrl+Shift+E]"
                       >
                         <CreditCard className="w-3.5 h-3.5 opacity-70" />
                         <span>
@@ -2000,11 +2010,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         <div className="flex items-center gap-1.5">
           {isEditable ? (
             <button
-              className="inline-flex items-center px-2.5 py-1 bg-primary-700 hover:bg-primary-800 text-white text-xs font-semibold rounded shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded shadow-sm transition-all ${
+                isDifferentCreator
+                  ? "bg-neutral-200 text-neutral-500 cursor-not-allowed opacity-70"
+                  : "bg-primary-700 hover:bg-primary-800 text-white disabled:opacity-50 cursor-pointer"
+              }`}
               type="button"
               onClick={() => handleSave(false)}
-              disabled={saving}
-              title="Chấp nhận lưu chứng từ (Ctrl + Enter; Shift + Enter để lưu và bỏ qua công nợ)"
+              disabled={saving || isDifferentCreator}
+              title={
+                isDifferentCreator
+                  ? `Phiếu do "${voucherCreator || "(trống)"}" lập — nút Lưu bị khóa (dùng Shift + Enter để lưu bỏ qua công nợ và người lập)`
+                  : "Chấp nhận lưu chứng từ (Ctrl + Enter; Shift + Enter để lưu và bỏ qua công nợ)"
+              }
             >
               {saving ? (
                 <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
@@ -2012,7 +2030,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 <Check className="w-3.5 h-3.5 mr-1.5" />
               )}
               {saving ? "Đang lưu..." : "Chấp nhận"}
-              <kbd className="ml-1.5 bg-primary-900/40 text-primary-100 border-primary-600 text-[10px]">
+              <kbd
+                className={`ml-1.5 text-[10px] ${
+                  isDifferentCreator
+                    ? "bg-neutral-300 text-neutral-500 border-neutral-400"
+                    : "bg-primary-900/40 text-primary-100 border-primary-600"
+                }`}
+              >
                 Ctrl + Enter
               </kbd>
             </button>

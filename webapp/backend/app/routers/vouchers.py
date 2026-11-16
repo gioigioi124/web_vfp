@@ -183,7 +183,7 @@ def update_voucher(
     """
     try:
         res = voucher_service.update_voucher(
-            stt=stt, data=req, user_name=req.user_name or "KTCN3", db_mode=db_mode or "sales"
+            stt=stt, data=req, user_name=req.user_name if req.user_name is not None else "", db_mode=db_mode or "sales"
         )
         return {
             "success": True,

@@ -1035,7 +1035,7 @@ class VoucherRepository:
                         TTien = ?, TTien0 = ?, TTien3 = ?, TTien2 = ?, TTien4 = ?,
                         Loai_Ck = ?, TyLeCK = ?, Han_Tt = ?, Ma_Thue = ?, Thue_GTGT = ?,
                         Ma_DtGtGt = ?, Ten_DtGtGt = {self.fn_tcvn}(?), So_Ct0 = ?, Ngay_Ct0 = ?,
-                        Confirmed = ?, Posted = ?, Printed = ?, UserName = ?
+                        Confirmed = ?, Posted = ?, Printed = ?
                     WHERE Stt = ?
                 """
                 cur.execute(update_header_sql, [
@@ -1047,7 +1047,7 @@ class VoucherRepository:
                     data.ttien, data.ttien0, data.ttien3, data.ttien2, data.ttien4,
                     data.loai_ck or "2", None, None, data.ma_thue, data.thue_gtgt,
                     data.ma_dtgtgt or None, data.ten_dtgtgt or None, data.so_ct0 or None, data.ngay_ct0,
-                    1 if data.confirmed is not False else 1, 1 if data.posted else 0, (1 if data.printed else None), user_name or "KTCN3",
+                    1 if data.confirmed is not False else 1, 1 if data.posted else 0, (1 if data.printed else None),
                     stt
                 ])
 
@@ -1118,8 +1118,9 @@ class VoucherRepository:
                 cur.execute(f"DELETE FROM {target_db}.dbo.SoCaiVT WHERE Stt = ?", [stt])
 
             # 3. Post Ledger & Save Document Number
+            post_user_name = (user_name or "") if mode == "S" else (user_name or "KTCN3")
             try:
-                cur.execute(f"SET NOCOUNT ON; EXEC {target_db}.dbo.CtBH_Post @p_Kieu='1', @p_Stt=?, @p_UserName=?", [stt, user_name or "KTCN3"])
+                cur.execute(f"SET NOCOUNT ON; EXEC {target_db}.dbo.CtBH_Post @p_Kieu='1', @p_Stt=?, @p_UserName=?", [stt, post_user_name])
             except Exception as e:
                 logger.warning(f"CtBH_Post ({db_mode}) warning: {e}")
                 if mode == "S":

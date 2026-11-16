@@ -946,3 +946,33 @@ def test_custom_voucher_number_preserved_on_create(sample_voucher_request):
                         assert spy_chk.call_args.kwargs.get("prefer_month_max") is False
 
 
+def test_edit_mode_preserves_original_creator(sample_voucher_request):
+    """Mode sửa ('S') KHÔNG ghi đè CtBH.UserName thành KTCN3 và truyền đúng người lập gốc vào CtBH_Post."""
+    executed = []
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.execute.side_effect = lambda q, p=None: executed.append((" ".join(q.split()), p))
+    mock_cur.fetchone.side_effect = [(True,), (2000000.0, 1)]
+
+    req = sample_voucher_request.model_copy(update={"user_name": "KTNH"})
+    with patch.object(voucher_repository, 'generate_stt', return_value="S1000000000014763699"):
+        with patch.object(voucher_repository, 'get_closing_date', return_value="2026-03-31"):
+            with patch('app.repositories.debt_repo.debt_repository.get_customer_debt_summary') as mock_debt:
+                mock_debt.return_value = MagicMock(is_over_limit=False, du_cuoi=0, gioi_han=100000000)
+                with patch.object(voucher_repository, 'check_duplicate_number', return_value=(False, "HD4081")):
+                    with patch('app.repositories.voucher_repo.get_db_transaction') as mock_tx:
+                        from contextlib import contextmanager
+                        @contextmanager
+                        def fake_tx(db_name=None):
+                            yield mock_conn, mock_cur
+                            mock_conn.commit()
+                        mock_tx.side_effect = fake_tx
+
+                        voucher_repository.save_voucher(req, mode="S", stt_override="S1000000000014763690", user_name="KTNH")
+
+    upd = [q for q, _ in executed if "UPDATE VP_2014.dbo.CtBH SET" in q]
+    assert upd and "UserName" not in upd[0]
+    post_calls = [p for q, p in executed if "CtBH_Post" in q]
+    assert post_calls and post_calls[0][1] == "KTNH"
+
+
