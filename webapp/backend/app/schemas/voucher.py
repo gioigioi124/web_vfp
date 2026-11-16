@@ -181,6 +181,7 @@ class VoucherCreateRequest(BaseModel):
     printed: Optional[bool] = False
     user_name: Optional[str] = ""
     skip_debt_check: Optional[bool] = False
+    custom_so_ct: Optional[bool] = False
     items: List[VoucherDetailSchema] = []
 
 class VoucherUpdateRequest(VoucherCreateRequest):

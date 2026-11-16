@@ -919,3 +919,30 @@ def test_delete_voucher_locked_period_blocked():
             with pytest.raises(ValueError, match="trong kỳ đã khóa sổ"):
                 voucher_repository.delete_voucher("S1000000000014763690")
 
+
+def test_custom_voucher_number_preserved_on_create(sample_voucher_request):
+    """Khi người dùng nhập số phiếu riêng (như HD2057-1 hoặc đặt custom_so_ct=True),
+    save_voucher KHÔNG ghi đè bằng số lớn nhất trong tháng mà kiểm tra bằng ST_Check_Number."""
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_cur.fetchone.side_effect = [(True,), (False,), (2000000.0, 1)]
+
+    req = sample_voucher_request.model_copy(update={"so_ct": "HD2057-1", "custom_so_ct": True})
+    with patch.object(voucher_repository, 'generate_stt', return_value="S1000000000014763691"):
+        with patch.object(voucher_repository, 'get_closing_date', return_value="2026-03-31"):
+            with patch('app.repositories.debt_repo.debt_repository.get_customer_debt_summary') as mock_debt:
+                mock_debt.return_value = MagicMock(is_over_limit=False, du_cuoi=0, gioi_han=100000000)
+                with patch.object(voucher_repository, 'check_duplicate_number', wraps=voucher_repository.check_duplicate_number) as spy_chk:
+                    with patch('app.repositories.voucher_repo.get_db_transaction') as mock_tx:
+                        from contextlib import contextmanager
+                        @contextmanager
+                        def fake_tx(db_name=None):
+                            yield mock_conn, mock_cur
+                            mock_conn.commit()
+                        mock_tx.side_effect = fake_tx
+
+                        res = voucher_repository.save_voucher(req, mode="M")
+                        assert res.so_ct == "HD2057-1"
+                        assert spy_chk.call_args.kwargs.get("prefer_month_max") is False
+
+

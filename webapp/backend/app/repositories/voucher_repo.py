@@ -958,16 +958,25 @@ class VoucherRepository:
                 )
             data.ma_dt = clean_ma_dt
 
+            raw_so_ct = (data.so_ct or "").strip()
+            is_custom_so_ct = bool(getattr(data, "custom_so_ct", False))
+            looks_non_standard_custom = (
+                bool(raw_so_ct)
+                and not is_wh
+                and not re.match(r"^HD\d+$", raw_so_ct, re.IGNORECASE)
+            )
+            use_month_max = (mode == "M") and not is_custom_so_ct and not looks_non_standard_custom
+
             is_dup, final_so_ct = self.check_duplicate_number(
                 ma_dvcs=data.ma_dvcs or "S1",
                 moi_sua=mode,
                 stt=stt_override or "",
                 ma_ct=data.ma_ct or "X1",
                 ngay_ct=data.ngay_ct,
-                so_ct=data.so_ct or "",
+                so_ct=raw_so_ct,
                 cur=cur,
                 db_mode=db_mode,
-                prefer_month_max=(mode == "M"),
+                prefer_month_max=use_month_max,
             )
             data.so_ct = final_so_ct
 

@@ -26,6 +26,7 @@ import {
 import { calcLoai2Item, calcVoucherTotals } from "../lib/calc";
 import { isModalOpen, useModalLock } from "../lib/modalLock";
 import { PriceCalculatorModal } from "./PriceCalculatorModal";
+import { PromotionCounter } from "./PromotionCounter";
 import {
   Printer,
   CreditCard,
@@ -124,6 +125,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const pickupBtnRef = useRef<HTMLButtonElement | null>(null);
   const firstMaVtRef = useRef<HTMLInputElement | null>(null);
   const detailGridRef = useRef<DetailGridHandle | null>(null);
+  const autoSuggestedSoCtRef = useRef<string>("");
+  const userEditedSoCtRef = useRef<boolean>(false);
 
   // Header State
   const [ngayCt, setNgayCt] = useState<string>(
@@ -395,7 +398,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   // 1. Tự động lấy số phiếu tiếp theo (VD: lớn nhất HD1000 -> tự điền HD1001) khi tạo phiếu mới
   useEffect(() => {
-    if (!isCreate) return;
+    if (!isCreate) {
+      autoSuggestedSoCtRef.current = "";
+      userEditedSoCtRef.current = false;
+      return;
+    }
+    autoSuggestedSoCtRef.current = "";
+    userEditedSoCtRef.current = false;
     let cancelled = false;
     const fetchNextSoCt = async () => {
       try {
@@ -406,6 +415,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           const data = await res.json();
           const suggested = data?.data?.so_ct;
           if (!cancelled && suggested) {
+            autoSuggestedSoCtRef.current = String(suggested).trim().toUpperCase();
             setSoCt((prev) => (prev.trim() ? prev : suggested));
           }
         }
@@ -832,6 +842,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Calculate voucher totals
   const totals = calcVoucherTotals(items, tyGia, thueGtgt, loaiCk);
   const totalQty = items.reduce((s, it) => s + (it.so_luong9 || 0), 0);
+  const uniqueItemCount = new Set(
+    items
+      .map((it) => (it.ma_vt || "").trim().toUpperCase())
+      .filter((code) => code.length > 0),
+  ).size;
 
   // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
   const handleSave = async (skipDebtCheck: boolean = false) => {
@@ -899,9 +914,17 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     try {
       let currentSoCt = soCt.trim().toUpperCase();
       const origSoCt = (voucher?.so_ct || "").trim().toUpperCase();
+      const isCustomSoCt =
+        Boolean(currentSoCt) &&
+        (isCreate
+          ? userEditedSoCtRef.current ||
+            (Boolean(autoSuggestedSoCtRef.current) &&
+              currentSoCt !== autoSuggestedSoCtRef.current)
+          : currentSoCt !== origSoCt);
 
-      // Trước khi lưu phiếu mới (hoặc khi số phiếu trống): tìm số lớn nhất trong tháng + 1
-      if (isCreate || !currentSoCt) {
+      // Chỉ tự động cấp số lớn nhất trong tháng + 1 khi tạo phiếu mới với số tự động (hoặc bỏ trống).
+      // Nếu người dùng tự gõ số riêng (VD: HD2057-1 để treo tạm/tách phiếu) -> giữ nguyên số đã nhập, chỉ kiểm tra trùng.
+      if ((isCreate && !isCustomSoCt) || !currentSoCt) {
         try {
           const nextRes = await fetch(
             `/api/vouchers/next-number?ma_dvcs=S1&ma_ct=${encodeURIComponent(maCt || "X1")}&ngay_ct=${encodeURIComponent(ngayCt)}&db_mode=${encodeURIComponent(voucherMode)}&prefix_so_ct=${encodeURIComponent(currentSoCt)}`,
@@ -917,8 +940,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         } catch {
           // Nếu next-number gặp lỗi mạng tạm thời, backend save_voucher vẫn cấp số lớn nhất trong tháng + 1 trong ACID transaction
         }
-      } else if (currentSoCt !== origSoCt) {
-        // Khi sửa và đổi sang số phiếu khác -> kiểm tra chống trùng với ST_Check_Number
+      } else if (isCustomSoCt) {
+        // Người dùng tự nhập số riêng hoặc đổi số khi sửa -> chỉ kiểm tra chống trùng với ST_Check_Number
         try {
           const chkRes = await fetch(
             `/api/vouchers/check-number?db_mode=${encodeURIComponent(voucherMode)}`,
@@ -927,8 +950,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 ma_dvcs: "S1",
-                moi_sua: "S",
-                stt: voucherStt,
+                moi_sua: isCreate ? "M" : "S",
+                stt: isCreate ? "" : voucherStt,
                 ma_ct: maCt || "X1",
                 ngay_ct: ngayCt,
                 so_ct: currentSoCt,
@@ -982,6 +1005,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         ttien0: saveTotals.ttien0,
         user_name: "KTCN3",
         skip_debt_check: skipDebtCheck,
+        custom_so_ct: isCustomSoCt,
         items: validItems.map((it) => ({
           ...it,
           ma_vt: (it.ma_vt || "").trim().toUpperCase(),
@@ -1419,7 +1443,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                     ref={soCtInputRef}
                     className="erp-input w-28 font-mono font-bold text-primary-700 bg-white border-primary-300 uppercase tracking-wide text-xs py-0.5"
                     value={soCt}
-                    onChange={(e) => setSoCt(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSoCt(val);
+                      const clean = val.trim().toUpperCase();
+                      userEditedSoCtRef.current =
+                        Boolean(clean) && clean !== autoSuggestedSoCtRef.current;
+                    }}
                     onFocus={(e) => e.currentTarget.select()}
                     onKeyDown={(e) => {
                       if (
@@ -1904,20 +1934,30 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       {/* ===== Grid Toolbar ===== */}
       <div
-        className="bg-neutral-100 px-3 py-1 border-b border-neutral-200 flex items-center justify-between shrink-0"
+        className="bg-neutral-100 px-3 py-1 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2 shrink-0"
         data-purpose="grid-actions"
       >
-        <div className="flex items-center gap-1.5">
-          <span className="font-bold text-xs uppercase tracking-wide text-neutral-700 flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <span className="font-bold text-xs uppercase tracking-wide text-neutral-700 flex items-center gap-1 shrink-0">
             <Table className="w-3.5 h-3.5 text-primary-600" /> Chi tiết hàng hóa
           </span>
           <span className="text-neutral-400">|</span>
-          <span className="text-neutral-500 text-[11px]">
+          <span className="text-neutral-500 text-[11px] whitespace-nowrap">
             Đang ghi nhận:{" "}
             <b className="text-neutral-800">{items.length} dòng</b>
+            <span className="text-neutral-300 mx-1">·</span>
+            <b className="text-neutral-800">{uniqueItemCount} mặt hàng</b>
           </span>
+          <span className="text-neutral-400">|</span>
+          <PromotionCounter
+            items={items}
+            ngayCt={ngayCt}
+            maTte={maTte}
+            isWarehouse={isWarehouse}
+            voucherKey={voucherStt || (isCreate ? "NEW" : "VIEW")}
+          />
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center shrink-0">
           <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-neutral-300 shadow-sm text-xs">
             <span className="text-[11px] text-neutral-500 font-medium">
               Tổng SL:
