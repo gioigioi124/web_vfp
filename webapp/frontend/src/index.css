@@ -208,13 +208,13 @@ kbd {
   background-color: #f1f5f9 !important;
   z-index: 2;
 }
-/* Cột nhóm "bán" (Số tấm / Hệ số / SL bán): nền vàng cam rất nhạt */
+/* Cột nhóm "bán" (Số tấm / Hệ số / SL bán): nền vàng rõ hơn để dễ nhìn */
 .xl-grid td.xl-amber {
-  background-color: #fffdf5;
+  background-color: #fef08a;
 }
 .xl-grid td.xl-amber.xl-ro,
 .xl-grid td.xl-locked {
-  background-color: #fef9e6;
+  background-color: #fde68a;
 }
 /* Tiêu đề dòng (số thứ tự) kiểu Excel */
 .xl-grid td.xl-rowhead {
@@ -232,9 +232,15 @@ kbd {
 .xl-grid tr.xl-row-marked td.xl-ro {
   background-color: #fffdf2;
 }
-/* Hover nhẹ trên dòng chưa chọn */
-.xl-grid tbody tr:not(.xl-row-active):not(.xl-row-marked):hover td.xl-cell {
+.xl-grid tr.xl-row-marked td.xl-amber {
+  background-color: #fef08a;
+}
+/* Hover nhẹ trên dòng chưa chọn (tắt khi bảng gắn .xl-grid-no-hover, như grid trong VoucherForm) */
+.xl-grid:not(.xl-grid-no-hover) tbody tr:not(.xl-row-active):not(.xl-row-marked):hover td.xl-cell {
   background-color: #f8fafc;
+}
+.xl-grid:not(.xl-grid-no-hover) tbody tr:not(.xl-row-active):hover td.xl-amber {
+  background-color: #fde68a;
 }
 /* Dòng đang chọn: tô nổi rõ cả dòng + làm nổi tiêu đề dòng */
 .xl-grid tr.xl-row-active td.xl-cell,
@@ -242,7 +248,7 @@ kbd {
   background-color: #dbeafe;
 }
 .xl-grid tr.xl-row-active td.xl-amber {
-  background-color: #edeedc;
+  background-color: #f5e696;
 }
 .xl-grid tr.xl-row-active td.xl-rowhead {
   background-color: #1e40af;
@@ -256,7 +262,7 @@ kbd {
   border-bottom: 2px solid #eab308 !important;
 }
 .xl-grid tbody tr.xl-row-manual td:first-child {
-  border-left: 3px solid #eab308 !important;
+  border-left: 2px solid #eab308 !important;
 }
 .xl-grid tbody tr.xl-row-manual td:last-child {
   border-right: 2px solid #eab308 !important;
@@ -318,7 +324,13 @@ kbd {
   appearance: textfield;
 }
 
-/* ===== Print styles cho mẫu in phiếu (PrintPreview - ctpxg.frx) ===== */
+/* ===== Print styles cho mẫu in phiếu (PrintPreview - HD2259 Template) ===== */
+/* Ép toàn bộ vùng bản in dùng đúng font Times New Roman chuẩn HD2259 Template.pdf */
+.print-area,
+.print-area * {
+  font-family: "Times New Roman", Times, serif !important;
+}
+
 @media print {
   html,
   body,
@@ -392,9 +404,16 @@ kbd {
     page-break-inside: avoid;
   }
 
+  .print-page-footer {
+    position: fixed !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    margin: 0 !important;
+  }
+
   @page {
     size: A4 portrait;
-    margin: 5mm 6mm 6mm 5mm;
+    margin: 5mm 6mm;
     @top-left {
       content: "";
     }

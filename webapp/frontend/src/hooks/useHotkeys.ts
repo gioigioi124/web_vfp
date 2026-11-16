@@ -20,10 +20,7 @@ export interface HotkeyHandlers {
   onCtrlHome?: () => void;
   onCtrlEnd?: () => void;
   onCtrlF?: () => void;
-  onAltNumpad3?: () => void;
-  onAltNumpad4?: () => void;
-  onCtrlNumpad3?: () => void;
-  onCtrlNumpad4?: () => void;
+  onQuickPrint?: (inGia: "1" | "0", copies: number) => void;
   onCtrlShiftE?: () => void;
 }
 
@@ -152,20 +149,24 @@ export function useHotkeys(
         return;
       }
 
-      // Alt+Numpad3/4 và Ctrl+Numpad3/4 — in nhanh theo tùy chọn giá và số bản copy
-      if (!e.shiftKey && (e.code === "Numpad3" || e.code === "Numpad4")) {
+      // Alt+1..4 (không giá) và Ctrl+1..4 (có giá) — hỗ trợ cả hàng số trên (Digit1..4) lẫn Numpad1..4
+      const quickPrintMatch = /^(?:Digit|Numpad)([1-4])$/.exec(e.code);
+      const quickPrintCount = quickPrintMatch
+        ? Number(quickPrintMatch[1])
+        : ["1", "2", "3", "4"].includes(key)
+          ? Number(key)
+          : 0;
+      if (!e.shiftKey && quickPrintCount > 0) {
         if (e.altKey && !ctrl) {
           e.preventDefault();
           e.stopPropagation();
-          if (e.code === "Numpad3") h.onAltNumpad3?.();
-          else h.onAltNumpad4?.();
+          h.onQuickPrint?.("0", quickPrintCount);
           return;
         }
         if (ctrl && !e.altKey) {
           e.preventDefault();
           e.stopPropagation();
-          if (e.code === "Numpad3") h.onCtrlNumpad3?.();
-          else h.onCtrlNumpad4?.();
+          h.onQuickPrint?.("1", quickPrintCount);
           return;
         }
       }

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { DebtLedgerData, DebtLedgerEntry } from "../types/debt";
+import { VoucherFullDetail } from "../types/voucher";
+import { VoucherForm } from "./VoucherForm";
 import { formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
 import { Button } from "./ui/Button";
@@ -21,6 +23,7 @@ import {
   Search,
   FileSpreadsheet,
   RefreshCw,
+  Eye,
 } from "lucide-react";
 
 interface DebtPanelProps {
@@ -69,8 +72,6 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
   const maDtInputRef = useRef<HTMLInputElement | null>(null);
   const maDtLatestRef = useRef<string>("");
 
-  useModalLock(isOpen, panelRef);
-
   const [fromDate, setFromDate] = useState<string>(
     () => getCurrentMonthBounds().start,
   );
@@ -79,11 +80,16 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
   );
   const [inputMaDt, setInputMaDt] = useState<string>("");
   const [tenDt, setTenDt] = useState<string>("");
+  const [gioiHan, setGioiHan] = useState<number | null>(null);
   const [ledger, setLedger] = useState<DebtLedgerData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
+  const [viewVoucher, setViewVoucher] = useState<VoucherFullDetail | null>(null);
+  const [loadingVoucher, setLoadingVoucher] = useState<boolean>(false);
+
+  useModalLock(isOpen && !viewVoucher, panelRef);
 
   const fetchCustomersLocal = useCallback(
     async (query: string): Promise<AutocompleteOption[]> => {
@@ -101,6 +107,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
 
       if (!code) {
         setTenDt("");
+        setGioiHan(null);
         setLedger(null);
         setSelectedRowKey(null);
         setErrorMsg(null);
@@ -122,13 +129,19 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         if (res.ok && json.success && json.data) {
           const data = json.data as DebtLedgerData;
           setLedger(data);
-          if (data.ten_dt) {
-            setTenDt(data.ten_dt);
-          } else {
+          let nextName = data.ten_dt || "";
+          let nextLimit =
+            typeof data.gioi_han === "number" ? data.gioi_han : null;
+          if (!nextName || nextLimit === null) {
             await initCustomerIndex();
             const hit = getCustomer(code);
-            setTenDt(hit?.ten_dt || "");
+            if (!nextName) nextName = hit?.ten_dt || "";
+            if (nextLimit === null) {
+              nextLimit = typeof hit?.gioi_han === "number" ? hit.gioi_han : 0;
+            }
           }
+          setTenDt(nextName);
+          setGioiHan(nextLimit);
         } else {
           setErrorMsg(
             json?.detail?.message ||
@@ -145,6 +158,16 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     [fromDate, toDate],
   );
 
+  const applyLocalCustomerMeta = useCallback(
+    (code: string, hintName?: string) => {
+      const hit = getCustomer(code);
+      setTenDt(hintName || hit?.ten_dt || "");
+      setGioiHan(typeof hit?.gioi_han === "number" ? hit.gioi_han : null);
+      return hit;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!isOpen) return;
     const { start, end } = getCurrentMonthBounds();
@@ -156,15 +179,27 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     setSelectedRowKey(null);
     setErrorMsg(null);
     setIsMaximized(false);
+    setViewVoucher(null);
+    setLoadingVoucher(false);
 
     if (initialCode) {
       void initCustomerIndex().then(() => {
         const hit = getCustomer(initialCode);
-        setTenDt(hit?.ten_dt || "");
+        if (hit && maDtLatestRef.current === initialCode) {
+          setTenDt((prev) => prev || hit.ten_dt || "");
+          setGioiHan((prev) =>
+            prev !== null
+              ? prev
+              : typeof hit.gioi_han === "number"
+                ? hit.gioi_han
+                : null,
+          );
+        }
       });
       void fetchLedger(initialCode, start, end);
     } else {
       setTenDt("");
+      setGioiHan(null);
       setLedger(null);
       setTimeout(() => {
         maDtInputRef.current?.focus();
@@ -179,15 +214,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
       const clean = code.trim().toUpperCase();
       setInputMaDt(clean);
       maDtLatestRef.current = clean;
-      if (hintName) {
-        setTenDt(hintName);
-      } else {
-        const hit = getCustomer(clean);
-        setTenDt(hit?.ten_dt || "");
-      }
+      applyLocalCustomerMeta(clean, hintName);
       void fetchLedger(clean, fromDate, toDate);
     },
-    [fetchLedger, fromDate, toDate],
+    [applyLocalCustomerMeta, fetchLedger, fromDate, toDate],
   );
 
   const handleExportExcel = useCallback(() => {
@@ -256,13 +286,58 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     URL.revokeObjectURL(url);
   }, [fromDate, ledger, tenDt, toDate]);
 
+  const entries = ledger?.entries || [];
+
+  const selectedEntry: DebtLedgerEntry | null =
+    selectedRowKey?.startsWith("entry-")
+      ? entries[Number(selectedRowKey.slice(6))] ?? null
+      : null;
+
+  const handleOpenEntryVoucher = useCallback(
+    async (entry?: DebtLedgerEntry | null) => {
+      const target = entry ?? selectedEntry;
+      if (!target?.stt || loadingVoucher) return;
+      setLoadingVoucher(true);
+      setErrorMsg(null);
+      try {
+        const res = await fetch(
+          `/api/vouchers/${encodeURIComponent(target.stt)}?db_mode=sales`,
+        );
+        const json = await res.json();
+        if (res.ok && json.success && json.data) {
+          setViewVoucher(json.data as VoucherFullDetail);
+        } else {
+          setErrorMsg(
+            json?.detail?.message ||
+              json?.message ||
+              `Chứng từ ${target.ma_ct || ""} (${target.so_ct || target.stt}) không phải hóa đơn bán hàng (CtBH) nên chưa hỗ trợ xem chi tiết.`,
+          );
+        }
+      } catch (err: any) {
+        setErrorMsg(err?.message || "Lỗi kết nối khi tải chi tiết hóa đơn.");
+      } finally {
+        setLoadingVoucher(false);
+      }
+    },
+    [loadingVoucher, selectedEntry],
+  );
+
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (viewVoucher) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+      if (e.key === "F3") {
+        if (selectedEntry) {
+          e.preventDefault();
+          e.stopPropagation();
+          void handleOpenEntryVoucher(selectedEntry);
+        }
         return;
       }
       if (
@@ -291,7 +366,15 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [fetchLedger, handleExportExcel, isOpen, onClose]);
+  }, [
+    fetchLedger,
+    handleExportExcel,
+    handleOpenEntryVoucher,
+    isOpen,
+    onClose,
+    selectedEntry,
+    viewVoucher,
+  ]);
 
   const ensureRowElementVisible = useCallback((row: HTMLTableRowElement) => {
     const container = gridScrollRef.current;
@@ -332,10 +415,25 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     [],
   );
 
-  const entries = ledger?.entries || [];
-
   const handleCellKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>, colIdx: number) => {
+    (
+      e: React.KeyboardEvent<HTMLInputElement>,
+      colIdx: number,
+      entry?: DebtLedgerEntry,
+    ) => {
+      if (
+        e.key === "Enter" &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        entry
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        void handleOpenEntryVoucher(entry);
+        return;
+      }
       const dir = arrowDir(e.key);
       const tr = e.currentTarget.closest("tr") as HTMLTableRowElement | null;
       if (!tr) return;
@@ -396,7 +494,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         }
       }
     },
-    [ensureRowElementVisible, focusRowCol],
+    [ensureRowElementVisible, focusRowCol, handleOpenEntryVoucher],
   );
 
   interface GridRowData {
@@ -408,6 +506,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     dienGiai: string;
     psTang: string;
     psGiam: string;
+    entry?: DebtLedgerEntry;
     isMarked?: boolean;
     isSummary?: boolean;
     maCtClassName?: string;
@@ -431,8 +530,11 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         e.currentTarget.select();
         selectAllLater(e.currentTarget);
       },
+      onDoubleClick: () => {
+        if (row.entry) void handleOpenEntryVoucher(row.entry);
+      },
       onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) =>
-        handleCellKeyDown(e, colIdx),
+        handleCellKeyDown(e, colIdx, row.entry),
       onCopy: handleCellCopy,
     });
 
@@ -442,6 +544,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         data-grid-row="true"
         data-row-key={row.key}
         onClick={() => setSelectedRowKey(row.key)}
+        onDoubleClick={() => {
+          if (row.entry) void handleOpenEntryVoucher(row.entry);
+        }}
+        title={row.entry ? "Nhấp đúp hoặc nhấn Enter / F3 để xem hóa đơn" : undefined}
         className={
           isSelected
             ? "xl-row-active"
@@ -643,8 +749,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
                       const clean = val.toUpperCase();
                       setInputMaDt(clean);
                       maDtLatestRef.current = clean;
-                      const hit = getCustomer(clean.trim());
-                      setTenDt(hit?.ten_dt || "");
+                      applyLocalCustomerMeta(clean.trim());
                     }}
                     onSelect={(opt) => handleSelectCustomer(opt.value, opt.hint)}
                     onKeyDown={(e) => {
@@ -657,11 +762,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
                       ) {
                         e.preventDefault();
                         const clean = maDtLatestRef.current.trim().toUpperCase();
-                        const hit = getCustomer(clean);
+                        const hit = applyLocalCustomerMeta(clean);
                         if (hit) {
                           setInputMaDt(hit.ma_dt);
                           maDtLatestRef.current = hit.ma_dt;
-                          setTenDt(hit.ten_dt || "");
                           void fetchLedger(hit.ma_dt, fromDate, toDate);
                         } else {
                           void fetchLedger(clean, fromDate, toDate);
@@ -834,7 +938,8 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
                 entries.map((entry, rowIdx) => {
                   const isCreditRow = entry.ps_giam > 0 && entry.ps_tang === 0;
                   return renderGridRow({
-                    key: `entry-${entry.stt || rowIdx}-${entry.ma_ct}-${entry.so_ct}-${rowIdx}`,
+                    key: `entry-${rowIdx}`,
+                    entry,
                     rowHead: String(rowIdx + 1),
                     maCt: entry.ma_ct || "",
                     ngay: formatDate(entry.ngay_ct),
@@ -910,16 +1015,27 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             {activeCode && (
               <>
                 <span className="text-neutral-300">|</span>
-                <span className="truncate">
-                  KH: <b className="font-mono text-primary-800">{activeCode}</b>
-                  {tenDt ? ` - ${tenDt}` : ""}
+                <span className="shrink-0">
+                  Giới hạn nợ:{" "}
+                  <b
+                    className={`font-mono ${
+                      gioiHan !== null &&
+                      gioiHan > 0 &&
+                      ledger &&
+                      ledger.du_cuoi >= gioiHan
+                        ? "text-danger-700"
+                        : "text-primary-800"
+                    }`}
+                  >
+                    {gioiHan !== null ? formatSpaceNumber(gioiHan) : "—"}
+                  </b>
                 </span>
               </>
             )}
             <span className="hidden md:inline-flex items-center gap-2 ml-2 text-[11px] text-neutral-500">
               <span className="text-neutral-300">|</span>
               <span>
-                <kbd>Enter</kbd> Tìm
+                <kbd>Enter</kbd>/<kbd>F3</kbd> Xem phiếu
               </span>
               <span>
                 <kbd>F4</kbd> Mã ĐT
@@ -931,6 +1047,25 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-primary-300 bg-primary-50 hover:bg-primary-100 text-primary-800 disabled:opacity-45"
+              disabled={!selectedEntry || loadingVoucher}
+              onClick={() => void handleOpenEntryVoucher(selectedEntry)}
+              type="button"
+              title="Xem chi tiết hóa đơn đang chọn (Enter trên dòng hoặc F3)"
+            >
+              {loadingVoucher ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary-700" />
+              ) : (
+                <Eye className="w-3.5 h-3.5 text-primary-700" />
+              )}
+              <span>Xem hóa đơn</span>
+              <kbd className="text-[9px] py-0 px-1 ml-0.5 border-primary-300 bg-white text-primary-800">
+                F3
+              </kbd>
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -959,6 +1094,24 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
           </div>
         </footer>
       </div>
+
+      {/* Mở hóa đơn/chứng từ toàn màn hình bằng chế độ sửa của VoucherForm */}
+      {viewVoucher && (
+        <div className="fixed inset-0 z-[75] bg-white flex flex-col overflow-hidden">
+          <VoucherForm
+            key={`debt-edit:${viewVoucher.stt}`}
+            stt={viewVoucher.stt}
+            voucher={viewVoucher}
+            mode="S"
+            voucherMode="sales"
+            onBack={() => setViewVoucher(null)}
+            onSaveSuccess={() => {
+              setViewVoucher(null);
+              void fetchLedger();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

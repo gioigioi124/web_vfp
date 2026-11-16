@@ -19,90 +19,40 @@ def _fetch_print_metadata(
     tk2: str,
     posted: bool,
     in_no_ck: str,
+    dmdt_dia_chi: str = "",
+    dmdt_phone: str = "",
 ) -> Dict[str, Any]:
     """
-    Truy vấn dữ liệu bổ sung cho mẫu in ctpxg.frx / ctpng.frx (100% READ-ONLY):
-    - Thông tin đơn vị (VTSYS.dbo.DmDvCs)
-    - Tiêu đề phiếu (VTSYS.dbo.DocumentNumber)
-    - Địa chỉ & SĐT khách hàng từ DmDt (theo chuẩn In_Ct_Hd: không lấy CtBH.Dia_Chi)
-    - Tên tài khoản người lập (UserName ngắn gọn, VD: KTCN3)
-    - Thời gian SQL Server (GETDATE())
-    - Nợ cũ _Du_Dau (GL_Alert_ClosingAccount4Customer khi in_no_ck='C' & Posted=1)
+    Chuẩn bị metadata bổ sung cho mẫu in (100% READ-ONLY):
+    - Tái sử dụng Dia_Chi & Phone của DmDt đã JOIN sẵn từ get_voucher_detail
+    - Thông tin công ty & tiêu đề phiếu chuẩn hóa (X1/N5)
+    - Thời gian in từ máy chủ ứng dụng
+    - Chỉ mở kết nối SQL gọi GL_Alert_ClosingAccount4Customer khi in_no_ck='C' & Posted=1
     """
     vp_db = settings.DB_VP
-    sys_db = settings.DB_SYS
-    fn_uni = f"{vp_db}.dbo.fn_TCVNToUnicode"
 
     company = {
-        "ten_dvcs": "Công ty chăn ga gối đệm Elan",
-        "dien_thoai": "",
-        "fax": "",
+        "ten_dvcs": "CÔNG TY TNHH CHĂN GA GỐI ĐỆM ELAN",
+        "dia_chi": "Số 227 - Quốc lộ 17B - Phường An Dương - Hải Phòng",
+        "dien_thoai": "(+84) 2253 914 242",
+        "mst": "0200727018",
+        "fax": "84-31.3.914.247",
     }
     doc_title = (
         "Phiếu nhập hàng trả lại"
         if (ma_ct or "").strip().upper() == "N5"
         else "Phiếu xuất bán"
     )
-    customer_address = ""
-    customer_phone = ""
+    customer_address = (dmdt_dia_chi or "").strip()
+    customer_phone = (dmdt_phone or "").strip()
     creator_name = (user_name or "").strip().upper()
-    sql_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    now_dt = datetime.now()
+    sql_time = now_dt.strftime("%d/%m/%Y %H:%M:%S")
+    print_time_str = now_dt.strftime("%H:%M:%S | %d/%m/%Y")
     du_dau = 0.0
 
-    with get_db_cursor(vp_db) as cur:
-        cur.execute(
-            f"""
-            SELECT TOP 1
-                RTRIM(ISNULL(dien_thoai, '')) AS Dien_Thoai,
-                RTRIM(ISNULL(fax, '')) AS Fax
-            FROM {sys_db}.dbo.DmDvCs WITH (NOLOCK)
-            WHERE Ma_DvCs = ?
-            """,
-            [(ma_dvcs or "S1").strip()],
-        )
-        r = cur.fetchone()
-        if r:
-            company = {
-                "ten_dvcs": "Công ty chăn ga gối đệm Elan",
-                "dien_thoai": (r[0] or "").strip(),
-                "fax": (r[1] or "").strip(),
-            }
-
-        if ma_ct:
-            cur.execute(
-                f"""
-                SELECT TOP 1 {fn_uni}(Tieu_De) AS Tieu_De
-                FROM {sys_db}.dbo.DocumentNumber WITH (NOLOCK)
-                WHERE Ma_Ct = ?
-                """,
-                [ma_ct.strip().upper()],
-            )
-            r = cur.fetchone()
-            if r and r[0] and r[0].strip():
-                doc_title = r[0].strip()
-
-        if ma_dt:
-            cur.execute(
-                f"""
-                SELECT TOP 1
-                    {fn_uni}(Dia_Chi) AS Dia_Chi,
-                    RTRIM(ISNULL(Phone, '')) AS Phone
-                FROM {sys_db}.dbo.DmDt WITH (NOLOCK)
-                WHERE Ma_Dt = ?
-                """,
-                [ma_dt.strip()],
-            )
-            r = cur.fetchone()
-            if r:
-                customer_address = (r[0] or "").strip()
-                customer_phone = (r[1] or "").strip()
-
-        cur.execute("SELECT GETDATE()")
-        r = cur.fetchone()
-        if r and r[0]:
-            sql_time = r[0].strftime("%d/%m/%Y %H:%M:%S")
-
-        if (in_no_ck or "K").strip().upper() == "C" and posted and ma_dt:
+    if (in_no_ck or "K").strip().upper() == "C" and posted and ma_dt:
+        with get_db_cursor(vp_db) as cur:
             try:
                 tk_parent = (tk2 or "131").strip()[:3] or "131"
                 cur.execute(
@@ -147,6 +97,7 @@ def _fetch_print_metadata(
         "customer_phone": customer_phone,
         "creator_name": creator_name,
         "sql_time": sql_time,
+        "print_time_str": print_time_str,
         "du_dau": du_dau,
     }
 
@@ -157,12 +108,14 @@ def get_print_payload(
     loai: Optional[str] = Query("hd", description="'hd' (ctpxg/ctpng) hoặc 'px'"),
     in_gia: str = Query("1", description="'1' In giá bán, '0' Không in giá"),
     in_no_ck: str = Query("K", description="'C' Có in nợ cũ, 'K' Không in nợ cũ"),
+    db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
 ):
     """
     Chuẩn bị dữ liệu in phiếu theo đúng logic VFP In_Ct_Hd (RPT\\ctpxg.frx / RPT\\ctpng.frx).
     100% READ-ONLY.
     """
-    voucher = voucher_service.get_voucher(stt)
+    clean_db_mode = "warehouse" if (db_mode or "").strip().lower() == "warehouse" else "sales"
+    voucher = voucher_service.get_voucher(stt, db_mode=clean_db_mode)
     if not voucher:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -175,6 +128,11 @@ def get_print_payload(
     except Exception:
         formal_date = voucher.ngay_ct
 
+    effective_in_no_ck = (
+        "C"
+        if (clean_db_mode == "sales" and str(in_no_ck).strip().upper() == "C")
+        else "K"
+    )
     meta = _fetch_print_metadata(
         ma_dvcs=voucher.ma_dvcs or "S1",
         ma_ct=voucher.ma_ct or "X1",
@@ -184,12 +142,13 @@ def get_print_payload(
         ngay_ct=voucher.ngay_ct,
         tk2=voucher.tk2 or "1311",
         posted=bool(voucher.posted),
-        in_no_ck=in_no_ck,
+        in_no_ck=effective_in_no_ck,
+        dmdt_dia_chi=voucher.dmdt_dia_chi or "",
+        dmdt_phone=voucher.dmdt_phone or "",
     )
 
-    # Biến đổi P_CtTemp giống In_Ct_Hd (§2.4):
-    # Loai_Vt IN ('2','3') -> So_Luong_In = So_Tam và hiển thị Cm(Kg) = He_So8;
-    # Loai_Vt IN ('1','4') -> So_Luong_In = So_Luong9 và ẩn Cm(Kg).
+    # Biến đổi P_CtTemp giống In_Ct_Hd (§2.4), đồng thời trả he_so_in cho mọi loại hàng có hệ số != 0:
+    # Loai_Vt IN ('2','3') -> So_Luong_In = So_Tam; Loai_Vt IN ('1','4') -> So_Luong_In = So_Luong9.
     items_payload = []
     tso_loai = 0.0
     for i, it in enumerate(voucher.items, start=1):
@@ -198,7 +157,7 @@ def get_print_payload(
         is_mut = loai_vt in ("2", "3")
         he_so8 = float(it.he_so8 or 0.0)
         so_luong_in = float(it.so_tam or 0.0) if is_mut else float(it.so_luong9 or 0.0)
-        he_so_in = he_so8 if (is_mut and he_so8 != 0) else 0.0
+        he_so_in = he_so8 if he_so8 != 0 else 0.0
 
         tso_loai += so_luong_in
         it_dict["line_no"] = i
@@ -218,14 +177,15 @@ def get_print_payload(
 
     print_data = {
         "loai_in": loai,
-        "in_gia": "0" if str(in_gia).strip() == "0" else "1",
-        "in_no_ck": "C" if str(in_no_ck).strip().upper() == "C" else "K",
+        "in_gia": "0" if (clean_db_mode == "warehouse" or str(in_gia).strip() == "0") else "1",
+        "in_no_ck": "C" if (clean_db_mode == "sales" and str(in_no_ck).strip().upper() == "C") else "K",
         "company": meta["company"],
         "title": meta["title"],
-        "customer_address": meta["customer_address"],
+        "customer_address": meta["customer_address"] or (voucher.dia_chi or "").strip(),
         "customer_phone": meta["customer_phone"],
         "creator_name": meta["creator_name"],
         "sql_time": meta["sql_time"],
+        "print_time_str": meta["print_time_str"],
         "formal_date": formal_date,
         "tso_loai": round(tso_loai, 2),
         "du_dau": du_dau,

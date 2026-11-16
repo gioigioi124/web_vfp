@@ -9,6 +9,11 @@ import {
 } from "../types/voucher";
 import { getTodayDate } from "../lib/format";
 import { cachedFetch, peek, invalidate } from "../lib/apiCache";
+import {
+  invalidatePrintCache,
+  prefetchPrintPayload,
+  preloadPrintLogo,
+} from "../lib/printCache";
 
 /**
  * Khóa cache cho từng loại tài nguyên.
@@ -93,7 +98,7 @@ export function useVouchers() {
         items.some((it) => it.stt === prev)
           ? prev
           : items.length > 0
-            ? items[0].stt
+            ? items[items.length - 1].stt
             : null,
       );
     } else {
@@ -182,6 +187,14 @@ export function useVouchers() {
     invalidate("list:");
     fetchVouchersRef.current({ force: true, silent: true });
 
+    // Nạp ngầm sẵn dữ liệu bản in & giải mã logo sau 60ms dừng chọn dòng để F7/Ctrl+F7 mở tức thì.
+    preloadPrintLogo();
+    const prefetchTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        prefetchPrintPayload(voucherMode, selectedStt, true);
+      }
+    }, 60);
+
     (async () => {
       setListDetailLoading(true);
       try {
@@ -233,6 +246,7 @@ export function useVouchers() {
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(prefetchTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStt, voucherMode]);
@@ -280,11 +294,14 @@ export function useVouchers() {
     await fetchVoucherDetail(stt);
   };
 
-  // Quay về từ trang chi tiết: đóng form và nạp lại danh sách + chi tiết dòng chọn.
-  const handleCloseDetail = () => {
+  // Quay về từ trang chi tiết: đóng form và nạp ngầm danh sách (khi đã có dòng) để tránh nháy spinner.
+  const handleCloseDetail = (opts?: { skipFetch?: boolean }) => {
     setActiveVoucher(null);
     invalidate("list:");
-    fetchVouchers({ force: true });
+    invalidatePrintCache();
+    if (!opts?.skipFetch) {
+      fetchVouchers({ force: true, silent: vouchers.length > 0 });
+    }
   };
 
   const handleApplyFilter = (newFilters: VoucherFilterParams) => {
@@ -304,11 +321,14 @@ export function useVouchers() {
     }));
   };
 
-  // Làm mới có chủ đích (nút refresh / F5): xóa cache để lấy dữ liệu mới.
-  const refresh = useCallback(() => {
-    invalidate();
-    fetchVouchers({ force: true });
-  }, [fetchVouchers]);
+  // Làm mới có chủ đích (nút refresh / F5 hoặc sau khi lưu): xóa cache để lấy dữ liệu mới.
+  const refresh = useCallback(
+    (opts?: { silent?: boolean }) => {
+      invalidate();
+      fetchVouchers({ force: true, silent: opts?.silent });
+    },
+    [fetchVouchers],
+  );
 
   const handleOpenPrint = (
     target: string | string[],

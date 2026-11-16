@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Printer, X, RefreshCw } from "lucide-react";
 import { formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
+import {
+  fetchPrintPayload,
+  isPrintPayloadFresh,
+  peekPrintPayload,
+  preloadPrintLogo,
+} from "../lib/printCache";
 
 interface PrintPreviewProps {
   isOpen: boolean;
@@ -14,10 +20,12 @@ interface PrintPreviewProps {
   copies?: number;
   /** "direct": in thẳng bằng hộp thoại trình duyệt (F7); "preview": hiện dialog chọn In nợ cũ & xem trước (Ctrl+F7) */
   mode?: "direct" | "preview";
+  /** Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014) */
+  dbMode?: "sales" | "warehouse";
 }
 
 /**
- * Định dạng số theo chuẩn VFP `@Z` (giá trị 0 hiển thị trống, phân nhóm nghìn bằng dấu cách).
+ * Định dạng số tiền/giá theo mẫu HD2259 Template (dấu chấm phân tách hàng nghìn, 0 hiển thị trống).
  */
 function formatVfpNum(
   value?: number | null,
@@ -32,22 +40,29 @@ function formatVfpNum(
       ? absVal.toFixed(decimals)
       : Math.round(absVal).toString();
   const [intPart, decPart] = fixed.split(".");
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return `${neg ? "-" : ""}${grouped}${decPart !== undefined ? `.${decPart}` : ""}`;
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${neg ? "-" : ""}${grouped}${decPart !== undefined ? `,${decPart}` : ""}`;
 }
 
-/** Định dạng tổng số thứ giống `alltrim(str(m.TSo_Loai)) + ' thứ'` của VFP. */
-function formatTsoLoai(value?: number | null): string {
-  if (value === null || value === undefined || isNaN(value)) return "0";
-  const rounded = Math.round(value * 100) / 100;
+/**
+ * Định dạng số lượng / hệ số gọn theo mẫu HD2259 Template:
+ * bỏ phần `.00` nếu là số nguyên, tối đa 2 chữ số thập phân gọn nếu có lẻ, phân nhóm nghìn bằng dấu chấm.
+ */
+function formatQtyNum(value?: number | null): string {
+  if (value === null || value === undefined || isNaN(value)) return "";
+  if (Math.abs(value) < 1e-9) return "";
+  const neg = value < 0;
+  const rounded = Math.round(Math.abs(value) * 100) / 100;
   if (Math.abs(rounded - Math.round(rounded)) < 1e-6) {
-    return Math.round(rounded)
+    const groupedInt = Math.round(rounded)
       .toString()
-      .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+      .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${neg ? "-" : ""}${groupedInt}`;
   }
-  const [intPart, decPart] = rounded.toString().split(".");
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return `${grouped}.${decPart}`;
+  const fixed = rounded.toFixed(2).replace(/\.?0+$/, "");
+  const [intPart, decPart] = fixed.split(".");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${neg ? "-" : ""}${grouped}${decPart !== undefined ? `,${decPart}` : ""}`;
 }
 
 /**
@@ -63,6 +78,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   inGia = "1",
   copies = 1,
   mode = "direct",
+  dbMode = "sales",
 }) => {
   const isPreviewMode = mode === "preview";
   const [printDocs, setPrintDocs] = useState<any[]>([]);
@@ -92,7 +108,8 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     wasOpenRef.current = isOpen;
   }, [isOpen, inGia]);
 
-  const effectiveInGia: "1" | "0" = isPreviewMode ? previewInGia : inGia;
+  const effectiveInGia: "1" | "0" =
+    dbMode === "warehouse" ? "0" : isPreviewMode ? previewInGia : inGia;
   const effectiveInNoCk: "C" | "K" = isPreviewMode ? previewInNoCk : "K";
 
   const targetStts =
@@ -101,8 +118,12 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const safeCopies = Math.max(1, Math.floor(copies || 1));
   const requestKey =
     isOpen && joinedStts
-      ? `${joinedStts}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`
+      ? `${joinedStts}|${dbMode}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`
       : "";
+
+  useEffect(() => {
+    preloadPrintLogo();
+  }, []);
 
   useEffect(() => {
     if (!isOpen || targetStts.length === 0) {
@@ -114,19 +135,44 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     }
 
     let cancelled = false;
-    const targetKey = `${joinedStts}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`;
+    const targetKey = `${joinedStts}|${dbMode}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`;
+
+    // Kiểm tra cache trước:
+    // - Nếu tất cả phiếu đều còn tươi -> nạp ngay lập tức (0ms chờ mạng).
+    // - Nếu chế độ Preview có cache cũ -> hiển thị ngay cache cũ trong lúc làm mới ngầm.
+    const cachedDocs = targetStts.map((s) =>
+      peekPrintPayload(dbMode, s, effectiveInNoCk),
+    );
+    const allHaveCache = cachedDocs.every(Boolean);
+    const allFresh = targetStts.every((s) =>
+      isPrintPayloadFresh(dbMode, s, effectiveInNoCk),
+    );
+
+    if (allHaveCache && allFresh) {
+      setPrintDocs(cachedDocs);
+      setLoadedKey(targetKey);
+      setIsFetching(false);
+      return;
+    }
+
+    if (isPreviewMode && allHaveCache) {
+      setPrintDocs(cachedDocs);
+      setLoadedKey(targetKey);
+    }
 
     const fetchPrintAll = async () => {
       setIsFetching(true);
       try {
         const payloads = await Promise.all(
-          targetStts.map(async (s) => {
-            const res = await fetch(
-              `/api/print/${encodeURIComponent(s)}?loai=hd&in_gia=${effectiveInGia}&in_no_ck=${effectiveInNoCk}`,
-            );
-            const json = await res.json();
-            return json?.success && json.data ? json.data : null;
-          }),
+          targetStts.map((s) =>
+            fetchPrintPayload(
+              dbMode,
+              s,
+              effectiveInNoCk,
+              effectiveInGia,
+              false,
+            ),
+          ),
         );
         const validDocs = payloads.filter(Boolean);
         if (!cancelled && validDocs.length > 0) {
@@ -151,6 +197,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   }, [
     isOpen,
     joinedStts,
+    dbMode,
     effectiveInGia,
     effectiveInNoCk,
     safeCopies,
@@ -171,7 +218,6 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     if (printedKeyRef.current === requestKey) return;
 
     let cancelled = false;
-    let printTimer: number | null = null;
     let rafId: number | null = null;
 
     const handleAfterPrint = () => {
@@ -186,11 +232,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       if (cancelled || printedKeyRef.current === requestKey) return;
       printedKeyRef.current = requestKey;
       rafId = window.requestAnimationFrame(() => {
-        printTimer = window.setTimeout(() => {
-          if (!cancelled) {
-            window.print();
-          }
-        }, 30);
+        if (!cancelled) {
+          window.print();
+        }
       });
     };
 
@@ -223,7 +267,6 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
           img.removeEventListener("error", onOne);
         });
         if (rafId !== null) window.cancelAnimationFrame(rafId);
-        if (printTimer !== null) window.clearTimeout(printTimer);
         window.removeEventListener("afterprint", handleAfterPrint);
       };
     }
@@ -232,7 +275,6 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     return () => {
       cancelled = true;
       if (rafId !== null) window.cancelAnimationFrame(rafId);
-      if (printTimer !== null) window.clearTimeout(printTimer);
       window.removeEventListener("afterprint", handleAfterPrint);
     };
   }, [isPreviewMode, isOpen, requestKey, loadedKey, printDocs]);
@@ -246,9 +288,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     };
     window.addEventListener("afterprint", handleAfterPrint, { once: true });
     window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
         window.print();
-      }, 20);
+      });
     });
   }, [isFetching, printDocs.length, printingFromPreview]);
 
@@ -319,71 +361,94 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       return (
         <tr
           key={it.stt0 || idx}
-          className="align-top break-inside-avoid"
+          className="align-middle break-inside-avoid"
           style={{
-            borderBottom: "1px dotted #000",
+            borderBottom: "1px dashed #000",
+            fontSize: "12pt",
+            lineHeight: 1.15,
           }}
         >
           <td
-            className="py-1 px-0.5 text-center tabular-nums"
+            className="text-center align-middle"
             style={{
               borderLeft: "2px solid #000",
               borderRight: "1px solid #000",
+              padding: "4px 2px",
             }}
           >
             {it.line_no || idx + 1}
           </td>
           <td
-            className="py-1 px-1 text-left font-bold break-words"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-left align-middle font-bold break-words"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
             {it.ten_vt || it.ma_vt || ""}
           </td>
           <td
-            className="py-1 px-0.5 text-center"
+            className="text-center align-middle"
             style={{
               borderRight: "1px solid #000",
-              fontSize: "10.5pt",
+              padding: "4px 2px",
             }}
           >
             {it.dvt || ""}
           </td>
           <td
-            className="py-1 px-1 text-right tabular-nums"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
-            {isMut ? formatVfpNum(it.he_so_in, 2) : ""}
+            {formatQtyNum(it.he_so_in ?? it.he_so8)}
           </td>
           <td
-            className="py-1 px-1 text-right tabular-nums"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
-            {formatVfpNum(
+            {formatQtyNum(
               it.so_luong_in ?? (isMut ? it.so_tam : it.so_luong9),
-              isN5 ? 0 : 2,
             )}
           </td>
           <td
-            className="py-1 px-1 text-right tabular-nums"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
             {showPrice ? formatVfpNum(it.gia_nt9, 0) : ""}
           </td>
           <td
-            className="py-1 px-1 text-right tabular-nums"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
             {showPrice ? formatVfpNum(it.tien_nt9, 0) : ""}
           </td>
           <td
-            className="py-1 px-0.5 text-left tabular-nums"
-            style={{ borderRight: "1px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "1px solid #000",
+              padding: "4px 4px",
+            }}
           >
             {showPrice && ck > 0 ? `${Math.round(ck)}%` : ""}
           </td>
           <td
-            className="py-1 px-1 text-right tabular-nums"
-            style={{ borderRight: "2px solid #000" }}
+            className="text-right align-middle"
+            style={{
+              borderRight: "2px solid #000",
+              padding: "4px 4px",
+            }}
           >
             {showPrice ? formatVfpNum(it.tien_nt2, 0) : ""}
           </td>
@@ -401,62 +466,79 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
           className="w-full border-collapse print-page-table"
           style={{
             tableLayout: "fixed",
-            fontSize: "11.5pt",
+            fontSize: "12pt",
           }}
         >
           <colgroup>
-            <col style={{ width: "4.19%" }} />
-            <col style={{ width: "30.54%" }} />
-            <col style={{ width: "5.81%" }} />
-            <col style={{ width: "7.43%" }} />
-            <col style={{ width: "7.57%" }} />
-            <col style={{ width: "12.30%" }} />
-            <col style={{ width: "13.51%" }} />
-            <col style={{ width: "4.32%" }} />
-            <col style={{ width: "14.32%" }} />
+            <col style={{ width: "6.01%" }} />
+            <col style={{ width: "28.84%" }} />
+            <col style={{ width: "5.34%" }} />
+            <col style={{ width: "8.28%" }} />
+            <col style={{ width: "8.54%" }} />
+            <col style={{ width: "12.28%" }} />
+            <col style={{ width: "12.28%" }} />
+            <col style={{ width: "5.87%" }} />
+            <col style={{ width: "12.55%" }} />
           </colgroup>
 
           <thead>
-            {/* Hàng đầu trang: Logo + Công ty + Tiêu đề + Hộp chứng từ + Khách hàng (tự lặp ở trang 2+) */}
+            {/* Hàng đầu trang: Logo ngang + Thông tin công ty + Tiêu đề + Thông tin phiếu + Khách hàng */}
             <tr>
               <th
                 colSpan={9}
-                className="p-0 pb-1.5 text-left font-normal align-top"
+                className="p-0 pb-1 text-left font-normal align-top"
                 style={{ border: "none" }}
               >
-                {/* ===== PHẦN ĐẦU TRANG (Page Header theo RPT\ctpxg.frx) ===== */}
-                <div className="flex items-start gap-2 mb-1">
-                  {/* Logo công ty (41.5 x 22.5 mm) */}
-                  <div
-                    className="shrink-0 flex items-center justify-center"
-                    style={{ width: "41.5mm", height: "22.5mm" }}
-                  >
-                    <img
-                      src="/logo.jpg"
-                      alt="Logo"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
+                {/* ===== KHỐI ĐẦU TRANG CÔNG TY (theo HD2259 Template.pdf) ===== */}
+                <div
+                  className="flex items-center pb-2"
+                  style={{ borderBottom: "1px solid #cccccc" }}
+                >
+                  <img
+                    src="/logo-elan.png"
+                    alt="ELAN"
+                    className="shrink-0 block"
+                    style={{
+                      width: "284px",
+                      height: "48px",
+                      objectFit: "contain",
+                    }}
+                  />
 
-                  {/* Tên công ty, ĐT/Fax, Tên bộ phận */}
-                  <div className="flex-1 text-center leading-tight pt-0.5">
+                  <div
+                    className="flex-1 text-left"
+                    style={{ paddingLeft: "10px", color: "#111111" }}
+                  >
                     <div
-                      className="font-bold uppercase tracking-tight"
-                      style={{ fontSize: "15.5pt", lineHeight: 1.15 }}
+                      className="font-bold uppercase"
+                      style={{ fontSize: "13pt", lineHeight: 1.2 }}
                     >
-                      {company.ten_dvcs || "Công ty chăn ga gối đệm Elan"}
+                      {company.ten_dvcs ||
+                        "CÔNG TY TNHH CHĂN GA GỐI ĐỆM ELAN"}
                     </div>
                     <div
                       className="font-normal"
-                      style={{ fontSize: "11.5pt", lineHeight: 1.25 }}
+                      style={{
+                        fontSize: "10pt",
+                        lineHeight: 1.25,
+                        marginTop: "2px",
+                      }}
                     >
-                      Điện thoại: {company.dien_thoai || "84-31.3.914.242"} -
-                      Fax: {company.fax || "84-31.3.914.247"}
+                      Địa chỉ:{" "}
+                      {company.dia_chi ||
+                        "Số 227 - Quốc lộ 17B - Phường An Dương - Hải Phòng"}
+                    </div>
+                    <div
+                      className="font-normal"
+                      style={{ fontSize: "10pt", lineHeight: 1.25 }}
+                    >
+                      SĐT: {company.dien_thoai || "(+84) 2253 914 242"} | MST:{" "}
+                      {company.mst || "0200727018"}
                     </div>
                     {header.ten_bp && (
                       <div
                         className="font-normal"
-                        style={{ fontSize: "11.5pt", lineHeight: 1.25 }}
+                        style={{ fontSize: "10pt", lineHeight: 1.25 }}
                       >
                         {header.ten_bp}
                       </div>
@@ -464,76 +546,50 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                   </div>
                 </div>
 
-                {/* Tiêu đề phiếu, Số xe & Hộp Ngày / Số phiếu / SQLTime góc phải */}
-                <div className="flex items-start justify-between gap-2 mt-1 mb-1">
-                  <div style={{ width: "41.5mm" }} className="shrink-0" />
-
-                  <div className="flex-1 text-center leading-tight pt-1">
-                    <div
-                      className="font-bold uppercase"
-                      style={{ fontSize: "19pt", lineHeight: 1.1 }}
-                    >
-                      {printData?.title || "Phiếu xuất bán"}
-                    </div>
-                    <div
-                      className="font-bold mt-0.5"
-                      style={{ fontSize: "11.5pt", lineHeight: 1.2 }}
-                    >
-                      Số xe: {header.ma_xe || ""}
-                    </div>
-                  </div>
-
-                  {/* Khung hộp góc phải (viền 1px solid #000) */}
+                {/* ===== TIÊU ĐỀ PHIẾU & DÒNG SỐ PHIẾU / NGÀY / SỐ XE ===== */}
+                <div className="text-center" style={{ marginTop: "5px" }}>
                   <div
-                    className="shrink-0 px-1.5 py-0.5 leading-tight font-normal"
+                    className="font-bold uppercase"
+                    style={{ fontSize: "17.5pt", lineHeight: 1.15 }}
+                  >
+                    {printData?.title || "PHIẾU XUẤT BÁN"}
+                  </div>
+                  <div
+                    className="font-bold"
                     style={{
-                      minWidth: "43mm",
-                      border: "1px solid #000",
-                      fontSize: "11.5pt",
+                      fontSize: "12.5pt",
+                      lineHeight: 1.25,
+                      marginTop: "3px",
+                      marginBottom: "6px",
                     }}
                   >
-                    <div className="flex items-center justify-between gap-2 font-bold">
-                      <span>Ngày:</span>
-                      <span>{formatDate(header.ngay_ct)}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 font-bold">
-                      <span>Số phiếu:</span>
-                      <span>{header.so_ct || ""}</span>
-                    </div>
-                    <div className="text-center italic font-normal mt-0.5">
-                      {printData?.sql_time || ""}
-                    </div>
+                    Số phiếu: {header.so_ct || ""} | Ngày:{" "}
+                    {formatDate(header.ngay_ct)} | Số xe:{" "}
+                    {header.ma_xe || ""}
                   </div>
                 </div>
 
-                {/* Thông tin khách hàng */}
+                {/* ===== THÔNG TIN KHÁCH HÀNG (3 DÒNG TÁCH BIỆT, THOÁNG NHƯ MẪU NHƯNG VẪN ĐỦ GỌN ĐỂ LẶP SANG TRANG 2) ===== */}
                 <div
-                  className="leading-snug font-bold"
-                  style={{ fontSize: "11.5pt" }}
+                  className="font-bold"
+                  style={{ fontSize: "12.5pt", lineHeight: "21px" }}
                 >
-                  <div className="flex items-baseline gap-2">
-                    <span className="shrink-0" style={{ minWidth: "24mm" }}>
-                      Khách hàng:
-                    </span>
-                    <span className="flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="flex-1">
+                      Khách hàng:{" "}
                       <span className="uppercase">
                         {header.ten_dt || header.ma_dt || ""}
                       </span>
-                      {header.dien_giai0 ? ` (${header.dien_giai0})` : ""}
-                    </span>
+                    </div>
+                    <div className="shrink-0" style={{ minWidth: "85px" }}>
+                      Điện thoại: {printData?.customer_phone || ""}
+                    </div>
                   </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="shrink-0" style={{ minWidth: "24mm" }}>
-                      Địa chỉ:
-                    </span>
-                    <span className="flex-1">
-                      {printData?.customer_address || ""}
-                    </span>
-                    <span className="shrink-0 ml-2">Điện thoại:</span>
-                    <span className="shrink-0" style={{ minWidth: "32mm" }}>
-                      {printData?.customer_phone || ""}
-                    </span>
+                  <div>
+                    Địa chỉ:{" "}
+                    {printData?.customer_address || header.dia_chi || ""}
                   </div>
+                  <div>Diễn giải: {header.dien_giai0 || ""}</div>
                 </div>
               </th>
             </tr>
@@ -541,13 +597,14 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             {/* Hàng tiêu đề 1 của bảng 9 cột */}
             <tr
               style={{
+                height: "24px",
                 borderTop: "2px solid #000",
                 borderBottom: "1px solid #000",
-                fontSize: "10.5pt",
+                fontSize: "12pt",
               }}
             >
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{
                   borderLeft: "2px solid #000",
                   borderRight: "1px solid #000",
@@ -556,49 +613,49 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 STT
               </th>
               <th
-                className="py-1 px-1 text-center font-bold"
+                className="px-1 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 Loại hàng
               </th>
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 ĐVT
               </th>
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 Cm(Kg)
               </th>
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 S.Lượng
               </th>
               <th
-                className="py-1 px-1 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 Đơn giá
               </th>
               <th
-                className="py-1 px-1 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 Thành tiền
               </th>
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "1px solid #000" }}
               >
                 CK
               </th>
               <th
-                className="py-1 px-0.5 text-center font-bold"
+                className="px-0.5 text-center font-bold align-middle whitespace-nowrap"
                 style={{ borderRight: "2px solid #000" }}
               >
                 Thanh toán
@@ -608,12 +665,13 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             {/* Hàng tiêu đề 2 (A, B, C, 1..6) */}
             <tr
               style={{
+                height: "20px",
                 borderBottom: "2px solid #000",
                 fontSize: "11pt",
               }}
             >
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{
                   borderLeft: "2px solid #000",
                   borderRight: "1px solid #000",
@@ -622,49 +680,49 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 A
               </th>
               <th
-                className="py-0.5 px-1 text-center font-normal"
+                className="px-1 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 B
               </th>
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 C
               </th>
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 1
               </th>
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 2
               </th>
               <th
-                className="py-0.5 px-1 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 3
               </th>
               <th
-                className="py-0.5 px-1 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 4=3x2x1
               </th>
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "1px solid #000" }}
               >
                 5
               </th>
               <th
-                className="py-0.5 px-0.5 text-center font-normal"
+                className="px-0.5 text-center italic font-normal align-middle"
                 style={{ borderRight: "2px solid #000" }}
               >
                 {header.loai_ck === "2" || !header.loai_ck ? "6=4-(4x5)" : "6"}
@@ -699,21 +757,22 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 }}
               >
                 <div
-                  className="flex items-baseline justify-between font-bold px-2 py-1"
-                  style={{ fontSize: "11.5pt" }}
+                  className="flex items-center justify-between font-bold"
+                  style={{
+                    height: "26px",
+                    padding: "0 4px 0 6px",
+                    fontSize: "12pt",
+                  }}
                 >
-                  <div className="flex items-baseline gap-3 pl-[10mm]">
-                    <span>Tổng cộng</span>
-                    <span style={{ fontSize: "13.5pt" }}>
-                      {formatTsoLoai(printData?.tso_loai)} thứ
-                    </span>
+                  <div>
+                    Tổng cộng {formatQtyNum(printData?.tso_loai) || "0"} thứ
                   </div>
 
-                  <div className="flex items-baseline gap-3">
+                  <div className="flex items-center gap-6">
                     <span>Tổng tiền</span>
                     <span
-                      className="text-right tabular-nums"
-                      style={{ minWidth: "36mm", fontSize: "12pt" }}
+                      className="text-right"
+                      style={{ minWidth: "90px" }}
                     >
                       {showPrice ? formatVfpNum(tongTien, 0) : ""}
                     </span>
@@ -724,26 +783,26 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
 
             {/* Bằng chữ, khối Nợ cũ / Tổng nợ (khi In nợ cũ = 'C') & 4 cột chữ ký */}
             <tr>
-              <td colSpan={9} className="p-0 pt-1" style={{ border: "none" }}>
+              <td colSpan={9} className="p-0" style={{ border: "none" }}>
                 {showNoCu && (
                   <div
-                    className="flex flex-col items-end font-bold pr-2 mt-0.5 leading-snug"
+                    className="flex flex-col items-end font-bold pr-1 mt-2 leading-snug"
                     style={{ fontSize: "12pt" }}
                   >
-                    <div className="flex items-baseline gap-3">
+                    <div className="flex items-baseline gap-6">
                       <span>Nợ cũ:</span>
                       <span
-                        className="text-right tabular-nums"
-                        style={{ minWidth: "36mm" }}
+                        className="text-right"
+                        style={{ minWidth: "90px" }}
                       >
                         {formatVfpNum(printData?.du_dau, 0)}
                       </span>
                     </div>
-                    <div className="flex items-baseline gap-3">
+                    <div className="flex items-baseline gap-6">
                       <span>Tổng nợ:</span>
                       <span
-                        className="text-right tabular-nums"
-                        style={{ minWidth: "36mm" }}
+                        className="text-right"
+                        style={{ minWidth: "90px" }}
                       >
                         {formatVfpNum(printData?.tong_no, 0)}
                       </span>
@@ -753,50 +812,77 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
 
                 {/* Bằng chữ */}
                 <div
-                  className="flex items-baseline gap-2 mt-1.5"
-                  style={{ fontSize: "13pt" }}
+                  style={{
+                    marginTop: "12mm",
+                    fontSize: "13pt",
+                    lineHeight: 1.35,
+                  }}
                 >
-                  <span className="shrink-0 pl-[3mm]">Bằng chữ :</span>
-                  <span className="flex-1">
+                  <span className="font-bold">Bằng chữ:</span>{" "}
+                  <span>
                     {showPrice ? printData?.tong_tien_chu || "" : ""}
                   </span>
                 </div>
 
                 {/* 4 cột chữ ký */}
                 <div
-                  className="grid grid-cols-4 text-center mt-4"
-                  style={{ fontSize: "11pt" }}
+                  className="grid grid-cols-4 text-center"
+                  style={{ marginTop: "6mm" }}
                 >
                   <div>
-                    <div className="font-bold uppercase">CHỦ HÀNG</div>
-                    <div className="italic" style={{ fontSize: "10.5pt" }}>
-                      (Ký &amp; ghi rõ họ tên)
-                    </div>
-                  </div>
-                  <div>
-                    <div className="font-bold uppercase">NGƯỜI LẬP</div>
-                    <div className="italic" style={{ fontSize: "10.5pt" }}>
-                      (Ký &amp; ghi rõ họ tên)
+                    <div
+                      className="font-bold uppercase"
+                      style={{ fontSize: "12pt", lineHeight: 1.3 }}
+                    >
+                      CHỦ HÀNG
                     </div>
                     <div
-                      className="mt-12 font-normal uppercase"
-                      style={{ fontSize: "10pt" }}
+                      className="italic font-normal"
+                      style={{ fontSize: "10pt", lineHeight: 1.3 }}
                     >
-                      {header.user_name || printData?.creator_name || ""}
+                      (Ký, họ tên)
                     </div>
                   </div>
                   <div>
-                    <div className="font-bold uppercase">
+                    <div
+                      className="font-bold uppercase"
+                      style={{ fontSize: "12pt", lineHeight: 1.3 }}
+                    >
+                      NGƯỜI LẬP
+                    </div>
+                    <div
+                      className="italic font-normal"
+                      style={{ fontSize: "10pt", lineHeight: 1.3 }}
+                    >
+                      (Ký, họ tên)
+                    </div>
+                  </div>
+                  <div>
+                    <div
+                      className="font-bold uppercase"
+                      style={{ fontSize: "12pt", lineHeight: 1.3 }}
+                    >
                       {isN5 ? "KIỂM HÀNG" : "LÁI XE"}
                     </div>
-                    <div className="italic" style={{ fontSize: "10.5pt" }}>
-                      (Ký &amp; ghi rõ họ tên)
+                    <div
+                      className="italic font-normal"
+                      style={{ fontSize: "10pt", lineHeight: 1.3 }}
+                    >
+                      (Ký, họ tên)
                     </div>
                   </div>
                   <div>
-                    <div className="font-bold uppercase">NGƯỜI GIAO HÀNG</div>
-                    <div className="italic" style={{ fontSize: "10.5pt" }}>
-                      (Ký &amp; ghi rõ họ tên)
+                    <div
+                      className="font-bold uppercase"
+                      style={{ fontSize: "12pt", lineHeight: 1.3 }}
+                    >
+                      NGƯỜI GIAO HÀNG
+                    </div>
+                    <div
+                      className="italic font-normal"
+                      style={{ fontSize: "10pt", lineHeight: 1.3 }}
+                    >
+                      (Ký, họ tên)
                     </div>
                   </div>
                 </div>
@@ -804,7 +890,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             </tr>
           </tbody>
 
-          {/* Đệm đáy lặp lại ở cuối mỗi trang in (tạo khoảng thoáng bottom mà không kích hoạt link URL của trình duyệt) */}
+          {/* Đệm đáy lặp lại ở cuối mỗi trang in (tạo khoảng thoáng bottom cho chân trang cố định) */}
           <tfoot>
             <tr>
               <td
@@ -814,6 +900,16 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             </tr>
           </tfoot>
         </table>
+
+        {/* Chân trang góc dưới bên phải */}
+        <div
+          className={`print-page-footer text-right mt-8 ${renderIdx > 0 ? "print:hidden" : ""}`}
+          style={{ fontSize: "11pt", fontWeight: 400 }}
+        >
+          Thời gian in:{" "}
+          {printData?.print_time_str || printData?.sql_time || ""} | Trang: 1 /
+          1
+        </div>
       </div>
     );
   };
@@ -931,7 +1027,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-[6mm] print-preview-sheet"
                 style={{
                   width: "210mm",
-                  fontFamily: '"Arial Narrow", Arial, sans-serif',
+                  fontFamily: '"Times New Roman", Times, serif',
                   color: "#000",
                 }}
               >
@@ -952,7 +1048,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       className="print-area fixed left-[-9999px] top-0 bg-white text-black opacity-0 pointer-events-none"
       style={{
         width: "198mm",
-        fontFamily: '"Arial Narrow", Arial, sans-serif',
+        fontFamily: '"Times New Roman", Times, serif',
         color: "#000",
       }}
       aria-hidden="true"

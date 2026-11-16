@@ -1,10 +1,17 @@
 /// <reference lib="webworker" />
+import {
+  collectRanked,
+  normalizeSearchText,
+  parseSearchQuery,
+  rankByFields,
+} from "../lib/searchMatch";
+
 /**
  * Web Worker giữ index danh mục vật tư trong RAM và tìm kiếm tức thì.
  *
  * - Index: { id, ma (IN HOA, NFC), k (mã + tên, chữ thường, NFC) }, sắp theo `ma`.
  * - Gõ mã: tìm nhị phân (lower bound) rồi lấy tối đa LIMIT dòng liên tiếp khớp đầu mã.
- * - Gõ tên: quét `includes` mọi từ, dừng ngay khi đủ LIMIT kết quả.
+ * - Gõ tên: ưu tiên khối liền nhau trong tên/mã trước từ rời, tới LIMIT kết quả.
  * - Đồng bộ delta qua `/api/products/changes`; lưu/đọc IndexedDB để khởi động nhanh.
  */
 
@@ -24,7 +31,11 @@ interface IndexItem {
   tk_dt: string;
   tk_ck: string;
   he_so0: number;
+  ma_kho?: string;
   k: string;
+  _ten?: string;
+  _ma?: string;
+  _k?: string;
 }
 
 let map = new Map<number, IndexItem>();
@@ -41,7 +52,12 @@ function rebuild() {
     a.ma < b.ma ? -1 : a.ma > b.ma ? 1 : 0,
   );
   byCode = new Map();
-  for (const it of items) byCode.set(it.ma, it.id);
+  for (const it of items) {
+    it._ten = normalizeSearchText(it.ten);
+    it._ma = normalizeSearchText(it.ma);
+    it._k = normalizeSearchText(it.k || `${it.ma} ${it.ten || ""}`);
+    byCode.set(it.ma, it.id);
+  }
 }
 
 function lowerBound(prefix: string): number {
@@ -71,16 +87,20 @@ function search(q: string): IndexItem[] {
     seen.add(items[i].id);
   }
 
-  // 2) Khớp mọi từ trong mã + tên.
+  // 2) Khớp ưu tiên khối liền nhau trong tên/mã -> đủ các từ rời.
   if (out.length < LIMIT) {
-    const words = chuan(q).split(/\s+/).filter(Boolean);
-    for (const it of items) {
-      if (seen.has(it.id)) continue;
-      if (words.every((w) => it.k.includes(w))) {
-        out.push(it);
-        if (out.length === LIMIT) break;
-      }
-    }
+    const { phrase, words } = parseSearchQuery(q);
+    const ranked = collectRanked(items, LIMIT - out.length, (it) => {
+      if (seen.has(it.id)) return Infinity;
+      return rankByFields(
+        it._ten ?? normalizeSearchText(it.ten),
+        it._ma ?? normalizeSearchText(it.ma),
+        it._k ?? normalizeSearchText(it.k),
+        phrase,
+        words,
+      );
+    });
+    out.push(...ranked);
   }
   return out;
 }
@@ -182,7 +202,9 @@ ctx.onmessage = async (e: MessageEvent) => {
 
   if (data.type === "init") {
     const loaded = await loadFromIdb();
-    if (loaded && map.size > 0) {
+    const hasWarehouseField =
+      items.length > 0 && Object.prototype.hasOwnProperty.call(items[0], "ma_kho");
+    if (loaded && map.size > 0 && hasWarehouseField) {
       // Báo sẵn sàng ngay lập tức từ IndexedDB để người dùng tra cứu không cần chờ mạng.
       ctx.postMessage({ type: "ready", count: map.size });
     }

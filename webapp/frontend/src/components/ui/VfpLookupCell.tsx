@@ -77,7 +77,8 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
   const [rect, setRect] = useState<{
     top: number;
     left: number;
-    width: number;
+    minWidth: number;
+    maxWidth: number;
   } | null>(null);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -113,10 +114,12 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     const el = internalRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
+    const avail = Math.max(300, window.innerWidth - r.left - 16);
     setRect({
       top: r.bottom + 2,
       left: r.left,
-      width: Math.max(r.width, dropdownMinWidth),
+      minWidth: Math.min(Math.max(r.width, dropdownMinWidth), avail),
+      maxWidth: avail,
     });
   }, [dropdownMinWidth]);
 
@@ -393,7 +396,9 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
             position: "fixed",
             top: rect.top,
             left: rect.left,
-            width: rect.width,
+            minWidth: rect.minWidth,
+            maxWidth: rect.maxWidth,
+            width: "max-content",
           }}
           className="z-[9999] max-h-56 overflow-y-auto bg-white border border-neutral-300 rounded shadow-xl text-xs divide-y divide-neutral-100"
         >
@@ -418,7 +423,10 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
                 />
               </span>
               {opt.hint && (
-                <span className="text-neutral-600 font-sans truncate text-right flex-1">
+                <span
+                  className="text-neutral-700 font-sans truncate text-left flex-1"
+                  title={opt.hint}
+                >
                   <HighlightText text={opt.hint} query={value} />
                 </span>
               )}

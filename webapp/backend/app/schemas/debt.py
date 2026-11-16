@@ -49,6 +49,7 @@ class DebtLedgerEntry(BaseModel):
 class DebtLedgerResponse(BaseModel):
     ma_dt: str = ""
     ten_dt: Optional[str] = ""
+    gioi_han: float = 0.0
     tk: str = "131"
     ngay_bd: str = ""
     ngay_kt: str = ""

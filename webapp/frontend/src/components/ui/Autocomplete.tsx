@@ -84,6 +84,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     width: number;
   } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const internalInputRef = useRef<HTMLInputElement | null>(null);
   const reqIdRef = useRef(0);
 
@@ -146,6 +147,13 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Cuộn dòng đang sáng vào vùng nhìn thấy của dropdown khi nhấn phím lên/xuống
+  useEffect(() => {
+    if (!open || highlight < 0) return;
+    const el = listRef.current?.children[highlight] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [highlight, open, options.length]);
 
   const choose = (opt: AutocompleteOption) => {
     onChange(opt.value);
@@ -271,6 +279,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
 
       {open && options.length > 0 && dropdownRect && (
         <ul
+          ref={listRef}
           style={{
             position: "fixed",
             top: dropdownRect.top,

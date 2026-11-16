@@ -1,13 +1,16 @@
 import { AutocompleteOption } from "../components/ui/Autocomplete";
 import { KhachHangItem } from "../types/lookup";
+import {
+  collectRanked,
+  normalizeSearchText,
+  parseSearchQuery,
+  rankByFields,
+} from "./searchMatch";
 
 /**
  * Index danh mục khách hàng (5.199 dòng) trong RAM trình duyệt.
- * Tải MỘT lần khi app khởi động, lọc bằng `includes` (NFC, không bỏ dấu) -> tức thì.
+ * Tải MỘT lần khi app khởi động, ưu tiên khối liền nhau trong Tên/Địa chỉ trước từ rời.
  */
-
-const chuan = (s: string | null | undefined): string =>
-  (s || "").normalize("NFC").toLowerCase();
 
 interface IndexedCustomer extends KhachHangItem {
   _name: string;
@@ -33,9 +36,11 @@ export function initCustomerIndex(): Promise<void> {
       const items = (body?.data ?? []) as KhachHangItem[];
       indexed = items.map((c) => ({
         ...c,
-        _name: chuan(c.ten_dt || ""),
-        _code: chuan(`${c.ma_dt} ${c.dia_chi || ""}`),
-        _all: chuan(`${c.ma_dt} ${c.ten_dt || ""} ${c.dia_chi || ""}`),
+        _name: normalizeSearchText(c.ten_dt),
+        _code: normalizeSearchText(`${c.dia_chi || ""} ${c.ma_dt}`),
+        _all: normalizeSearchText(
+          `${c.ma_dt} ${c.ten_dt || ""} ${c.dia_chi || ""}`,
+        ),
       }));
       loaded = true;
     } catch {
@@ -46,22 +51,11 @@ export function initCustomerIndex(): Promise<void> {
 }
 
 export function searchCustomers(q: string, limit = 50): AutocompleteOption[] {
-  const words = chuan(q).split(/\s+/).filter(Boolean);
+  const { phrase, words } = parseSearchQuery(q);
   if (!words.length) return [];
-  // Ưu tiên khớp hết trong TÊN -> khớp trong MÃ/ĐỊA CHỈ -> khớp kết hợp cả tên + mã + địa chỉ.
-  const nameHits: IndexedCustomer[] = [];
-  const codeHits: IndexedCustomer[] = [];
-  const crossHits: IndexedCustomer[] = [];
-  for (const c of indexed) {
-    if (words.every((w) => c._name.includes(w))) {
-      nameHits.push(c);
-    } else if (words.every((w) => c._code.includes(w))) {
-      codeHits.push(c);
-    } else if (words.every((w) => c._all.includes(w))) {
-      crossHits.push(c);
-    }
-  }
-  return [...nameHits, ...codeHits, ...crossHits].slice(0, limit).map((c) => ({
+  return collectRanked(indexed, limit, (c) =>
+    rankByFields(c._name, c._code, c._all, phrase, words),
+  ).map((c) => ({
     value: c.ma_dt,
     label: c.ma_dt,
     hint: c.ten_dt,

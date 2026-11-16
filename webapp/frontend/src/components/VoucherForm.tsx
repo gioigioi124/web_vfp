@@ -4,7 +4,8 @@ import { DetailGrid, DetailGridHandle } from "./DetailGrid";
 import {
   formatCurrency,
   formatDate,
-  formatQuantity,
+  formatCompactNumber,
+  parseNumberInput,
   getTodayDate,
 } from "../lib/format";
 import { Autocomplete, AutocompleteOption } from "./ui/Autocomplete";
@@ -95,6 +96,9 @@ const emptyDetailRow = (): VoucherDetail => ({
 
 const CURRENT_USER = "KTCN3";
 
+const clampField = (val: string | null | undefined, max: number): string =>
+  (val || "").normalize("NFC").slice(0, max);
+
 export const VoucherForm: React.FC<VoucherFormProps> = ({
   stt: sttProp,
   voucher,
@@ -119,7 +123,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     ? CURRENT_USER
     : (voucher?.user_name || "").trim();
   const isDifferentCreator =
-    !isCreate && (!voucher || voucherCreator.toUpperCase() !== CURRENT_USER);
+    isEditable &&
+    !isCreate &&
+    (!voucher || voucherCreator.toUpperCase() !== CURRENT_USER);
 
   // Refs for sequential focus & Enter navigation:
   // Ngày -> Số phiếu -> Mã đối tượng -> Diễn giải -> Mã xe -> Chọn phiếu xuất
@@ -149,19 +155,24 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     voucher?.ten_dt || initialInherited?.ten_dt || "",
   );
   const [ongBa, setOngBa] = useState<string>(
-    voucher?.ong_ba ||
-      initialInherited?.ong_ba ||
-      voucher?.ten_dt ||
-      initialInherited?.ten_dt ||
-      "",
+    clampField(
+      voucher?.ong_ba ||
+        initialInherited?.ong_ba ||
+        voucher?.ten_dt ||
+        initialInherited?.ten_dt,
+      64,
+    ),
   );
   const [diaChi, setDiaChi] = useState<string>(
-    voucher?.dia_chi || initialInherited?.dia_chi || "",
+    clampField(voucher?.dia_chi || initialInherited?.dia_chi, 64),
   );
   const [dienGiai0, setDienGiai0] = useState<string>(
-    voucher?.dien_giai0 ??
-      initialInherited?.dien_giai0 ??
-      (isWarehouse ? "xuất bán" : "Mua hàng"),
+    clampField(
+      voucher?.dien_giai0 ??
+        initialInherited?.dien_giai0 ??
+        (isWarehouse ? "xuất bán" : "Mua hàng"),
+      128,
+    ),
   );
   const [maBp, setMaBp] = useState<string>(
     voucher?.ma_bp || initialInherited?.ma_bp || "",
@@ -235,6 +246,24 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   });
 
   const [activeRowIndex, setActiveRowIndex] = useState<number>(0);
+  const [highlightSpecs, setHighlightSpecs] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("vfp_highlight_spec_ten_vt") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggleHighlightSpecs = useCallback(() => {
+    setHighlightSpecs((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("vfp_highlight_spec_ten_vt", next ? "1" : "0");
+      } catch {
+        // Ignore storage errors (private mode / quota)
+      }
+      return next;
+    });
+  }, []);
 
   // Status & Validation States
   const [saving, setSaving] = useState<boolean>(false);
@@ -262,6 +291,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
   const [showPriceCalc, setShowPriceCalc] = useState<boolean>(false);
+  const [calcInitialPrice, setCalcInitialPrice] = useState<number>(0);
   const beforeCalcFocusRef = useRef<HTMLElement | null>(null);
   useModalLock(!!debtDialog, debtDialogRef);
   useModalLock(showAccountPicker, accountPickerRef);
@@ -340,9 +370,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     lastWarnedMaDtRef.current = "";
     setMaDtError(null);
     setTenDt(voucher.ten_dt || "");
-    setOngBa(voucher.ong_ba || voucher.ten_dt || "");
-    setDiaChi(voucher.dia_chi || "");
-    setDienGiai0(voucher.dien_giai0 ?? "");
+    setOngBa(clampField(voucher.ong_ba || voucher.ten_dt, 64));
+    setDiaChi(clampField(voucher.dia_chi, 64));
+    setDienGiai0(clampField(voucher.dien_giai0, 128));
     setMaBp(voucher.ma_bp || "");
     setTenBp(voucher.ten_bp || "");
     setMaXe(voucher.ma_xe || "");
@@ -488,16 +518,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       if (isCreate) {
         if (cust.ten_dt) setTenDt(cust.ten_dt);
         const resolvedOngBa = cust.ong_ba || cust.doi_tac || cust.ten_dt || "";
-        if (resolvedOngBa) setOngBa(resolvedOngBa);
-        if (cust.dia_chi !== undefined && !diaChi) setDiaChi(cust.dia_chi);
+        if (resolvedOngBa) setOngBa(clampField(resolvedOngBa, 64));
+        if (cust.dia_chi !== undefined && !diaChi)
+          setDiaChi(clampField(cust.dia_chi, 64));
         if (cust.ma_bp) setMaBp(cust.ma_bp);
         if (cust.ten_bp) setTenBp(cust.ten_bp);
         if (cust.ms_thue) setMaDtGtGt(cust.ms_thue);
       } else {
         if (cust.ten_dt) setTenDt((prev) => prev || cust.ten_dt || "");
         const resolvedOngBa = cust.ong_ba || cust.doi_tac || cust.ten_dt || "";
-        if (resolvedOngBa) setOngBa((prev) => prev || resolvedOngBa);
-        if (cust.dia_chi) setDiaChi((prev) => prev || cust.dia_chi || "");
+        if (resolvedOngBa)
+          setOngBa((prev) => prev || clampField(resolvedOngBa, 64));
+        if (cust.dia_chi)
+          setDiaChi((prev) => prev || clampField(cust.dia_chi, 64));
         if (cust.ma_bp) setMaBp((prev) => prev || cust.ma_bp || "");
         if (cust.ten_bp) setTenBp((prev) => prev || cust.ten_bp || "");
         if (cust.ms_thue) setMaDtGtGt((prev) => prev || cust.ms_thue || "");
@@ -672,8 +705,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setMaDt(realCode);
       setMaDtError(null);
       setTenDt(cust.ten_dt || "");
-      setOngBa(cust.ong_ba || cust.doi_tac || cust.ten_dt || "");
-      setDiaChi(cust.dia_chi || "");
+      setOngBa(clampField(cust.ong_ba || cust.doi_tac || cust.ten_dt, 64));
+      setDiaChi(clampField(cust.dia_chi, 64));
       setMaBp(cust.ma_bp || "");
       setTenBp(cust.ten_bp || "");
       if (cust.han_tt !== undefined) setHanTt(cust.han_tt);
@@ -850,11 +883,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Calculate voucher totals
   const totals = calcVoucherTotals(items, tyGia, thueGtgt, loaiCk);
   const totalQty = items.reduce((s, it) => s + (it.so_luong9 || 0), 0);
-  const uniqueItemCount = new Set(
-    items
-      .map((it) => (it.ma_vt || "").trim().toUpperCase())
-      .filter((code) => code.length > 0),
-  ).size;
 
   // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
   const handleSave = async (bypassChecks: boolean = false) => {
@@ -1099,6 +1127,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     })();
   }, [maDt, maDtError, onViewDebt, tenDt]);
 
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
   // Keyboard shortcut listener for Ctrl+Enter / Esc / F8 / F4
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1114,7 +1145,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         !e.altKey
       ) {
         e.preventDefault();
-        handleSave(false);
+        handleSaveRef.current(false);
       } else if (
         isEditable &&
         !saving &&
@@ -1125,7 +1156,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         !e.altKey
       ) {
         e.preventDefault();
-        handleSave(true);
+        handleSaveRef.current(true);
       } else if (
         (e.ctrlKey || e.metaKey) &&
         e.shiftKey &&
@@ -1189,9 +1220,28 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const handleOpenPriceCalc = useCallback(() => {
     if (isWarehouse || isSuspended || !isEditable || items.length === 0) return;
     if (showPriceCalc || isModalOpen()) return;
-    beforeCalcFocusRef.current = document.activeElement as HTMLElement | null;
+    const activeEl = document.activeElement as HTMLElement | null;
+    beforeCalcFocusRef.current = activeEl;
+
+    const latestItems = itemsLatestRef.current;
+    const safeIdx = Math.max(0, Math.min(activeRowIndex, latestItems.length - 1));
+    let nextInit = Number(latestItems[safeIdx]?.gia_nt9 ?? 0);
+
+    // Nếu đang nhập dở trong ô của grid (đặc biệt ô Đơn giá), lấy ngay số đang gõ
+    // đưa vào máy tính và blur để ô tự commit/tính lại thành tiền trên dòng.
+    if (
+      activeEl instanceof HTMLInputElement &&
+      activeEl.closest('[data-purpose="ledger-table-container"]')
+    ) {
+      if (activeEl.dataset.field === "gia_nt9") {
+        nextInit = parseNumberInput(activeEl.value);
+      }
+      activeEl.blur();
+    }
+
+    setCalcInitialPrice(nextInit);
     setShowPriceCalc(true);
-  }, [isWarehouse, isSuspended, isEditable, items.length, showPriceCalc]);
+  }, [isWarehouse, isSuspended, isEditable, items.length, activeRowIndex, showPriceCalc]);
 
   useEffect(() => {
     const handleF5Capture = (e: KeyboardEvent) => {
@@ -1224,7 +1274,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   const handleApplyCalculatedPrice = (calculatedPrice: number) => {
     const safeIdx = Math.max(0, Math.min(activeRowIndex, items.length - 1));
-    const targetRow = items[safeIdx];
+    const targetRow = itemsLatestRef.current[safeIdx] ?? items[safeIdx];
     beforeCalcFocusRef.current = null;
     setShowPriceCalc(false);
     if (targetRow) {
@@ -1373,7 +1423,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-1 pl-2 border-l border-white/20">
-            {!isWarehouse && voucher?.stt && (
+            {!isWarehouse && voucher?.stt && onPrint && (
               <button
                 className="p-1 px-2 text-primary-200 hover:text-white hover:bg-white/10 rounded transition-colors"
                 title="In phiếu (F7)"
@@ -1540,31 +1590,56 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                   {debtInfo && (
                     <>
                       <span className="text-neutral-300">|</span>
-                      <button
-                        type="button"
-                        onClick={openDebtLedger}
-                        className={`inline-flex items-center gap-1 text-xs cursor-pointer hover:underline ${
-                          debtInfo.is_over_limit
-                            ? "text-danger-700 font-bold"
-                            : debtInfo.is_near_limit
-                              ? "text-amber-700 font-semibold"
-                              : "text-neutral-700 font-medium"
-                        }`}
-                        title="Mở sổ chi tiết công nợ [Ctrl+Shift+E]"
-                      >
-                        <CreditCard className="w-3.5 h-3.5 opacity-70" />
-                        <span>
-                          Dư nợ:{" "}
-                          <span className="font-mono font-bold">
-                            {formatCurrency(debtInfo.du_cuoi)}
+                      {onViewDebt ? (
+                        <button
+                          type="button"
+                          onClick={openDebtLedger}
+                          className={`inline-flex items-center gap-1 text-xs cursor-pointer hover:underline ${
+                            debtInfo.is_over_limit
+                              ? "text-danger-700 font-bold"
+                              : debtInfo.is_near_limit
+                                ? "text-amber-700 font-semibold"
+                                : "text-neutral-700 font-medium"
+                          }`}
+                          title="Mở sổ chi tiết công nợ [Ctrl+Shift+E]"
+                        >
+                          <CreditCard className="w-3.5 h-3.5 opacity-70" />
+                          <span>
+                            Dư nợ:{" "}
+                            <span className="font-mono font-bold">
+                              {formatCurrency(debtInfo.du_cuoi)}
+                            </span>
                           </span>
-                        </span>
-                        {debtInfo.is_over_limit && (
-                          <span className="text-danger-600 ml-0.5 font-bold">
-                            (Vượt HM!)
+                          {debtInfo.is_over_limit && (
+                            <span className="text-danger-600 ml-0.5 font-bold">
+                              (Vượt HM!)
+                            </span>
+                          )}
+                        </button>
+                      ) : (
+                        <div
+                          className={`inline-flex items-center gap-1 text-xs ${
+                            debtInfo.is_over_limit
+                              ? "text-danger-700 font-bold"
+                              : debtInfo.is_near_limit
+                                ? "text-amber-700 font-semibold"
+                                : "text-neutral-700 font-medium"
+                          }`}
+                        >
+                          <CreditCard className="w-3.5 h-3.5 opacity-70" />
+                          <span>
+                            Dư nợ:{" "}
+                            <span className="font-mono font-bold">
+                              {formatCurrency(debtInfo.du_cuoi)}
+                            </span>
                           </span>
-                        )}
-                      </button>
+                          {debtInfo.is_over_limit && (
+                            <span className="text-danger-600 ml-0.5 font-bold">
+                              (Vượt HM!)
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </>
                   )}
                 </>
@@ -1702,6 +1777,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               <label className="erp-label shrink-0 ml-1">Địa chỉ:</label>
               <div className="flex-1 min-w-[180px] ">
                 <input
+                  maxLength={64}
                   className={disabledLookupField}
                   value={diaChi || ""}
                   onFocus={(e) => e.currentTarget.select()}
@@ -1718,6 +1794,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               </label>
               <div className="w-[350px] shrink-0">
                 <input
+                  maxLength={64}
                   className={disabledLookupField + " font-medium"}
                   value={ongBa || ""}
                   onFocus={(e) => e.currentTarget.select()}
@@ -1761,13 +1838,14 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               <div className="w-[350px] shrink-0">
                 <input
                   ref={dienGiaiInputRef}
+                  maxLength={128}
                   className={`erp-input w-full font-medium text-neutral-800 text-xs py-0.5 ${
                     isEditable
                       ? "bg-white border-neutral-300"
                       : "bg-neutral-100 cursor-text select-text"
                   }`}
                   value={dienGiai0 || ""}
-                  onChange={(e) => setDienGiai0(e.target.value)}
+                  onChange={(e) => setDienGiai0(clampField(e.target.value, 128))}
                   onFocus={(e) => {
                     const target = e.currentTarget;
                     target.select();
@@ -1778,6 +1856,34 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                     }, 0);
                   }}
                   onKeyDown={(e) => {
+                    if (
+                      isEditable &&
+                      (e.ctrlKey || e.metaKey) &&
+                      !e.shiftKey &&
+                      !e.altKey &&
+                      (e.key.toLowerCase() === "d" || e.code === "KeyD")
+                    ) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const input = e.currentTarget;
+                      const source =
+                        input.value ||
+                        dienGiai0 ||
+                        voucher?.dien_giai0 ||
+                        initialInherited?.dien_giai0 ||
+                        "";
+                      const nextVal = source.slice(0, 10);
+                      setDienGiai0(nextVal);
+                      setTimeout(() => {
+                        if (document.activeElement === input) {
+                          input.setSelectionRange(
+                            nextVal.length,
+                            nextVal.length,
+                          );
+                        }
+                      }, 0);
+                      return;
+                    }
                     if (
                       e.key === "Enter" &&
                       !e.ctrlKey &&
@@ -1792,6 +1898,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                     }
                     handleHeaderArrowNav(e, 4);
                   }}
+                  title={
+                    isEditable
+                      ? "Diễn giải (Ctrl+D: cắt giữ 10 ký tự đầu)"
+                      : undefined
+                  }
                   readOnly={!isEditable}
                 />
               </div>
@@ -1955,8 +2066,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           <span className="text-neutral-500 text-[11px] whitespace-nowrap">
             Đang ghi nhận:{" "}
             <b className="text-neutral-800">{items.length} dòng</b>
-            <span className="text-neutral-300 mx-1">·</span>
-            <b className="text-neutral-800">{uniqueItemCount} mặt hàng</b>
           </span>
           <span className="text-neutral-400">|</span>
           <PromotionCounter
@@ -1967,13 +2076,26 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             voucherKey={voucherStt || (isCreate ? "NEW" : "VIEW")}
           />
         </div>
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={toggleHighlightSpecs}
+            aria-pressed={highlightSpecs}
+            title="Bật/tắt tô màu phân loại và tô đậm kích thước trong Tên vật tư"
+            className={`px-2 py-0.5 rounded border shadow-sm text-[11px] transition-colors cursor-pointer ${
+              highlightSpecs
+                ? "bg-primary-50 border-primary-300 text-primary-800 font-semibold hover:bg-primary-100"
+                : "bg-white border-neutral-300 text-neutral-500 font-medium hover:bg-neutral-50"
+            }`}
+          >
+            Phân loại
+          </button>
           <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-neutral-300 shadow-sm text-xs">
             <span className="text-[11px] text-neutral-500 font-medium">
               Tổng SL:
             </span>
             <span className="font-mono font-bold text-neutral-800">
-              {formatQuantity(totalQty)}
+              {formatCompactNumber(totalQty)}
             </span>
           </div>
         </div>
@@ -1991,6 +2113,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           variant="form"
           voucherMode={voucherMode}
           editable={isEditable}
+          highlightSpecs={highlightSpecs}
           activeRowIndex={activeRowIndex}
           onSelectRow={setActiveRowIndex}
           onChangeItem={handleItemChange}
@@ -2242,11 +2365,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
           ]?.ten_vt
         }
-        initialValue={Number(
-          items[
-            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
-          ]?.gia_nt9 ?? 0,
-        )}
+        initialValue={calcInitialPrice}
         onApply={handleApplyCalculatedPrice}
         onClose={handleClosePriceCalc}
       />

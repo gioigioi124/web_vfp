@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import {
   VoucherHeader,
   VoucherDetail,
@@ -86,7 +86,8 @@ export const VoucherList: React.FC<VoucherListProps> = ({
 }) => {
   const isWarehouse = voucherMode === "warehouse";
   const activeVoucher =
-    vouchers.find((v) => v.stt === selectedStt) || vouchers[0];
+    vouchers.find((v) => v.stt === selectedStt) ||
+    vouchers[vouchers.length - 1];
   const detailCurrency = activeVoucher?.ma_tte || "VND";
 
   const masterScrollRef = useRef<HTMLDivElement | null>(null);
@@ -94,27 +95,103 @@ export const VoucherList: React.FC<VoucherListProps> = ({
   const detailSectionRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const activeColRef = useRef<number>(3);
+  const scrollTimerRef = useRef<number | null>(null);
+  const hasAlignedRef = useRef<boolean>(false);
+  const prevAlignedSttRef = useRef<string | null>(null);
+  const userSelectedSttRef = useRef<string | null>(null);
 
-  const ensureRowVisible = useCallback((stt: string | null) => {
-    if (!stt) return;
-    const container = masterScrollRef.current;
-    const row = rowRefs.current[stt];
-    if (!container || !row) return;
-
-    const headerHeight = masterHeadRef.current
-      ? masterHeadRef.current.getBoundingClientRect().height
-      : 0;
-    const cRect = container.getBoundingClientRect();
-    const rRect = row.getBoundingClientRect();
-    const visibleTop = cRect.top + headerHeight;
-    const visibleBottom = cRect.top + container.clientHeight;
-
-    if (rRect.top < visibleTop) {
-      container.scrollTop -= visibleTop - rRect.top;
-    } else if (rRect.bottom > visibleBottom) {
-      container.scrollTop += rRect.bottom - visibleBottom;
+  const clearScheduledScroll = useCallback(() => {
+    if (scrollTimerRef.current !== null) {
+      window.clearTimeout(scrollTimerRef.current);
+      scrollTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    return () => clearScheduledScroll();
+  }, [clearScheduledScroll]);
+
+  const measureRowPosition = useCallback(
+    (container: HTMLDivElement, row: HTMLTableRowElement) => {
+      const headerHeight = masterHeadRef.current
+        ? masterHeadRef.current.getBoundingClientRect().height
+        : 0;
+      const cRect = container.getBoundingClientRect();
+      const rRect = row.getBoundingClientRect();
+      const visibleTop = cRect.top + headerHeight;
+      const bodyHeight = Math.max(0, container.clientHeight - headerHeight);
+      const targetRowBottom = visibleTop + (bodyHeight * 2) / 3;
+      const delta = rRect.bottom - targetRowBottom;
+      return {
+        rRect,
+        visibleTop,
+        visibleBottom: visibleTop + bodyHeight,
+        delta,
+        alignedTop: Math.max(0, container.scrollTop + delta),
+      };
+    },
+    [],
+  );
+
+  // Định vị tức thì dòng đang chọn ở 2/3 phía dưới grid (khi mở list hoặc quay ra từ form).
+  const alignRowInstant = useCallback(
+    (stt: string | null): boolean => {
+      if (!stt) return false;
+      const container = masterScrollRef.current;
+      const row = rowRefs.current[stt];
+      if (!container || !row) return false;
+
+      const { delta, alignedTop } = measureRowPosition(container, row);
+      if (Math.abs(delta) > 2) {
+        container.scrollTop = alignedTop;
+      }
+      return true;
+    },
+    [measureRowPosition],
+  );
+
+  const ensureRowVisible = useCallback(
+    (stt: string | null, immediateClamp: boolean = false) => {
+      clearScheduledScroll();
+      if (!stt) return;
+
+      const container = masterScrollRef.current;
+      const row = rowRefs.current[stt];
+      if (!container || !row) return;
+
+      if (immediateClamp) {
+        const { rRect, visibleTop, visibleBottom } = measureRowPosition(
+          container,
+          row,
+        );
+        if (rRect.top < visibleTop) {
+          container.scrollTop -= visibleTop - rRect.top;
+        } else if (rRect.bottom > visibleBottom) {
+          container.scrollTop += rRect.bottom - visibleBottom;
+        }
+      }
+
+      // Trì hoãn nhẹ rồi cuộn mượt để tránh nhảy dòng ngay lúc người dùng đang click.
+      scrollTimerRef.current = window.setTimeout(() => {
+        scrollTimerRef.current = null;
+        const activeContainer = masterScrollRef.current;
+        const activeRow = rowRefs.current[stt];
+        if (!activeContainer || !activeRow) return;
+
+        const { delta, alignedTop } = measureRowPosition(
+          activeContainer,
+          activeRow,
+        );
+        if (Math.abs(delta) > 2) {
+          activeContainer.scrollTo({
+            top: alignedTop,
+            behavior: "smooth",
+          });
+        }
+      }, 260);
+    },
+    [clearScheduledScroll, measureRowPosition],
+  );
 
   const focusMasterCell = useCallback((stt: string, colIdx?: number) => {
     const row = rowRefs.current[stt];
@@ -179,10 +256,11 @@ export const VoucherList: React.FC<VoucherListProps> = ({
         const nextStt = list[nextIdx]?.stt;
         if (!nextStt) return;
         if (nextStt !== currentStt) {
+          userSelectedSttRef.current = nextStt;
           selectStt(nextStt);
         }
         focusMasterCell(nextStt, colIdx);
-        ensureRowVisible(nextStt);
+        ensureRowVisible(nextStt, true);
         return;
       }
 
@@ -214,10 +292,11 @@ export const VoucherList: React.FC<VoucherListProps> = ({
           const nextStt = list[nextRowIdx]?.stt;
           if (!nextStt) return;
           if (nextStt !== currentStt) {
+            userSelectedSttRef.current = nextStt;
             selectStt(nextStt);
           }
           focusMasterCell(nextStt, forward ? 1 : 6);
-          ensureRowVisible(nextStt);
+          ensureRowVisible(nextStt, true);
         }
       }
     },
@@ -256,20 +335,63 @@ export const VoucherList: React.FC<VoucherListProps> = ({
       const nextStt = list[nextIdx]?.stt;
       if (!nextStt) return;
       if (nextStt !== currentStt) {
+        userSelectedSttRef.current = nextStt;
         selectStt(nextStt);
       }
       focusMasterCell(nextStt);
-      ensureRowVisible(nextStt);
+      ensureRowVisible(nextStt, true);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [ensureRowVisible, focusMasterCell]);
 
-  // Cuộn dòng đang chọn vào vùng hiển thị (tránh bị che dưới header sticky).
-  useEffect(() => {
-    ensureRowVisible(selectedStt);
-  }, [selectedStt, vouchers, ensureRowVisible]);
+  const handleMasterCellFocus = useCallback(
+    (colIdx: number, stt: string, input: HTMLInputElement) => {
+      activeColRef.current = colIdx;
+      if (selectedStt !== stt) {
+        userSelectedSttRef.current = stt;
+        onSelectStt(stt);
+        ensureRowVisible(stt, false);
+      }
+      input.select();
+      selectAllLater(input);
+    },
+    [selectedStt, onSelectStt, ensureRowVisible],
+  );
+
+  // Khi mở grid hoặc thoát từ form thêm/sửa về, đặt sẵn vị trí cuộn trước khi vẽ để tránh trượt từ đầu bảng xuống.
+  useLayoutEffect(() => {
+    if (loading || vouchers.length === 0) {
+      hasAlignedRef.current = false;
+      return;
+    }
+    if (!selectedStt) return;
+
+    if (userSelectedSttRef.current === selectedStt) {
+      userSelectedSttRef.current = null;
+      hasAlignedRef.current = true;
+      prevAlignedSttRef.current = selectedStt;
+      return;
+    }
+
+    if (!hasAlignedRef.current || prevAlignedSttRef.current !== selectedStt) {
+      clearScheduledScroll();
+      if (alignRowInstant(selectedStt)) {
+        hasAlignedRef.current = true;
+        prevAlignedSttRef.current = selectedStt;
+      } else if (!hasAlignedRef.current) {
+        // Phiếu mới tạo đang đợi nạp ngầm về cuối danh sách: neo tạm dòng cuối để không nháy về đầu bảng.
+        alignRowInstant(vouchers[vouchers.length - 1]?.stt || null);
+      }
+    }
+  }, [
+    selectedStt,
+    vouchers,
+    loading,
+    alignRowInstant,
+    clearScheduledScroll,
+  ]);
 
   return (
     <div className="flex flex-col h-full w-full bg-surface min-h-0">
@@ -361,7 +483,13 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                         if (el) rowRefs.current[v.stt] = el;
                         else delete rowRefs.current[v.stt];
                       }}
-                      onClick={() => onSelectStt(v.stt)}
+                      onClick={() => {
+                        if (selectedStt !== v.stt) {
+                          userSelectedSttRef.current = v.stt;
+                          onSelectStt(v.stt);
+                        }
+                        ensureRowVisible(v.stt, false);
+                      }}
                       className={
                         isSelected
                           ? "xl-row-active"
@@ -393,12 +521,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           data-mode="select"
                           value={v.ma_ct || ""}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 1;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(1, v.stt, e.currentTarget)
+                          }
                           onKeyDown={(e) =>
                             handleMasterCellKeyDown(e, rowIdx, 1)
                           }
@@ -413,12 +538,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           data-mode="select"
                           value={formatDate(v.ngay_ct)}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 2;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(2, v.stt, e.currentTarget)
+                          }
                           onKeyDown={(e) =>
                             handleMasterCellKeyDown(e, rowIdx, 2)
                           }
@@ -433,12 +555,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           data-mode="select"
                           value={v.so_ct || v.stt}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 3;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(3, v.stt, e.currentTarget)
+                          }
                           onKeyDown={(e) =>
                             handleMasterCellKeyDown(e, rowIdx, 3)
                           }
@@ -455,12 +574,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           placeholder="—"
                           title={v.dien_giai0 || ""}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 4;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(4, v.stt, e.currentTarget)
+                          }
                           onKeyDown={(e) =>
                             handleMasterCellKeyDown(e, rowIdx, 4)
                           }
@@ -477,12 +593,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                           placeholder="—"
                           title={v.ten_dt || v.ma_dt || ""}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
-                          onFocus={(e) => {
-                            activeColRef.current = 5;
-                            if (selectedStt !== v.stt) onSelectStt(v.stt);
-                            e.currentTarget.select();
-                            selectAllLater(e.currentTarget);
-                          }}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(5, v.stt, e.currentTarget)
+                          }
                           onKeyDown={(e) =>
                             handleMasterCellKeyDown(e, rowIdx, 5)
                           }
@@ -500,12 +613,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                             onMouseDown={(e) =>
                               handleExcelMouseDown(e, "select")
                             }
-                            onFocus={(e) => {
-                              activeColRef.current = 6;
-                              if (selectedStt !== v.stt) onSelectStt(v.stt);
-                              e.currentTarget.select();
-                              selectAllLater(e.currentTarget);
-                            }}
+                            onFocus={(e) =>
+                              handleMasterCellFocus(6, v.stt, e.currentTarget)
+                            }
                             onKeyDown={(e) =>
                               handleMasterCellKeyDown(e, rowIdx, 6)
                             }
@@ -520,6 +630,13 @@ export const VoucherList: React.FC<VoucherListProps> = ({
               )}
             </tbody>
           </table>
+          {!loading && vouchers.length > 0 && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none select-none"
+              style={{ height: "calc((100% - 26px) / 3)", minHeight: "48px" }}
+            />
+          )}
         </div>
       </section>
 

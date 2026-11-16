@@ -45,12 +45,105 @@ export function formatNumber0(n?: number | null): string {
   return `${neg ? "-" : ""}${grouped}`;
 }
 
+/**
+ * Định dạng số 2 chữ số thập phân gọn: phân nhóm nghìn bằng dấu cách,
+ * chỉ hiện phần thập phân (tối đa 2 số, bỏ 0 dư) khi khác số nguyên.
+ * VD: 1000 -> "1 000", 1234.5 -> "1 234.5", 2.88 -> "2.88"
+ */
+export function formatCompactNumber(n?: number | null): string {
+  if (n === null || n === undefined || isNaN(n)) return "0";
+  const neg = n < 0;
+  const fixed = Math.abs(n).toFixed(2);
+  if (fixed === "0.00") return "0";
+  const [intPart, rawDec] = fixed.split(".");
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const dec = rawDec.replace(/0+$/, "");
+  return `${neg ? "-" : ""}${dec ? `${grouped}.${dec}` : grouped}`;
+}
+
 /** Bỏ mọi ký tự phân nhóm (dấu cách, dấu phẩy) để parse số người dùng nhập. */
 export function parseNumberInput(s: string): number {
   if (!s) return 0;
   const cleaned = s.replace(/[\s,]/g, "").replace(/[^\d.\-]/g, "");
   const v = parseFloat(cleaned);
   return isNaN(v) ? 0 : v;
+}
+
+/**
+ * Định dạng chuỗi số ngay lúc đang gõ (phân nhóm nghìn/triệu bằng dấu cách),
+ * đồng thời giữ đúng vị trí con trỏ.
+ */
+export function formatLiveNumberInput(
+  raw: string,
+  caret: number,
+  allowDecimal: boolean = true,
+): { formatted: string; caret: number } {
+  if (!raw) return { formatted: "", caret: 0 };
+
+  let rawBeforeCaret = 0;
+  let seenDotBefore = false;
+  const limit = Math.min(Math.max(0, caret), raw.length);
+  for (let i = 0; i < limit; i++) {
+    const ch = raw[i];
+    if (
+      (ch >= "0" && ch <= "9") ||
+      (ch === "-" && i === 0) ||
+      (allowDecimal && ch === "." && !seenDotBefore)
+    ) {
+      if (ch === ".") seenDotBefore = true;
+      rawBeforeCaret += 1;
+    }
+  }
+
+  const isNeg = raw.trimStart().startsWith("-");
+  let cleanedBody = "";
+  let seenDot = false;
+  for (const ch of raw) {
+    if (ch >= "0" && ch <= "9") {
+      cleanedBody += ch;
+    } else if (allowDecimal && ch === "." && !seenDot) {
+      seenDot = true;
+      cleanedBody += ch;
+    }
+  }
+
+  if (!cleanedBody && !isNeg) return { formatted: "", caret: 0 };
+  if (!cleanedBody && isNeg) {
+    return { formatted: "-", caret: rawBeforeCaret > 0 ? 1 : 0 };
+  }
+
+  const dotIdx = cleanedBody.indexOf(".");
+  let intPart = dotIdx >= 0 ? cleanedBody.slice(0, dotIdx) : cleanedBody;
+  const decPart = dotIdx >= 0 ? cleanedBody.slice(dotIdx) : "";
+
+  if (!intPart && dotIdx >= 0) {
+    intPart = "0";
+    if (rawBeforeCaret > 0) rawBeforeCaret += 1;
+  } else if (intPart.length > 1) {
+    const stripped = intPart.replace(/^0+/, "") || "0";
+    const diff = intPart.length - stripped.length;
+    if (diff > 0) {
+      rawBeforeCaret = Math.max(0, rawBeforeCaret - diff);
+    }
+    intPart = stripped;
+  }
+
+  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const formatted = `${isNeg ? "-" : ""}${groupedInt}${decPart}`;
+
+  if (rawBeforeCaret <= 0) return { formatted, caret: 0 };
+  let seen = 0;
+  let nextCaret = formatted.length;
+  for (let i = 0; i < formatted.length; i++) {
+    if (formatted[i] !== " ") {
+      seen += 1;
+      if (seen === rawBeforeCaret) {
+        nextCaret = i + 1;
+        break;
+      }
+    }
+  }
+  return { formatted, caret: nextCaret };
 }
 
 export function formatDate(dateStr?: string | null): string {

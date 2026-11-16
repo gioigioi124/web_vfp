@@ -104,6 +104,8 @@ class VoucherHeaderSchema(BaseModel):
     ten_nx: Optional[str] = ""
     ten_tk2: Optional[str] = ""
     ten_hd: Optional[str] = ""
+    dmdt_dia_chi: Optional[str] = ""
+    dmdt_phone: Optional[str] = ""
 
 class VoucherDetailResponse(VoucherHeaderSchema):
     items: List[VoucherDetailSchema] = []

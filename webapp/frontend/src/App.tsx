@@ -15,15 +15,20 @@ import { FilterDialog } from "./components/FilterDialog";
 import { PickupDialog } from "./components/PickupDialog";
 import { DebtPanel } from "./components/DebtPanel";
 import { PrintPreview } from "./components/PrintPreview";
+import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { Autocomplete } from "./components/ui/Autocomplete";
 import { Badge } from "./components/ui/Badge";
 import { formatDate } from "./lib/format";
+import {
+  invalidatePrintCache,
+  preloadPrintLogo,
+} from "./lib/printCache";
 import {
   VoucherFullDetail,
   VoucherDetail,
   VoucherHeader,
 } from "./types/voucher";
-import { User, ShieldCheck, RefreshCw, Trash2, X } from "lucide-react";
+import { User, ShieldCheck, RefreshCw, Trash2, X, Keyboard } from "lucide-react";
 
 export function App() {
   const {
@@ -62,6 +67,7 @@ export function App() {
   } = useVouchers();
 
   const [notification, setNotification] = useState<string | null>(null);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   // Tùy chọn in từ thanh đáy danh sách: "1" = In giá bán, "0" = Không in giá.
   const [printPrice, setPrintPrice] = useState<"1" | "0">("1");
   // Đánh dấu dòng (Mark) giống ctbhh — Space / Ctrl+A / Ctrl+U tác động.
@@ -89,6 +95,7 @@ export function App() {
 
   useEffect(() => {
     void initCustomerIndex();
+    preloadPrintLogo();
   }, []);
 
   useEffect(() => {
@@ -520,19 +527,9 @@ export function App() {
       onF6: () => showToast("F6 - Nhập số IMEI."),
       // F7 = In chứng từ trực tiếp (nếu đã Space đánh dấu nhiều phiếu -> in toàn bộ phiếu đã chọn và bỏ chọn)
       onF7: () => handleActionPrint(),
-      // Alt+Numpad3 / Alt+Numpad4 = In không giá (3 / 4 bản copy) trên VoucherList
-      onAltNumpad3: () => {
-        if (!sttParam) handleActionPrint({ inGia: "0", copies: 3 });
-      },
-      onAltNumpad4: () => {
-        if (!sttParam) handleActionPrint({ inGia: "0", copies: 4 });
-      },
-      // Ctrl+Numpad3 / Ctrl+Numpad4 = In có giá (3 / 4 bản copy) trên VoucherList
-      onCtrlNumpad3: () => {
-        if (!sttParam) handleActionPrint({ inGia: "1", copies: 3 });
-      },
-      onCtrlNumpad4: () => {
-        if (!sttParam) handleActionPrint({ inGia: "1", copies: 4 });
+      // Alt+1..4 = In không giá (1..4 bản), Ctrl+1..4 = In có giá (1..4 bản) trên VoucherList
+      onQuickPrint: (inGia, copies) => {
+        if (!sttParam) handleActionPrint({ inGia, copies });
       },
       // Ctrl+F7 / Shift+F7 = Mở dialog PrintPreview (có tùy chọn In nợ cũ) trên VoucherList
       onPreview: () => {
@@ -582,6 +579,8 @@ export function App() {
           setDeleteTarget(null);
         } else if (isPrintOpen) {
           setIsPrintOpen(false);
+        } else if (isShortcutsOpen) {
+          setIsShortcutsOpen(false);
         } else if (isDebtOpen) {
           setIsDebtOpen(false);
         } else if (isPickupOpen) {
@@ -607,6 +606,7 @@ export function App() {
       isPickupOpen ||
       isFilterOpen ||
       isDebtOpen ||
+      isShortcutsOpen ||
       isPrintOpen ||
       !!deleteTarget
     ),
@@ -963,7 +963,7 @@ export function App() {
             stt={isNew ? undefined : sttParam}
             mode={isNew ? "M" : "S"}
             voucherMode={voucherMode}
-            isSuspended={!!warehouseOverlay}
+            isSuspended={!!warehouseOverlay || isDebtOpen}
             voucher={isNew ? null : editingVoucher}
             initialInherited={inheritedData || undefined}
             pickupPayload={pickupPayload}
@@ -971,13 +971,18 @@ export function App() {
             onBack={navToList}
             onPrint={() => {
               const targetStt = editingVoucher?.stt || sttParam;
-              if (targetStt && !isNew) handleOpenPrint(targetStt);
+              if (targetStt && !isNew) {
+                invalidatePrintCache(targetStt);
+                handleOpenPrint(targetStt);
+              }
             }}
             onViewDebt={(dt) => handleOpenDebt(dt)}
             onOpenPickup={handleOpenPickup}
             onSaveSuccess={(newStt) => {
+              invalidatePrintCache(newStt);
               setSelectedStt(newStt);
-              refresh();
+              handleCloseDetail({ skipFetch: true });
+              refresh({ silent: vouchers.length > 0 });
               navToList();
             }}
           />
@@ -1099,6 +1104,15 @@ export function App() {
             {/* Nhóm tiện ích và thoát */}
             <div className="flex items-center gap-1.5">
               <button
+                type="button"
+                onClick={() => setIsShortcutsOpen(true)}
+                className="px-2.5 py-0.5 bg-neutral-800 hover:bg-primary-700 text-neutral-200 hover:text-white rounded border border-neutral-700 transition flex items-center gap-1 font-medium cursor-pointer"
+                title="Xem hướng dẫn tất cả phím tắt của ứng dụng"
+              >
+                <Keyboard className="w-3.5 h-3.5 text-primary-300" />
+                <span>Phím tắt</span>
+              </button>
+              <button
                 onClick={() => handleHotkeyBarAction("ESCAPE")}
                 className="px-2.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white rounded border border-neutral-700 transition flex items-center gap-1 font-medium cursor-pointer"
               >
@@ -1198,6 +1212,11 @@ export function App() {
         onClose={() => setIsDebtOpen(false)}
         maDt={debtMaDt}
       />
+
+      <ShortcutsDialog
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
       </div>
 
       <PrintPreview
@@ -1210,6 +1229,7 @@ export function App() {
         inGia={printInGia ?? printPrice}
         copies={printCopies}
         mode={printMode}
+        dbMode={voucherMode}
       />
     </>
   );

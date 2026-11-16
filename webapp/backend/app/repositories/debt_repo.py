@@ -306,15 +306,18 @@ class DebtRepository:
             )
 
         ten_dt = ""
+        gioi_han = 0.0
         try:
             with get_db_cursor(self.sys_db) as cur:
                 cur.execute(
-                    f"SELECT TOP 1 {self.fn_uni}(Ten_Dt) FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt = ?",
+                    f"SELECT TOP 1 {self.fn_uni}(Ten_Dt), ISNULL(Gioi_Han, 0) FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt = ?",
                     [clean_ma_dt],
                 )
                 r = cur.fetchone()
-                if r and r[0]:
-                    ten_dt = r[0].strip()
+                if r:
+                    if r[0]:
+                        ten_dt = r[0].strip()
+                    gioi_han = float(r[1] or 0.0)
         except Exception as e:
             logger.warning(f"Error querying DmDt in debt ledger: {e}")
 
@@ -409,6 +412,7 @@ class DebtRepository:
         return DebtLedgerResponse(
             ma_dt=clean_ma_dt,
             ten_dt=ten_dt,
+            gioi_han=gioi_han,
             tk=tk_clean,
             ngay_bd=start_str,
             ngay_kt=end_str,

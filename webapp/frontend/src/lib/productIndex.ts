@@ -20,6 +20,7 @@ export interface ProductInfo {
   tk_dt: string;
   tk_ck: string;
   he_so0: number;
+  ma_kho?: string;
   k: string;
 }
 

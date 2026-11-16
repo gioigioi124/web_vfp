@@ -49,6 +49,7 @@ export interface DebtLedgerEntry {
 export interface DebtLedgerData {
   ma_dt: string;
   ten_dt?: string;
+  gioi_han?: number;
   tk: string;
   ngay_bd: string;
   ngay_kt: string;

@@ -63,6 +63,10 @@ class ProductIndexService:
             with open(_CACHE_FILE, "rb") as f:
                 data = pickle.load(f)
             if isinstance(data, dict) and isinstance(data.get("snapshot"), dict) and data["snapshot"]:
+                sample = next(iter(data["snapshot"].values()))
+                if not isinstance(sample, dict) or "ma_kho" not in sample:
+                    logger.info("Product index disk cache missing 'ma_kho'; rebuilding from SQL.")
+                    return
                 self.snapshot = data["snapshot"]
                 self.changes = data.get("changes", [])
                 self.version = int(data.get("version", 0))
@@ -95,7 +99,30 @@ class ProductIndexService:
             logger.warning(f"Could not save product index disk cache: {e}")
 
     # ------------------------------------------------------------------ loading
+    def _read_warehouse_map(self) -> Dict[str, str]:
+        """Đọc ánh xạ Code -> WarehouseCode từ QLDH.dbo.Products (100% READ-ONLY)."""
+        out: Dict[str, str] = {}
+        sql = """
+            SELECT RTRIM(Code), RTRIM(WarehouseCode)
+            FROM QLDH.dbo.Products WITH (NOLOCK)
+            WHERE ISNULL(IsDeleted, 0) = 0
+              AND WarehouseCode IS NOT NULL
+              AND LTRIM(RTRIM(WarehouseCode)) <> ''
+        """
+        try:
+            with get_db_cursor("QLDH") as cur:
+                cur.execute(sql)
+                for r in cur.fetchall():
+                    code = (r[0] or "").strip().upper()
+                    wh = (r[1] or "").strip().upper()
+                    if code and wh:
+                        out[code] = wh
+        except Exception as e:
+            logger.warning(f"Could not read QLDH.dbo.Products warehouse map: {e}")
+        return out
+
     def _read_all(self) -> Dict[int, dict]:
+        wh_map = self._read_warehouse_map()
         fn = self.fn_uni
         sql = f"""
             SELECT VTID, RTRIM(Ma_Vt) AS Ma_Vt, {fn}(Ten_Vt) AS Ten_Vt,
@@ -108,8 +135,9 @@ class ProductIndexService:
         with get_db_cursor(self.sys_db) as cur:
             cur.execute(sql)
             for r in cur.fetchall():
+                ma = (r[1] or "").strip()
                 out[int(r[0])] = {
-                    "ma": (r[1] or "").strip(),
+                    "ma": ma,
                     "ten": (r[2] or "").strip(),
                     "dvt": (r[3] or "").strip(),
                     "dvt_ban": (r[4] or "").strip(),
@@ -119,6 +147,7 @@ class ProductIndexService:
                     "tk_dt": (r[8] or "5111").strip(),
                     "tk_ck": (r[9] or "").strip(),
                     "he_so0": float(r[10] or 1.0),
+                    "ma_kho": wh_map.get(ma.upper(), ""),
                 }
         return out
 
@@ -137,6 +166,7 @@ class ProductIndexService:
             "tk_dt": val["tk_dt"],
             "tk_ck": val["tk_ck"],
             "he_so0": val["he_so0"],
+            "ma_kho": val.get("ma_kho", ""),
             "k": chuan(f"{val['ma']} {val['ten']}"),
         }
 
@@ -244,8 +274,26 @@ class ProductIndexService:
                 cur.execute(sql, [code])
                 r = cur.fetchone()
                 if r:
+                    ma = (r[1] or "").strip()
+                    ma_kho = ""
+                    try:
+                        with get_db_cursor("QLDH") as qcur:
+                            qcur.execute(
+                                """
+                                SELECT TOP 1 RTRIM(WarehouseCode)
+                                FROM QLDH.dbo.Products WITH (NOLOCK)
+                                WHERE RTRIM(Code) = ? AND ISNULL(IsDeleted, 0) = 0
+                                """,
+                                [ma],
+                            )
+                            qr = qcur.fetchone()
+                            if qr and qr[0]:
+                                ma_kho = qr[0].strip().upper()
+                    except Exception as qe:
+                        logger.warning(f"Could not read QLDH warehouse for {ma}: {qe}")
+
                     val = {
-                        "ma": (r[1] or "").strip(),
+                        "ma": ma,
                         "ten": (r[2] or "").strip(),
                         "dvt": (r[3] or "").strip(),
                         "dvt_ban": (r[4] or "").strip(),
@@ -255,6 +303,7 @@ class ProductIndexService:
                         "tk_dt": (r[8] or "5111").strip(),
                         "tk_ck": (r[9] or "").strip(),
                         "he_so0": float(r[10] or 1.0),
+                        "ma_kho": ma_kho,
                     }
                     return self._to_item(int(r[0]), val)
         except Exception as e:

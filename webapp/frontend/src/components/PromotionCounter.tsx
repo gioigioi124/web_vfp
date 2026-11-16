@@ -13,7 +13,6 @@ import { useModalLock } from "../lib/modalLock";
 import {
   Gift,
   X,
-  ChevronRight,
   SlidersHorizontal,
 } from "lucide-react";
 
@@ -93,22 +92,9 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
   const isVnd = (maTte || "VND").trim().toUpperCase() === "VND";
   const showNominalGifts = !isWarehouse && isVnd;
 
-  const outOfDateAuto = !isDateInRange && programOverride === "AUTO";
   const displayedRules = onlyMatchedInModal
     ? matchedRules
     : evaluatedRules;
-
-  const hasAnyQualified = matchedRules.some(
-    (er) => er.matchedQty >= er.activeResult.option.buyQty,
-  );
-
-  const summaryBadgeTone = outOfDateAuto
-    ? "bg-neutral-200/80 text-neutral-600 border-neutral-300 hover:bg-neutral-200"
-    : hasAnyQualified
-      ? "bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
-      : matchedRules.length > 0
-        ? "bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100"
-        : "bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50";
 
   const formatRangeText = (p: PromotionProgram) => {
     if (p.startDate && p.endDate) {
@@ -122,23 +108,6 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
   return (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* Nút mở bảng đối chiếu khuyến mại trên thanh Chi tiết hàng hóa */}
-        <button
-          type="button"
-          onClick={() => setIsOpen(true)}
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-semibold transition-colors cursor-pointer shadow-2xs ${summaryBadgeTone}`}
-          title={`Xem chi tiết bộ đếm khuyến mại (${program.name})`}
-        >
-          <Gift className="w-3 h-3 shrink-0" />
-          <span>KM</span>
-          {outOfDateAuto && (
-            <span className="text-[10px] font-normal opacity-80">
-              (Ngoài hạn)
-            </span>
-          )}
-          <ChevronRight className="w-3 h-3 opacity-60 -mr-0.5" />
-        </button>
-
         {/* Đếm số lượng / định mức cho từng nhóm hàng có trên phiếu (VD: Fly, See 10/2) */}
         {matchedRules.map((er) => {
           const { rule, matchedQty, activeResult } = er;

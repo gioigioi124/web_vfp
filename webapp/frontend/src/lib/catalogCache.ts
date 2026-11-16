@@ -7,13 +7,17 @@ import {
   TienTeItem,
 } from "../types/lookup";
 
+import {
+  collectRanked,
+  normalizeSearchText,
+  parseSearchQuery,
+  rankByFields,
+} from "./searchMatch";
+
 /**
  * Cache RAM cho các danh mục NHỎ (kho, xe, bộ phận, tài khoản, tiền tệ).
  * Tải MỘT lần khi mở form -> gợi ý/tra cứu tức thì, không chờ mạng mỗi lần gõ.
  */
-
-const chuan = (s: string | null | undefined): string =>
-  (s || "").normalize("NFC").toLowerCase();
 
 let kho: KhoItem[] = [];
 let xe: XeItem[] = [];
@@ -65,16 +69,23 @@ function filterOptions<T>(
   nameOf: (i: T) => string,
   limit = 30,
 ): AutocompleteOption[] {
-  const words = chuan(q).split(/\s+/).filter(Boolean);
-  const out: AutocompleteOption[] = [];
-  for (const it of items) {
-    const hay = chuan(`${codeOf(it)} ${nameOf(it)}`);
-    if (words.every((w) => hay.includes(w))) {
-      out.push({ value: codeOf(it), label: codeOf(it), hint: nameOf(it) });
-      if (out.length >= limit) break;
-    }
+  const { phrase, words } = parseSearchQuery(q);
+  if (!words.length) {
+    return items.slice(0, limit).map((it) => ({
+      value: codeOf(it),
+      label: codeOf(it),
+      hint: nameOf(it),
+    }));
   }
-  return out;
+  return collectRanked(items, limit, (it) => {
+    const code = normalizeSearchText(codeOf(it));
+    const name = normalizeSearchText(nameOf(it));
+    return rankByFields(name, code, `${code} ${name}`.trim(), phrase, words);
+  }).map((it) => ({
+    value: codeOf(it),
+    label: codeOf(it),
+    hint: nameOf(it),
+  }));
 }
 
 export function searchKho(q: string): AutocompleteOption[] {

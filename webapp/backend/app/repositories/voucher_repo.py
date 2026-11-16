@@ -247,7 +247,9 @@ class VoucherRepository:
                 {self.fn_uni}(bp.Ten_Bp) AS Ten_Bp,
                 {self.fn_uni}(nx.Ten_Nx) AS Ten_Nx,
                 {self.fn_uni}(tk.Ten_Tk) AS Ten_Tk2,
-                {self.fn_uni}(hd.Ten_HD) AS Ten_HD
+                {self.fn_uni}(hd.Ten_HD) AS Ten_HD,
+                {self.fn_uni}(c.Dia_Chi) AS DmDt_Dia_Chi,
+                RTRIM(ISNULL(c.Phone, '')) AS DmDt_Phone
             FROM {target_db}.dbo.CtBH h WITH (NOLOCK)
             LEFT JOIN {self.sys_db}.dbo.DmDt c WITH (NOLOCK) ON c.Ma_Dt = h.Ma_Dt
             LEFT JOIN {self.sys_db}.dbo.DmXe x WITH (NOLOCK) ON x.Ma_Xe = h.Ma_Xe
@@ -289,6 +291,8 @@ class VoucherRepository:
                 rows = cur.fetchall()
                 for r in rows:
                     items.append(self._row_to_header_schema(r))
+                # Hiển thị số mới nhất ở cuối danh sách (cũ ở trên, mới nhất ở dưới cùng)
+                items.reverse()
         except Exception as e:
             logger.error(f"Error querying vouchers ({db_mode}): {e}")
 
@@ -329,7 +333,9 @@ class VoucherRepository:
                 {self.fn_uni}(bp.Ten_Bp) AS Ten_Bp,
                 {self.fn_uni}(nx.Ten_Nx) AS Ten_Nx,
                 {self.fn_uni}(tk.Ten_Tk) AS Ten_Tk2,
-                {self.fn_uni}(hd.Ten_HD) AS Ten_HD
+                {self.fn_uni}(hd.Ten_HD) AS Ten_HD,
+                {self.fn_uni}(c.Dia_Chi) AS DmDt_Dia_Chi,
+                RTRIM(ISNULL(c.Phone, '')) AS DmDt_Phone
             FROM {target_db}.dbo.CtBH h WITH (NOLOCK)
             LEFT JOIN {self.sys_db}.dbo.DmDt c WITH (NOLOCK) ON c.Ma_Dt = h.Ma_Dt
             LEFT JOIN {self.sys_db}.dbo.DmXe x WITH (NOLOCK) ON x.Ma_Xe = h.Ma_Xe
@@ -433,6 +439,8 @@ class VoucherRepository:
             ten_nx=(r[49] or "").strip(),
             ten_tk2=(r[50] or "").strip(),
             ten_hd=(r[51] or "").strip(),
+            dmdt_dia_chi=(r[52] or "").strip() if len(r) > 52 else "",
+            dmdt_phone=(r[53] or "").strip() if len(r) > 53 else "",
         )
 
     def _row_to_detail_schema(self, dr: Any) -> VoucherDetailSchema:

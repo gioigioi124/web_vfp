@@ -1,10 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { VoucherDetail } from "../types/voucher";
 import {
   formatCurrency,
   formatQuantity,
   formatNumber0,
   formatNumber2,
+  formatCompactNumber,
+  formatLiveNumberInput,
   parseNumberInput,
 } from "../lib/format";
 import {
@@ -15,7 +23,6 @@ import {
 import { initCatalogCache, searchKho } from "../lib/catalogCache";
 import { AutocompleteOption } from "./ui/Autocomplete";
 import { VfpLookupCell, VfpNavDir } from "./ui/VfpLookupCell";
-import { Trash2 } from "lucide-react";
 import {
   arrowDir,
   caretToEndLater,
@@ -24,6 +31,40 @@ import {
   selectAllLater,
   useExcelCellMode,
 } from "./ui/excelCell";
+
+const SPEC_TOKEN_REGEX =
+  /(\(\s*\d{2,4}\s*[xX*]\s*\d{2,4}(?:\s*[xX*]\s*\d{1,4})?\s*\)|\b\d{2,4}\s*[xX*]\s*\d{2,4}(?:\s*[xX*]\s*\d{1,4})?\b|\b\d{1,3}(?:[.,]\d+)?\s*(?:F|cm|mm|ly|li)(?=\b|\()|\b(?:Alias|Vimatt?)\b|(?:[Vv]ỏ|[Vv]ải)\s+gấm\s+in\b|\b(?:Fly|See)\b|\b(?:Rexi?|Mix|Nova|Ale)\b|\b(?:TMD|TM|TP|TD|TE|ST|SD|TL|TB)(?:\s*\d{2,5})?\b|\b(?:CI|PI)\s*\d{2,5}\b|(?<![\p{L}\p{N}])(?:nano\s+foam\s+massage|foam\s+tổng\s+hợp|bông\s+mút\s+massage|massage\s+ELAN|đa\s+tầng(?:\s+II)?|thoáng\s+khí|ELAN\s+K(?:24|35)|thêu)(?![\p{L}\p{N}]))/giu;
+
+const GROUP1_CHECK = /^(?:Alias|Vimatt?|(?:Vỏ|Vải)\s+gấm\s+in)$/iu;
+const GROUP2_CHECK = /^(?:Fly|See)$/i;
+const GROUP3_CHECK = /^(?:Rexi?|Mix|Nova|Ale)$/i;
+const FABRIC_CHECK =
+  /^(?:(?:TMD|TM|TP|TD|TE|ST|SD|TL|TB)(?:\s*\d{2,5})?|(?:CI|PI)\s*\d{2,5})$/i;
+const FOAM_CHECK =
+  /^(?:nano\s+foam\s+massage|foam\s+tổng\s+hợp|bông\s+mút\s+massage|massage\s+ELAN|đa\s+tầng(?:\s+II)?|thoáng\s+khí|ELAN\s+K(?:24|35))$/iu;
+
+function getTokenHighlightClass(token: string): string {
+  if (GROUP1_CHECK.test(token)) return "font-bold text-blue-700";
+  if (GROUP2_CHECK.test(token)) return "font-bold text-emerald-700";
+  if (GROUP3_CHECK.test(token)) return "font-bold text-orange-600";
+  if (FABRIC_CHECK.test(token)) return "font-bold text-fuchsia-700";
+  if (FOAM_CHECK.test(token)) return "font-bold text-amber-800";
+  return "font-extrabold text-neutral-950";
+}
+
+function renderHighlightedSpecs(text: string): React.ReactNode {
+  const parts = text.split(SPEC_TOKEN_REGEX);
+  if (parts.length <= 1) return text;
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <span key={idx} className={getTokenHighlightClass(part)}>
+        {part}
+      </span>
+    ) : (
+      <React.Fragment key={idx}>{part}</React.Fragment>
+    ),
+  );
+}
 
 /** Kết quả tra giá trả về cho DetailGrid (đơn giá ngoại tệ + % chiết khấu). */
 export interface PriceLookupResult {
@@ -41,6 +82,9 @@ interface NumCellProps {
   integerOnly?: boolean;
   /** Làm tròn số nguyên có phân nhóm nghìn bằng dấu cách (VD: Thành tiền VND). */
   noDecimals?: boolean;
+  /** Định dạng thập phân gọn: số chẵn bỏ .00, số lẻ hiện tối đa 2 chữ số thập phân. */
+  compactDecimals?: boolean;
+  dataField?: string;
   className?: string;
   title?: string;
   onCommit: (v: number) => void;
@@ -65,6 +109,8 @@ const NumCell: React.FC<NumCellProps> = ({
   blankWhenZero = false,
   integerOnly = false,
   noDecimals = false,
+  compactDecimals = false,
+  dataField,
   className,
   title,
   onCommit,
@@ -75,6 +121,8 @@ const NumCell: React.FC<NumCellProps> = ({
   const [text, setTextState] = useState<string | null>(null);
   // Bản đồng bộ của `text` để commit() không chạy 2 lần (mũi tên commit + blur).
   const textRef = useRef<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const pendingCaretRef = useRef<number | null>(null);
   const setText = (t: string | null) => {
     textRef.current = t;
     setTextState(t);
@@ -84,17 +132,30 @@ const NumCell: React.FC<NumCellProps> = ({
   const cancelRef = useRef(false);
   const formatVal = (v?: number | null) => {
     if (blankWhenZero && (!v || Number(v) === 0)) return "";
+    if (noDecimals) {
+      return formatNumber0(v);
+    }
     if (integerOnly) {
       if (v === null || v === undefined || isNaN(v)) return "0";
       return Math.round(Number(v)).toString();
     }
-    if (noDecimals) {
-      return formatNumber0(v);
+    if (compactDecimals) {
+      return formatCompactNumber(v);
     }
     return formatNumber2(v);
   };
   const formatted = formatVal(value);
   const display = text !== null ? text : formatted;
+
+  useLayoutEffect(() => {
+    const pos = pendingCaretRef.current;
+    if (pos === null) return;
+    pendingCaretRef.current = null;
+    const el = inputRef.current;
+    if (el && document.activeElement === el) {
+      el.setSelectionRange(pos, pos);
+    }
+  }, [display]);
   const commit = () => {
     if (cancelRef.current) {
       cancelRef.current = false;
@@ -116,6 +177,7 @@ const NumCell: React.FC<NumCellProps> = ({
   };
   return (
     <input
+      ref={inputRef}
       type="text"
       inputMode={integerOnly ? "numeric" : "decimal"}
       autoComplete="off"
@@ -126,16 +188,25 @@ const NumCell: React.FC<NumCellProps> = ({
       tabIndex={disabled ? -1 : undefined}
       data-readonly={disabled ? "true" : undefined}
       data-optional={blankWhenZero ? "true" : undefined}
+      data-field={dataField}
       title={title}
       data-mode={mode}
       onChange={(e) => {
         if (disabled) return;
         if (modeRef.current === "select") setMode("enter");
-        let val = e.target.value;
-        if (integerOnly) {
-          val = val.replace(/[^\d\-]/g, "");
+        const val = e.target.value;
+        if (integerOnly && !noDecimals) {
+          pendingCaretRef.current = null;
+          setText(val.replace(/[^\d\-]/g, ""));
+          return;
         }
-        setText(val);
+        const live = formatLiveNumberInput(
+          val,
+          e.target.selectionStart ?? val.length,
+          !integerOnly,
+        );
+        pendingCaretRef.current = live.caret;
+        setText(live.formatted);
       }}
       onMouseDown={(e) => {
         if (disabled) return;
@@ -232,6 +303,8 @@ interface DetailGridProps {
   voucherMode?: "sales" | "warehouse";
   /** Chế độ sửa dữ liệu (Phase 2) */
   editable?: boolean;
+  /** Bật/tắt tô đậm kích thước và độ dày trong cột Tên vật tư (biến thể form). */
+  highlightSpecs?: boolean;
   activeRowIndex?: number;
   onSelectRow?: (index: number) => void;
   onChangeItem?: (
@@ -258,6 +331,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
   variant = "list",
   voucherMode = "sales",
   editable = false,
+  highlightSpecs = false,
   activeRowIndex = 0,
   onSelectRow,
   onChangeItem,
@@ -778,6 +852,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
           dvt: found.dvt || latest.dvt || "",
           dvt_ban: found.dvt_ban || found.dvt || latest.dvt_ban || "",
           loai_vt: nextLoaiVt,
+          ma_kho: (found.ma_kho || latest.ma_kho || "K0101").trim().toUpperCase(),
           tk_du2: found.tk_dt || latest.tk_du2 || "5111",
           tk_du: found.tk_vt || latest.tk_du || "1561",
           tk: found.tk_gv || latest.tk || "632",
@@ -1150,74 +1225,65 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
           <table
             ref={tableRef}
             onFocusCapture={handleFormTableFocusCapture}
-            className="w-full text-left dense-table border-collapse text-[11.5px] xl-grid"
+            className="w-full min-w-[1120px] table-fixed text-left dense-table border-collapse text-[11.5px] xl-grid xl-grid-no-hover"
           >
-            <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 font-semibold text-[11px] uppercase tracking-wide select-none border-b border-neutral-300">
+            <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 [&_th]:!px-1 text-neutral-700 font-semibold text-[10.5px] uppercase tracking-tight select-none border-b border-neutral-300">
               <tr className="divide-x divide-neutral-200">
-                <th className="w-9 text-center" scope="col">
+                <th className="w-7 text-center" scope="col">
                   #
                 </th>
-                <th className="w-36" scope="col">
+                <th className="w-[116px]" scope="col">
                   Mã vật tư
                 </th>
-                <th className="min-w-[200px]" scope="col">
+                <th className="w-auto" scope="col">
                   Tên vật tư
                 </th>
-                <th className="w-16 text-center" scope="col">
+                <th className="w-[42px] text-center" scope="col">
                   Đvt
                 </th>
-                <th className="w-24 text-right" scope="col">
+                <th className="w-[66px] text-right" scope="col">
                   Số lượng
                 </th>
                 {!isWarehouse && (
-                  <th className="w-16 text-center" scope="col">
+                  <th className="w-[46px] text-center" scope="col">
                     TK Có
                   </th>
                 )}
-                <th className="w-24 text-center" scope="col">
+                <th className="w-[56px] text-center" scope="col">
                   Kho
                 </th>
-                <th className="w-24 text-right" scope="col">
+                <th className="w-[56px] text-right" scope="col">
                   Số tấm
                 </th>
-                <th className="w-16 text-right" scope="col">
+                <th className="w-[44px] text-right" scope="col">
                   Hệ số
                 </th>
-                <th className="w-24 text-right" scope="col">
+                <th className="w-[66px] text-right" scope="col">
                   SL bán
                 </th>
                 {!isWarehouse && (
                   <>
-                    <th className="w-40 text-right" scope="col">
+                    <th className="w-[96px] text-right" scope="col">
                       Đơn giá
                     </th>
-                    <th className="w-44 text-right" scope="col">
+                    <th className="w-[108px] text-right" scope="col">
                       Thành tiền
                     </th>
-                    <th className="w-14 text-center" scope="col">
+                    <th className="w-[44px] text-center" scope="col">
                       CK %
                     </th>
                   </>
                 )}
-                <th className="w-10 text-center" scope="col">
+                <th className="w-7 text-center" scope="col">
                   TT
                 </th>
-                {editable && (
-                  <th
-                    className="w-10 text-center"
-                    scope="col"
-                    title="Xóa dòng (F8)"
-                  >
-                    Xóa
-                  </th>
-                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
               {items.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={isWarehouse ? (editable ? 11 : 10) : editable ? 15 : 14}
+                    colSpan={isWarehouse ? 10 : 14}
                     className="px-4 py-8 text-center text-neutral-400 italic text-xs font-sans"
                   >
                     Không có dòng mặt hàng nào.{" "}
@@ -1297,12 +1363,12 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             fetcher={fetchVatTuOptions}
                             debounceMs={30}
                             maxResults={30}
-                            dropdownMinWidth={420}
+                            dropdownMinWidth={640}
                             className="xl-input font-mono font-semibold text-blue-900 uppercase grid-cell-input"
                           />
                         </td>
                         {/* Tên vật tư (chỉ đọc — click chọn/copy được) */}
-                        <td className="xl-ro min-w-[200px] max-w-[320px]">
+                        <td className="xl-ro relative">
                           <input
                             type="text"
                             readOnly
@@ -1320,8 +1386,20 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             }}
                             onKeyDown={handleReadOnlyCellKeyDown}
                             onCopy={handleReadOnlyCopy}
-                            className="xl-ro-input font-sans font-semibold text-neutral-600 truncate"
+                            className={`xl-ro-input font-sans truncate ${
+                              highlightSpecs && it.ten_vt
+                                ? "!text-transparent caret-transparent selection:bg-primary-200/40 selection:text-transparent"
+                                : "font-medium text-neutral-800"
+                            }`}
                           />
+                          {highlightSpecs && it.ten_vt && (
+                            <div
+                              aria-hidden="true"
+                              className="xl-ro-input pointer-events-none absolute inset-0 font-sans font-medium text-neutral-800 truncate select-none"
+                            >
+                              {renderHighlightedSpecs(it.ten_vt)}
+                            </div>
+                          )}
                         </td>
                         {/* Đvt (chỉ đọc — click chọn/copy được) */}
                         <td className="xl-ro">
@@ -1351,7 +1429,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             readOnly
                             tabIndex={-1}
                             data-readonly="true"
-                            value={formatNumber2(it.so_luong9 ?? 0)}
+                            value={formatCompactNumber(it.so_luong9 ?? 0)}
                             onMouseDown={(e) =>
                               handleExcelMouseDown(e, "select")
                             }
@@ -1362,7 +1440,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             }}
                             onKeyDown={handleReadOnlyCellKeyDown}
                             onCopy={handleReadOnlyCopy}
-                            className="xl-ro-input text-right font-semibold text-neutral-600 tabular-nums"
+                            className="xl-ro-input text-right font-mono font-bold text-primary-900 tabular-nums"
                           />
                         </td>
                         {/* TK Có (chỉ đọc — click chọn/copy được) */}
@@ -1384,7 +1462,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                               }}
                               onKeyDown={handleReadOnlyCellKeyDown}
                               onCopy={handleReadOnlyCopy}
-                              className="xl-ro-input text-center font-semibold text-neutral-600"
+                              className="xl-ro-input text-center font-normal text-neutral-400"
                             />
                           </td>
                         )}
@@ -1425,21 +1503,24 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             onFocusRow={() => handleSelectRow(idx)}
                             fetcher={fetchKhoOptionsLocal}
                             dropdownMinWidth={300}
-                            className="xl-input text-center font-mono font-semibold text-blue-900 uppercase grid-cell-input"
+                            className="xl-input text-center font-mono font-normal text-neutral-400 uppercase grid-cell-input"
                           />
                         </td>
                         {/* Số tấm */}
                         <td className="xl-cell xl-amber">
                           <NumCell
-                            value={it.so_tam ?? 1}
+                            value={Math.round(it.so_tam ?? 1)}
+                            integerOnly
+                            noDecimals
                             onCommit={(v) => {
                               const curr = itemsRef.current[idx] ?? it;
+                              const rounded = Math.round(v);
                               // Ràng buộc Số tấm không thể <= 0: giữ lại giá trị hợp lệ trước đó (mặc định 1).
                               const safeSoTam =
-                                v > 0
-                                  ? v
+                                rounded > 0
+                                  ? rounded
                                   : curr.so_tam && curr.so_tam > 0
-                                    ? curr.so_tam
+                                    ? Math.round(curr.so_tam)
                                     : 1;
                               const hs8 = Number(curr.he_so8 ?? 1) || 1;
                               const nextSl8 = safeSoTam * hs8;
@@ -1460,7 +1541,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className="xl-input text-right font-bold text-blue-900 tabular-nums grid-cell-input"
+                            className="xl-input text-right font-mono font-bold text-primary-900 tabular-nums grid-cell-input"
                           />
                         </td>
                         {/* Hệ số (Loại 4: khóa, luôn = 1) */}
@@ -1471,6 +1552,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                         >
                           <NumCell
                             value={it.he_so8 ?? 1}
+                            compactDecimals
                             disabled={it.loai_vt === "4"}
                             title={
                               it.loai_vt === "4"
@@ -1498,10 +1580,11 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             onNavigate={(dir, el) =>
                               handleCellNavigate(dir, el, idx)
                             }
-                            className={`xl-input text-right font-bold tabular-nums grid-cell-input ${
-                              it.loai_vt === "4"
-                                ? "text-neutral-600"
-                                : "text-blue-900"
+                            className={`xl-input text-right font-mono tabular-nums grid-cell-input ${
+                              it.loai_vt !== "4" ||
+                              Math.abs(Number(it.he_so8 ?? 1) - 1) > 1e-6
+                                ? "font-bold text-amber-700"
+                                : "font-normal text-neutral-400"
                             }`}
                           />
                         </td>
@@ -1512,7 +1595,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             readOnly
                             tabIndex={-1}
                             data-readonly="true"
-                            value={formatNumber2(it.so_luong8 ?? 0)}
+                            value={formatCompactNumber(it.so_luong8 ?? 0)}
                             onMouseDown={(e) =>
                               handleExcelMouseDown(e, "select")
                             }
@@ -1523,7 +1606,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             }}
                             onKeyDown={handleReadOnlyCellKeyDown}
                             onCopy={handleReadOnlyCopy}
-                            className="xl-ro-input text-right font-semibold text-neutral-600 tabular-nums"
+                            className="xl-ro-input text-right font-mono font-semibold text-neutral-700 tabular-nums"
                           />
                         </td>
                         {!isWarehouse && (
@@ -1532,6 +1615,8 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             <td className="xl-cell">
                               <NumCell
                                 value={it.gia_nt9 ?? 0}
+                                compactDecimals
+                                dataField="gia_nt9"
                                 onCommit={(v) => {
                                   const curr = itemsRef.current[idx] ?? it;
                                   applyRow(
@@ -1547,7 +1632,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 onNavigate={(dir, el) =>
                                   handleCellNavigate(dir, el, idx)
                                 }
-                                className="xl-input text-right font-semibold text-blue-900 tabular-nums grid-cell-input"
+                                className="xl-input text-right font-mono font-semibold text-blue-900 tabular-nums grid-cell-input"
                               />
                             </td>
                             {/* Thành tiền */}
@@ -1576,7 +1661,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 onNavigate={(dir, el) =>
                                   handleCellNavigate(dir, el, idx)
                                 }
-                                className="xl-input text-right font-semibold text-blue-900 tabular-nums grid-cell-input"
+                                className="xl-input text-right font-mono font-semibold text-blue-900 tabular-nums grid-cell-input"
                               />
                             </td>
                             {/* CK % */}
@@ -1600,7 +1685,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                                 onNavigate={(dir, el) =>
                                   handleCellNavigate(dir, el, idx)
                                 }
-                                className="xl-input text-center font-semibold text-blue-900 tabular-nums grid-cell-input"
+                                className="xl-input text-center font-mono font-semibold text-blue-900 tabular-nums grid-cell-input"
                               />
                             </td>
                           </>
@@ -1626,21 +1711,6 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                             title="Cố định là C — Bấm Enter để tạo dòng mới"
                             className="xl-input text-center font-semibold text-neutral-600 uppercase grid-cell-input"
                           />
-                        </td>
-                        <td className="xl-ro text-center !px-0">
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteItem?.(idx);
-                            }}
-                            disabled={items.length <= 1}
-                            title="Xóa dòng (F8)"
-                            className="p-0.5 text-neutral-400 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 mx-auto" />
-                          </button>
                         </td>
                       </tr>
                     );
@@ -1676,7 +1746,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                           className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
                         />
                       </td>
-                      <td className="xl-cell min-w-[200px] max-w-[320px]">
+                      <td className="xl-cell relative">
                         <input
                           type="text"
                           readOnly
@@ -1692,8 +1762,20 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                           }}
                           onKeyDown={handleReadOnlyCellKeyDown}
                           onCopy={handleReadOnlyCopy}
-                          className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
+                          className={`xl-input font-sans truncate grid-cell-input ${
+                            highlightSpecs && it.ten_vt
+                              ? "!text-transparent caret-transparent"
+                              : "font-medium text-neutral-800"
+                          }`}
                         />
+                        {highlightSpecs && it.ten_vt && (
+                          <div
+                            aria-hidden="true"
+                            className="xl-input pointer-events-none absolute inset-0 font-sans font-medium text-neutral-800 truncate select-none"
+                          >
+                            {renderHighlightedSpecs(it.ten_vt)}
+                          </div>
+                        )}
                       </td>
                       <td className="xl-cell">
                         <input
@@ -1775,7 +1857,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                           type="text"
                           readOnly
                           data-mode="select"
-                          value={formatQuantity(it.so_tam)}
+                          value={formatNumber0(it.so_tam)}
                           onMouseDown={(e) => handleExcelMouseDown(e, "select")}
                           onFocus={(e) => {
                             handleSelectRow(idx);
@@ -2060,7 +2142,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                         }}
                         onKeyDown={handleReadOnlyCellKeyDown}
                         onCopy={handleReadOnlyCopy}
-                        className="xl-input font-medium text-neutral-900 truncate grid-cell-input"
+                        className="xl-input font-semibold text-neutral-900 truncate grid-cell-input"
                       />
                     </td>
                     <td className="xl-cell">
@@ -2103,7 +2185,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
                         type="text"
                         readOnly
                         data-mode="select"
-                        value={formatQuantity(it.so_tam)}
+                        value={formatNumber0(it.so_tam)}
                         onMouseDown={(e) => handleExcelMouseDown(e, "select")}
                         onFocus={(e) => {
                           handleSelectRow(idx);
