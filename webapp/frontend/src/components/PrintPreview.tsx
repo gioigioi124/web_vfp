@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Printer, X, RefreshCw } from "lucide-react";
 import { formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
@@ -70,6 +70,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const [isFetching, setIsFetching] = useState<boolean>(false);
   const [previewInNoCk, setPreviewInNoCk] = useState<"C" | "K">("K");
   const [previewInGia, setPreviewInGia] = useState<"1" | "0">(inGia);
+  const [printingFromPreview, setPrintingFromPreview] = useState<boolean>(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const printAreaRef = useRef<HTMLDivElement | null>(null);
   const printedKeyRef = useRef<string>("");
@@ -77,13 +78,16 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useModalLock(isOpen && isPreviewMode, dialogRef);
+  useModalLock(isOpen && isPreviewMode && !printingFromPreview, dialogRef);
 
   // Khi mở dialog Ctrl+F7 mới, đồng bộ tùy chọn giá từ toolbar và reset In nợ cũ về mặc định ("K")
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
       setPreviewInNoCk("K");
       setPreviewInGia(inGia);
+      setPrintingFromPreview(false);
+    } else if (!isOpen) {
+      setPrintingFromPreview(false);
     }
     wasOpenRef.current = isOpen;
   }, [isOpen, inGia]);
@@ -233,14 +237,24 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     };
   }, [isPreviewMode, isOpen, requestKey, loadedKey, printDocs]);
 
-  const handleManualPrint = () => {
-    if (isFetching || printDocs.length === 0) return;
-    window.print();
-  };
+  const handleManualPrint = useCallback(() => {
+    if (isFetching || printDocs.length === 0 || printingFromPreview) return;
+    setPrintingFromPreview(true);
+    const handleAfterPrint = () => {
+      window.removeEventListener("afterprint", handleAfterPrint);
+      onCloseRef.current();
+    };
+    window.addEventListener("afterprint", handleAfterPrint, { once: true });
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        window.print();
+      }, 20);
+    });
+  }, [isFetching, printDocs.length, printingFromPreview]);
 
   // Phím tắt trong dialog Xem trước (Ctrl+F7): Esc để đóng, F7 hoặc Enter để In phiếu.
   useEffect(() => {
-    if (!isOpen || !isPreviewMode) return;
+    if (!isOpen || !isPreviewMode || printingFromPreview) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -249,9 +263,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       } else if (e.key === "F7") {
         e.preventDefault();
         e.stopPropagation();
-        if (!isFetching && printDocs.length > 0) {
-          window.print();
-        }
+        handleManualPrint();
       } else if (e.key === "Enter" && !e.ctrlKey && !e.altKey) {
         const active = document.activeElement;
         if (
@@ -262,14 +274,12 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
         }
         e.preventDefault();
         e.stopPropagation();
-        if (!isFetching && printDocs.length > 0) {
-          window.print();
-        }
+        handleManualPrint();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [isOpen, isPreviewMode, isFetching, printDocs.length]);
+  }, [isOpen, isPreviewMode, printingFromPreview, handleManualPrint]);
 
   if (!isOpen) {
     return null;
@@ -815,7 +825,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     })),
   );
 
-  if (isPreviewMode) {
+  if (isPreviewMode && !printingFromPreview) {
     return (
       <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print-preview-root">
         <div

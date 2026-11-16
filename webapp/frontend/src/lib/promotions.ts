@@ -64,6 +64,13 @@ export interface PromotionRule {
   options: GiftRewardOption[];
 }
 
+/** Quy tắc phân loại hàng mang ra khuyến mại (đơn giá 1–10₫) để hiển thị rõ loại quà. */
+export interface GiftCategoryRule {
+  id: string;
+  label: string;
+  matcher: ItemMatcher;
+}
+
 /** Định nghĩa một chương trình khuyến mại. */
 export interface PromotionProgram {
   id: string;
@@ -78,6 +85,8 @@ export interface PromotionProgram {
   /** Bỏ qua dòng hàng tặng có đơn giá tượng trưng 1–10 VND trong phiếu bán. */
   excludeNominalGiftRowsByDefault?: boolean;
   rules: PromotionRule[];
+  /** Bộ phân loại hàng tặng 1–10₫ (ưu tiên theo thứ tự từ trên xuống). */
+  giftCategories?: GiftCategoryRule[];
 }
 
 export interface MatchedVoucherRow {
@@ -130,6 +139,8 @@ export interface NominalGiftRow {
   dvt: string;
   qty: number;
   gia_nt9: number;
+  categoryId: string;
+  categoryLabel: string;
 }
 
 export interface NominalGiftSummaryItem {
@@ -138,6 +149,15 @@ export interface NominalGiftSummaryItem {
   dvt: string;
   totalQty: number;
   rowCount: number;
+  categoryId: string;
+  categoryLabel: string;
+}
+
+export interface NominalGiftGroup {
+  categoryId: string;
+  label: string;
+  totalQty: number;
+  items: NominalGiftSummaryItem[];
 }
 
 export interface PromotionEvaluation {
@@ -152,6 +172,7 @@ export interface PromotionEvaluation {
   /** Các dòng hàng mang ra khuyến mại (đơn giá từ 1–10 đồng VND). */
   nominalGiftRows: NominalGiftRow[];
   nominalGiftItems: NominalGiftSummaryItem[];
+  nominalGiftGroups: NominalGiftGroup[];
   nominalGiftTotalQty: number;
 }
 
@@ -313,6 +334,105 @@ function evaluateOption(
 }
 
 /**
+ * Bộ phân loại mặc định cho hàng mang ra khuyến mại (1–10₫) theo quy chuẩn đầu mã sản phẩm,
+ * giúp luôn phân tách rõ ruột gối, ga bộ, ruột chăn, vỏ gối... thay vì cộng gộp chung.
+ */
+export const DEFAULT_GIFT_CATEGORIES: GiftCategoryRule[] = [
+  {
+    id: "rg-alias-45x65",
+    label: "RG Alias 45x65",
+    matcher: { exactCodes: ["92020604506512"] },
+  },
+  {
+    id: "rg-vimatt-45x65",
+    label: "RG Vimatt 45x65",
+    matcher: { exactCodes: ["920206045065", "9202060450651"] },
+  },
+  {
+    id: "ruot-goi",
+    label: "Ruột gối",
+    matcher: { codePrefixes: ["920206"] },
+  },
+  {
+    id: "ga-bo-5-mon",
+    label: "Ga bộ 5 món",
+    matcher: { codePrefixes: ["91"] },
+  },
+  {
+    id: "bo-ga-2-vo-goi",
+    label: "Bộ ga + 2 vỏ gối",
+    matcher: { codePrefixes: ["88", "87"] },
+  },
+  {
+    id: "tam-bao-ve-dem",
+    label: "Tấm bảo vệ đệm",
+    matcher: { codePrefixes: ["9511"] },
+  },
+  {
+    id: "ga-chun-phu",
+    label: "Ga chun/phủ",
+    matcher: { codePrefixes: ["95"], excludeCodePrefixes: ["9511"] },
+  },
+  {
+    id: "vo-goi",
+    label: "Vỏ gối",
+    matcher: { codePrefixes: ["96"] },
+  },
+  {
+    id: "vo-chan",
+    label: "Vỏ chăn",
+    matcher: { codePrefixes: ["93"] },
+  },
+  {
+    id: "chan-he-4-mua",
+    label: "Chăn hè/4 mùa",
+    matcher: { codePrefixes: ["97"] },
+  },
+  {
+    id: "ruot-chan",
+    label: "Ruột chăn",
+    matcher: { codePrefixes: ["9801"] },
+  },
+  {
+    id: "dem",
+    label: "Đệm",
+    matcher: {
+      codePrefixes: [
+        "80",
+        "81",
+        "60",
+        "61",
+        "65",
+        "66",
+        "67",
+        "68",
+        "69",
+        "77",
+        "78",
+        "79",
+        "13",
+      ],
+    },
+  },
+];
+
+function resolveGiftCategory(
+  item: VoucherDetail,
+  categories: GiftCategoryRule[],
+): { categoryId: string; categoryLabel: string } {
+  const matched = categories.find((cat) => matchesItem(item, cat.matcher));
+  if (matched) {
+    return { categoryId: matched.id, categoryLabel: matched.label };
+  }
+  const code = (item.ma_vt || "").trim().toUpperCase();
+  const ten = (item.ten_vt || "").trim();
+  return {
+    categoryId: `item:${code}`,
+    categoryLabel: ten || code,
+  };
+}
+
+/**
  * Đánh giá toàn bộ các quy định khuyến mại của một chương trình trên danh sách hàng hóa.
  */
 export function evaluatePromotionProgram(
@@ -325,6 +445,7 @@ export function evaluatePromotionProgram(
   const shouldExcludeNominal =
     options.excludeNominalGiftRows ??
     Boolean(program.excludeNominalGiftRowsByDefault);
+  const giftCategories = program.giftCategories ?? DEFAULT_GIFT_CATEGORIES;
 
   let ignoredGiftRowCount = 0;
   let nominalGiftTotalQty = 0;
@@ -350,6 +471,11 @@ export function evaluatePromotionProgram(
       const upperCode = maVt.toUpperCase();
       const tenVt = (item.ten_vt || "").trim();
       const dvt = (item.dvt || "").trim();
+      const { categoryId, categoryLabel } = resolveGiftCategory(
+        item,
+        giftCategories,
+      );
+
       nominalGiftRows.push({
         rowIndex,
         ma_vt: upperCode,
@@ -357,6 +483,8 @@ export function evaluatePromotionProgram(
         dvt,
         qty,
         gia_nt9: giaNt9,
+        categoryId,
+        categoryLabel,
       });
       nominalGiftTotalQty = round(nominalGiftTotalQty + qty, 2);
 
@@ -372,6 +500,8 @@ export function evaluatePromotionProgram(
           dvt,
           totalQty: qty,
           rowCount: 1,
+          categoryId,
+          categoryLabel,
         });
       }
 
@@ -383,6 +513,26 @@ export function evaluatePromotionProgram(
 
     eligibleRows.push({ rowIndex, item, qty, gia_nt9: giaNt9 });
   });
+
+  const nominalGiftItems = Array.from(nominalGiftMap.values());
+  const nominalGiftGroupMap = new Map<string, NominalGiftGroup>();
+  for (const gItem of nominalGiftItems) {
+    const existingGroup = nominalGiftGroupMap.get(gItem.categoryId);
+    if (existingGroup) {
+      existingGroup.totalQty = round(
+        existingGroup.totalQty + gItem.totalQty,
+        2,
+      );
+      existingGroup.items.push(gItem);
+    } else {
+      nominalGiftGroupMap.set(gItem.categoryId, {
+        categoryId: gItem.categoryId,
+        label: gItem.categoryLabel,
+        totalQty: gItem.totalQty,
+        items: [gItem],
+      });
+    }
+  }
 
   const evaluatedRules: EvaluatedRule[] = program.rules.map((rule) => {
     const matchedRows: MatchedVoucherRow[] = [];
@@ -477,7 +627,8 @@ export function evaluatePromotionProgram(
     giftSummary: Array.from(giftMap.values()),
     ignoredGiftRowCount,
     nominalGiftRows,
-    nominalGiftItems: Array.from(nominalGiftMap.values()),
+    nominalGiftItems,
+    nominalGiftGroups: Array.from(nominalGiftGroupMap.values()),
     nominalGiftTotalQty,
   };
 }

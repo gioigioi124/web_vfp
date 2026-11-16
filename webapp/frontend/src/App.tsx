@@ -890,6 +890,15 @@ export function App() {
                       headerDienGiaiRef.current = e.target.value;
                       setHeaderDienGiai(e.target.value);
                     }}
+                    onFocus={(e) => {
+                      const target = e.currentTarget;
+                      target.select();
+                      setTimeout(() => {
+                        if (document.activeElement === target) {
+                          target.select();
+                        }
+                      }, 0);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();

@@ -87,7 +87,7 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
     ignoredGiftRowCount,
     nominalGiftRows,
     nominalGiftItems,
-    nominalGiftTotalQty,
+    nominalGiftGroups,
   } = evaluation;
 
   const isVnd = (maTte || "VND").trim().toUpperCase() === "VND";
@@ -169,36 +169,46 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
           );
         })}
 
-        {/* Đếm hàng mang ra khuyến mại (đơn giá 1–10 đồng VND) */}
+        {/* Đếm từng loại hàng mang ra khuyến mại (đơn giá 1–10 đồng VND) */}
         {showNominalGifts && (
-          <button
-            type="button"
-            onClick={() => setIsOpen(true)}
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] transition-colors cursor-pointer ${
-              nominalGiftTotalQty > 0
-                ? "bg-sky-50 text-sky-900 border-sky-300 hover:bg-sky-100"
-                : "bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50"
-            }`}
-            title={
-              nominalGiftItems.length > 0
-                ? `Hàng mang ra khuyến mại (giá 1–10₫):\n${nominalGiftItems
-                    .map(
-                      (g) =>
-                        `• ${g.ma_vt}${g.ten_vt ? ` - ${g.ten_vt}` : ""}: ${formatQuantity(g.totalQty)} ${g.dvt}`.trim(),
-                    )
-                    .join("\n")}`
-                : "Đếm hàng mang ra khuyến mại có đơn giá từ 1–10₫"
-            }
-          >
-            <span className="font-medium">Hàng KM (1–10₫):</span>
-            <span
-              className={`font-mono font-bold ${
-                nominalGiftTotalQty > 0 ? "text-sky-700" : "text-neutral-600"
-              }`}
-            >
-              {formatQuantity(nominalGiftTotalQty)}
-            </span>
-          </button>
+          <div className="inline-flex flex-wrap items-center gap-1">
+            {nominalGiftGroups.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setIsOpen(true)}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50 transition-colors cursor-pointer"
+                title="Đếm hàng mang ra khuyến mại có đơn giá từ 1–10₫ (phân tách theo từng loại)"
+              >
+                <span className="font-medium">Quà (1–10₫):</span>
+                <span className="font-mono font-bold text-neutral-600">0</span>
+              </button>
+            ) : (
+              <>
+                <span className="text-[11px] font-semibold text-sky-800 ml-0.5">
+                  Quà (1–10₫):
+                </span>
+                {nominalGiftGroups.map((grp) => (
+                  <button
+                    key={grp.categoryId}
+                    type="button"
+                    onClick={() => setIsOpen(true)}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] bg-sky-50 text-sky-900 border-sky-300 hover:bg-sky-100 transition-colors cursor-pointer"
+                    title={`${grp.label} (giá 1–10₫):\n${grp.items
+                      .map(
+                        (g) =>
+                          `• ${g.ma_vt}${g.ten_vt ? ` - ${g.ten_vt}` : ""}: ${formatQuantity(g.totalQty)} ${g.dvt}`.trim(),
+                      )
+                      .join("\n")}`}
+                  >
+                    <span className="font-medium">{grp.label}:</span>
+                    <span className="font-mono font-bold text-sky-700">
+                      {formatQuantity(grp.totalQty)}
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
         )}
       </div>
 
@@ -304,17 +314,25 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
               </div>
             </div>
 
-            {/* Hàng mang ra khuyến mại (giá 1–10₫) */}
+            {/* Hàng mang ra khuyến mại (giá 1–10₫) phân tách rõ từng loại */}
             {showNominalGifts && (
               <div className="px-4 py-2 bg-sky-50/60 border-b border-neutral-200 shrink-0 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] font-bold uppercase tracking-wide text-sky-900">
                       Hàng mang ra khuyến mại (đơn giá 1–10₫):
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-900 font-mono font-bold text-xs border border-sky-200">
-                      {formatQuantity(nominalGiftTotalQty)}
-                    </span>
+                    {nominalGiftGroups.map((grp) => (
+                      <span
+                        key={grp.categoryId}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-100 text-sky-900 text-[11px] font-semibold border border-sky-200"
+                      >
+                        <span>{grp.label}:</span>
+                        <span className="font-mono font-bold">
+                          {formatQuantity(grp.totalQty)}
+                        </span>
+                      </span>
+                    ))}
                     {nominalGiftRows.length > 0 && (
                       <span className="text-[11px] text-sky-800">
                         ({nominalGiftRows.length} dòng · {nominalGiftItems.length} mã)
@@ -336,15 +354,18 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
                         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-white border border-sky-200 text-[11px]"
                         title={g.ten_vt}
                       >
+                        <span className="text-[10px] font-semibold text-sky-800 bg-sky-50 px-1 rounded">
+                          {g.categoryLabel}
+                        </span>
                         <span className="font-mono font-semibold text-primary-800">
                           {g.ma_vt}
                         </span>
                         {g.ten_vt && (
-                          <span className="text-neutral-600 max-w-[240px] truncate">
+                          <span className="text-neutral-600 max-w-[220px] truncate">
                             {g.ten_vt}
                           </span>
                         )}
-                        <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 py-0.2 rounded border border-sky-200">
+                        <span className="font-mono font-bold text-sky-700 bg-sky-50 px-1.5 rounded border border-sky-200">
                           {formatQuantity(g.totalQty)}
                           {g.dvt ? ` ${g.dvt}` : ""}
                         </span>
