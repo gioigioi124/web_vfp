@@ -42,7 +42,6 @@ import {
   DebtInfoSummary,
   emptyDetailRow,
   InvalidVoucherField,
-  PendingPickupPrompt,
   VoucherFormProps,
 } from "./voucher-form/types";
 import { useVoucherHistory } from "./voucher-form/useVoucherHistory";
@@ -254,10 +253,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Bảo vệ mất dữ liệu (Dirty tracking + bản nháp localStorage + xác nhận khi thoát)
   const tenDtEditedRef = useRef<boolean>(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState<boolean>(false);
-  const [pendingPickupPrompt, setPendingPickupPrompt] =
-    useState<PendingPickupPrompt | null>(null);
   const discardDialogRef = useRef<HTMLDivElement | null>(null);
-  const pickupPromptRef = useRef<HTMLDivElement | null>(null);
 
   const {
     pendingDraft,
@@ -296,7 +292,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   useModalLock(!!debtDialog, debtDialogRef);
   useModalLock(showAccountPicker, accountPickerRef);
   useModalLock(showDiscardDialog, discardDialogRef);
-  useModalLock(!!pendingPickupPrompt, pickupPromptRef);
 
   const requestClose = useCallback(() => {
     if (isEditable && isDirty && !saving) {
@@ -306,7 +301,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     onBack();
   }, [isEditable, isDirty, saving, onBack]);
 
-  // Phím tắt Esc trong modal xác nhận bỏ thay đổi & modal gộp/thay thế phiếu kho
+  // Phím tắt Esc trong modal xác nhận bỏ thay đổi
   useEffect(() => {
     if (!showDiscardDialog) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -319,19 +314,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [showDiscardDialog]);
-
-  useEffect(() => {
-    if (!pendingPickupPrompt) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        setPendingPickupPrompt(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [pendingPickupPrompt]);
 
   useEffect(() => {
     if (!showAccountPicker) return;
@@ -515,7 +497,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       if (pickupMaXe && !maXe.trim()) {
         setMaXe(pickupMaXe);
       }
-      setPendingPickupPrompt(null);
     },
     [pushUndoSnapshot, isCreate, voucherStt, maXe],
   );
@@ -632,25 +613,23 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreate, maCt, voucherMode]);
 
-  // 2. Watch for pickup payload from PickupDialog
+  // 2. Watch for pickup payload from PickupDialog:
+  // - Mode thêm mới (isCreate): ghi đè toàn bộ các dòng hiện tại trên grid.
+  // - Mode sửa (!isCreate): nối thêm các dòng mới chọn vào cuối grid.
   useEffect(() => {
     if (pickupPayload && pickupPayload.items.length > 0) {
       const calculatedItems = pickupPayload.items.map((it) =>
         calcLoai2Item({ ...it, gia_tb_tt: "C" }, tyGia, "", maTte),
       );
-      const hasExistingRows = items.some((it) => Boolean(it.ma_vt?.trim()));
-      if (hasExistingRows) {
-        setPendingPickupPrompt({
-          items: calculatedItems,
-          ma_xe: pickupPayload.ma_xe,
-        });
-      } else {
-        applyPickupItems(calculatedItems, pickupPayload.ma_xe, "replace");
-      }
+      applyPickupItems(
+        calculatedItems,
+        pickupPayload.ma_xe,
+        isCreate ? "replace" : "append",
+      );
       onClearPickupPayload?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickupPayload, tyGia, maTte, applyPickupItems, onClearPickupPayload]);
+  }, [pickupPayload, isCreate, tyGia, maTte, applyPickupItems, onClearPickupPayload]);
 
   // Sau khi nạp các dòng từ PickupDialog vào grid, focus xuống dòng cuối cùng của grid hàng hóa.
   useEffect(() => {
@@ -1686,10 +1665,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           setShowDiscardDialog(false);
           void handleSave(false);
         }}
-        pendingPickupPrompt={pendingPickupPrompt}
-        pickupPromptRef={pickupPromptRef}
-        onCancelPickupPrompt={() => setPendingPickupPrompt(null)}
-        onApplyPickupItems={applyPickupItems}
         debtDialog={debtDialog}
         debtDialogRef={debtDialogRef}
         onCloseDebtDialog={closeDebtDialog}

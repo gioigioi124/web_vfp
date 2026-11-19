@@ -2,13 +2,12 @@ import React, { lazy, Suspense } from "react";
 import {
   AlertTriangle,
   CreditCard,
-  FileText,
   Save,
   X,
 } from "lucide-react";
 import { VoucherDetail } from "../../types/voucher";
 import { Autocomplete, AutocompleteOption } from "../ui/Autocomplete";
-import { DebtDialogState, PendingPickupPrompt } from "./types";
+import { DebtDialogState } from "./types";
 
 const PriceCalculatorModal = lazy(() =>
   import("../PriceCalculatorModal").then((m) => ({
@@ -27,15 +26,6 @@ export interface VoucherFormModalsProps {
   onCancelDiscard: () => void;
   onConfirmDiscard: () => void;
   onSaveAndClose: () => void;
-  // Pickup merge/replace prompt
-  pendingPickupPrompt: PendingPickupPrompt | null;
-  pickupPromptRef: React.MutableRefObject<HTMLDivElement | null>;
-  onCancelPickupPrompt: () => void;
-  onApplyPickupItems: (
-    items: VoucherDetail[],
-    maXe: string | undefined,
-    strategy: "replace" | "append",
-  ) => void;
   // Debt / warning dialog
   debtDialog: DebtDialogState | null;
   debtDialogRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -66,10 +56,6 @@ export const VoucherFormModals: React.FC<VoucherFormModalsProps> = ({
   onCancelDiscard,
   onConfirmDiscard,
   onSaveAndClose,
-  pendingPickupPrompt,
-  pickupPromptRef,
-  onCancelPickupPrompt,
-  onApplyPickupItems,
   debtDialog,
   debtDialogRef,
   onCloseDebtDialog,
@@ -147,83 +133,6 @@ export const VoucherFormModals: React.FC<VoucherFormModalsProps> = ({
               >
                 <Save className="w-3.5 h-3.5" />
                 Lưu (Ctrl+Enter)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pickup Merge vs. Replace Prompt Modal */}
-      {pendingPickupPrompt && (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div
-            ref={pickupPromptRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Chọn cách nạp dòng hàng từ kho"
-            className="bg-white rounded shadow-2xl border border-neutral-300 w-[450px] overflow-hidden animate-in fade-in zoom-in-95"
-          >
-            <div className="bg-primary-800 text-white px-4 py-2.5 flex items-center justify-between">
-              <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Nạp {pendingPickupPrompt.items.length} dòng hàng từ kho
-              </span>
-              <button
-                type="button"
-                onClick={onCancelPickupPrompt}
-                className="text-white/80 hover:text-white cursor-pointer"
-                aria-label="Đóng"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 text-xs text-neutral-700 space-y-2 leading-relaxed">
-              <p>
-                Bảng chi tiết hiện đang có{" "}
-                <b>
-                  {items.filter((it) => Boolean(it.ma_vt?.trim())).length} dòng
-                  hàng
-                </b>
-                . Bạn muốn <b>nối thêm</b> hay <b>thay thế</b> toàn bộ các dòng
-                hiện tại bằng{" "}
-                <b>{pendingPickupPrompt.items.length} dòng mới</b> vừa chọn từ
-                kho?
-              </p>
-            </div>
-            <div className="bg-neutral-100 px-3.5 py-2 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200">
-              <button
-                type="button"
-                onClick={onCancelPickupPrompt}
-                className="px-3 py-1 bg-white border border-neutral-300 hover:bg-neutral-50 rounded text-neutral-700 font-medium text-xs cursor-pointer"
-              >
-                Hủy (Esc)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  onApplyPickupItems(
-                    pendingPickupPrompt.items,
-                    pendingPickupPrompt.ma_xe,
-                    "replace",
-                  )
-                }
-                className="px-3 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded text-xs cursor-pointer"
-              >
-                Thay thế toàn bộ
-              </button>
-              <button
-                type="button"
-                data-autofocus
-                onClick={() =>
-                  onApplyPickupItems(
-                    pendingPickupPrompt.items,
-                    pendingPickupPrompt.ma_xe,
-                    "append",
-                  )
-                }
-                className="px-3.5 py-1 bg-primary-700 hover:bg-primary-800 text-white font-semibold rounded text-xs cursor-pointer"
-              >
-                Nối thêm vào cuối bảng
               </button>
             </div>
           </div>

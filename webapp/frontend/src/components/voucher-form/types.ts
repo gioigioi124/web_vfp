@@ -48,11 +48,6 @@ export interface DebtDialogState {
   focusTarget?: "tenDt" | "maDt" | "none";
 }
 
-export interface PendingPickupPrompt {
-  items: VoucherDetail[];
-  ma_xe?: string;
-}
-
 export type InvalidVoucherField = "maDt" | "ngayCt" | "maNx" | "items" | null;
 
 export const CURRENT_USER = "KTCN3";
