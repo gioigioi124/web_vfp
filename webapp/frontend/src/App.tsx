@@ -11,7 +11,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useModalLock } from "./lib/modalLock";
-import { peek } from "./lib/apiCache";
+import { peek, invalidate, removeKey } from "./lib/apiCache";
 import { initCustomerIndex, getCustomer } from "./lib/customerIndex";
 import { VoucherList } from "./components/VoucherList";
 import { TopHeaderBar } from "./components/TopHeaderBar";
@@ -22,6 +22,7 @@ import {
   VoucherDetail,
   VoucherHeader,
 } from "./types/voucher";
+import { PickupSlip, PickupItem } from "./types/pickup";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -54,6 +55,49 @@ const ShortcutsDialog = lazy(() =>
   })),
 );
 
+/** Ước tính nhanh (0ms) số chứng từ tiếp theo trong tháng hiện tại từ danh sách đang có. */
+function computeOptimisticNextSoCt(
+  vouchers: VoucherHeader[],
+  mode: "sales" | "warehouse",
+  targetDate: string,
+): string {
+  const ym = (targetDate || "").slice(0, 7);
+  let maxNum = 0;
+  let bestPrefix = mode === "sales" ? "HD" : "";
+  let padLen = 4;
+
+  for (const v of vouchers) {
+    if (ym && (v.ngay_ct || "").slice(0, 7) !== ym) continue;
+    const raw = (v.so_ct || "").trim().toUpperCase();
+    if (!raw) continue;
+    if (mode === "sales") {
+      const m = /^([A-Z]+)(\d+)$/.exec(raw);
+      if (m) {
+        const num = parseInt(m[2], 10);
+        if (num > maxNum) {
+          maxNum = num;
+          bestPrefix = m[1];
+          padLen = Math.max(4, m[2].length);
+        }
+      }
+    } else {
+      const m = /^(.*?)(\d+)$/.exec(raw);
+      if (m) {
+        const num = parseInt(m[2], 10);
+        if (num > maxNum) {
+          maxNum = num;
+          bestPrefix = m[1];
+          padLen = m[2].length;
+        }
+      }
+    }
+  }
+  if (maxNum > 0 && bestPrefix) {
+    return `${bestPrefix}${String(maxNum + 1).padStart(padLen, "0")}`;
+  }
+  return "";
+}
+
 export function App() {
   const {
     voucherMode,
@@ -65,12 +109,15 @@ export function App() {
     loading,
     selectedStt,
     setSelectedStt,
+    flashStt,
     listDetail,
     listDetailLoading,
     debtAmount,
     activeVoucher,
     handleOpenDetail,
     handleCloseDetail,
+    optimisticUpsertVoucher,
+    optimisticDeleteVoucher,
     isFilterOpen,
     setIsFilterOpen,
     handleApplyFilter,
@@ -129,7 +176,6 @@ export function App() {
       fromPickup?: boolean;
     }) | null
   >(null);
-  const [deleting, setDeleting] = useState<boolean>(false);
   const deleteDialogRef = useRef<HTMLDivElement | null>(null);
   useModalLock(!!deleteTarget, deleteDialogRef);
 
@@ -263,6 +309,25 @@ export function App() {
   } | null>(null);
   const [pickupRefreshTrigger, setPickupRefreshTrigger] = useState<number>(0);
   const [pickupFocusStt, setPickupFocusStt] = useState<string | null>(null);
+  const [pickupHiddenStts, setPickupHiddenStts] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [pickupOptimisticSlip, setPickupOptimisticSlip] = useState<{
+    slip: PickupSlip;
+    items: PickupItem[];
+    version: number;
+  } | null>(null);
+
+  // Gợi ý số chứng từ tức thì (0ms) khi mở form Thêm mới (F2)
+  const optimisticNextSoCt = useMemo(
+    () =>
+      computeOptimisticNextSoCt(
+        vouchers,
+        voucherMode,
+        inheritedData?.ngay_ct || getTodayDate(),
+      ),
+    [vouchers, voucherMode, inheritedData?.ngay_ct],
+  );
 
   const handleOpenPickup = (maDt?: string, ngayCt?: string) => {
     setPickupParams({
@@ -319,26 +384,101 @@ export function App() {
     });
   };
 
-  const handleEditWarehouseSlipFromPickup = async (stt: string) => {
+  const handleEditWarehouseSlipFromPickup = async (
+    stt: string,
+    preview?: { slip?: PickupSlip; items?: PickupItem[] },
+  ) => {
+    // Mở overlay tức thì (0ms) từ cache RAM hoặc dữ liệu slip/items đã nạp sẵn trong PickupDialog,
+    // sau đó đồng bộ ngầm bản đầy đủ từ SQL mà không chặn màn hình.
+    const cached = peek<any>(`voucher:warehouse:${stt}`);
+    let previewVoucher: VoucherFullDetail | null = null;
+    if (cached?.success && cached.data?.stt === stt) {
+      previewVoucher = cached.data as VoucherFullDetail;
+    } else if (preview?.slip) {
+      const s = preview.slip;
+      previewVoucher = {
+        stt: s.stt,
+        ma_dvcs: "S1",
+        ma_ct: "X1",
+        nh_ct: "2",
+        ma_tte: "VND",
+        ty_gia: 1,
+        ngay_ct: s.ngay_ct,
+        ngay_ps: s.ngay_ct,
+        so_ct: s.so_ct || "",
+        ma_dt: s.ma_dt,
+        ten_dt: s.ten_dt || "",
+        ong_ba: s.ten_dt || "",
+        dia_chi: s.dia_chi || "",
+        dien_giai0: "xuất bán",
+        ma_xe: s.ma_xe || "",
+        ten_xe: "",
+        ttien_nt: 0,
+        ttien_nt0: 0,
+        ttien_nt2: 0,
+        ttien_nt3: 0,
+        ttien_nt4: 0,
+        ttien: 0,
+        ttien0: 0,
+        ttien2: 0,
+        ttien3: 0,
+        ttien4: 0,
+        confirmed: true,
+        posted: false,
+        printed: false,
+        items: (preview.items || []).map((it) => ({
+          stt: s.stt,
+          stt0: it.stt0,
+          ma_kho: it.ma_kho || "K0101",
+          ma_vt: it.ma_vt,
+          ten_vt: it.ten_vt || "",
+          dvt: it.dvt || "",
+          dvt_ban: it.dvt_ban || "",
+          loai_vt: it.loai_vt || "1",
+          so_tam: it.so_tam ?? 0,
+          he_so8: it.he_so8 ?? 1,
+          so_luong8: it.so_luong8 ?? it.so_luong9 ?? 0,
+          he_so9: 1,
+          so_luong9: it.so_luong9 ?? 0,
+          so_luong: it.so_luong9 ?? it.so_luong8 ?? 0,
+          gia_tb_tt: "C",
+        })),
+      };
+    }
+
+    if (previewVoucher) {
+      setWarehouseOverlay({
+        mode: "S",
+        stt,
+        voucher: previewVoucher,
+      });
+    }
+
     try {
       const res = await fetch(
         `/api/vouchers/${encodeURIComponent(stt)}?db_mode=warehouse`,
       );
       const data = await res.json();
       if (res.ok && data?.success && data?.data) {
-        setWarehouseOverlay({
-          mode: "S",
-          stt,
-          voucher: data.data as VoucherFullDetail,
+        setWarehouseOverlay((prev) => {
+          // Nếu người dùng đã đóng overlay trong lúc tải ngầm thì không mở lại
+          if (previewVoucher && (!prev || prev.stt !== stt)) return prev;
+          return {
+            mode: "S",
+            stt,
+            voucher: data.data as VoucherFullDetail,
+          };
         });
-      } else {
+      } else if (!previewVoucher) {
         showToast(
           `Không thể tải phiếu kho ${stt}: ${data?.message || "Lỗi không xác định"}`,
           "error",
         );
       }
     } catch (err: any) {
-      showToast(`Lỗi tải phiếu kho: ${err.message}`, "error");
+      if (!previewVoucher) {
+        showToast(`Lỗi tải phiếu kho: ${err.message}`, "error");
+      }
     }
   };
 
@@ -455,48 +595,122 @@ export function App() {
     }
   };
 
+  // Xóa lạc quan (0ms): đóng hộp thoại + gỡ dòng khỏi giao diện ngay lập tức,
+  // tự động hoàn tác nguyên trạng kèm thông báo lỗi nếu SQL từ chối (khóa sổ / mất mạng).
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
     const target = deleteTarget;
-    setDeleting(true);
+    setDeleteTarget(null);
+
+    if (target.fromPickup) {
+      // 0ms: ẩn phiếu khỏi PickupDialog ngay
+      setPickupHiddenStts((prev) => {
+        const next = new Set(prev);
+        next.add(target.stt);
+        return next;
+      });
+      setPickupFocusStt(null);
+      showToast(
+        `Đã xóa phiếu xuất kho số ${target.so_ct || target.stt}.`,
+        "success",
+      );
+
+      try {
+        const res = await fetch(
+          `/api/vouchers/${encodeURIComponent(target.stt)}?user_name=KTCN3&db_mode=${encodeURIComponent(target.dbMode)}`,
+          { method: "DELETE" },
+        );
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          // Rollback: hiện lại phiếu vừa ẩn
+          setPickupHiddenStts((prev) => {
+            const next = new Set(prev);
+            next.delete(target.stt);
+            return next;
+          });
+          showToast(
+            `Không thể xóa phiếu kho ${target.so_ct || target.stt}: ${data?.detail?.message || data?.message || "Lỗi máy chủ."}`,
+            "error",
+          );
+          return;
+        }
+        invalidate("pickup:list:");
+        removeKey(`pickup:detail:${target.stt}`);
+        removeKey(`voucher:warehouse:${target.stt}`);
+        setPickupRefreshTrigger((prev) => prev + 1);
+        setPickupHiddenStts((prev) => {
+          if (!prev.has(target.stt)) return prev;
+          const next = new Set(prev);
+          next.delete(target.stt);
+          return next;
+        });
+      } catch (err: any) {
+        setPickupHiddenStts((prev) => {
+          const next = new Set(prev);
+          next.delete(target.stt);
+          return next;
+        });
+        showToast(
+          `Lỗi kết nối khi xóa phiếu kho ${target.so_ct || target.stt}: ${err.message}`,
+          "error",
+        );
+      }
+      return;
+    }
+
+    // 0ms: gỡ dòng khỏi VoucherList, trừ tổng, chuyển focus sang dòng kế cận
+    const wasMarked = marked.has(target.stt);
+    if (wasMarked) {
+      setMarked((prev) => {
+        const next = new Set(prev);
+        next.delete(target.stt);
+        return next;
+      });
+    }
+    const tx = optimisticDeleteVoucher(target.stt);
+    if (sttParam) {
+      navToList();
+    }
+    showToast(
+      `Đã xóa chứng từ số ${target.so_ct || target.stt}.`,
+      "success",
+    );
+
     try {
       const res = await fetch(
         `/api/vouchers/${encodeURIComponent(target.stt)}?user_name=KTCN3&db_mode=${encodeURIComponent(target.dbMode)}`,
-        {
-          method: "DELETE",
-        },
+        { method: "DELETE" },
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
+        tx.rollback();
+        if (wasMarked) {
+          setMarked((prev) => {
+            const next = new Set(prev);
+            next.add(target.stt);
+            return next;
+          });
+        }
         showToast(
-          `Lỗi khi xóa: ${data?.detail?.message || data?.message || "Không thể xóa chứng từ."}`,
+          `Không thể xóa chứng từ ${target.so_ct || target.stt}: ${data?.detail?.message || data?.message || "Lỗi máy chủ."}`,
           "error",
         );
         return;
       }
-      if (target.fromPickup) {
-        showToast(
-          `Đã xóa thành công phiếu xuất kho số ${target.so_ct || target.stt}.`,
-          "success",
-        );
-        setDeleteTarget(null);
-        setPickupFocusStt(null);
-        setPickupRefreshTrigger((prev) => prev + 1);
-      } else {
-        showToast(
-          `Đã xóa thành công chứng từ số ${target.so_ct || target.stt}.`,
-          "success",
-        );
-        setDeleteTarget(null);
-        refresh();
-        if (sttParam) {
-          navToList();
-        }
-      }
+      tx.commit();
     } catch (err: any) {
-      showToast(`Lỗi kết nối: ${err.message}`, "error");
-    } finally {
-      setDeleting(false);
+      tx.rollback();
+      if (wasMarked) {
+        setMarked((prev) => {
+          const next = new Set(prev);
+          next.add(target.stt);
+          return next;
+        });
+      }
+      showToast(
+        `Lỗi kết nối khi xóa chứng từ ${target.so_ct || target.stt}: ${err.message}`,
+        "error",
+      );
     }
   };
 
@@ -510,16 +724,16 @@ export function App() {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        if (!deleting) setDeleteTarget(null);
+        setDeleteTarget(null);
       } else if (e.key === "F8" && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
-        if (!deleting) void handleConfirmDeleteRef.current();
+        void handleConfirmDeleteRef.current();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [deleteTarget, deleting]);
+  }, [deleteTarget]);
 
   // VFP Keyboard Shortcuts Handler (khớp ctbhh / ctbhd / ctbhch)
   useHotkeys(
@@ -892,10 +1106,8 @@ export function App() {
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                disabled={deleting}
-                className="px-3.5 py-1 bg-danger-600 hover:bg-danger-700 text-white font-semibold rounded text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-1 bg-danger-600 hover:bg-danger-700 text-white font-semibold rounded text-xs flex items-center gap-1.5 cursor-pointer"
               >
-                {deleting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                 Xóa chứng từ (F8)
               </button>
             </div>
@@ -971,6 +1183,7 @@ export function App() {
               isSuspended={!!warehouseOverlay || isDebtOpen}
               voucher={isNew ? null : editingVoucher}
               initialInherited={inheritedData || undefined}
+              suggestedSoCt={isNew ? optimisticNextSoCt : undefined}
               pickupPayload={pickupPayload}
               onClearPickupPayload={() => setPickupPayload(null)}
               onBack={navToList}
@@ -983,16 +1196,21 @@ export function App() {
               }}
               onViewDebt={(dt) => handleOpenDebt(dt)}
               onOpenPickup={handleOpenPickup}
-              onSaveSuccess={(newStt) => {
-                invalidatePrintCache(newStt);
-                setSelectedStt(newStt);
-                handleCloseDetail({ skipFetch: true });
-                refresh({ silent: vouchers.length > 0 });
+              onSaveSuccess={(newStt, savedVoucher) => {
+                if (savedVoucher) {
+                  // 0ms: cập nhật danh sách, dòng tổng, cache chi tiết & bảng chi tiết đáy tức thì
+                  optimisticUpsertVoucher(savedVoucher, isNew);
+                } else {
+                  invalidatePrintCache(newStt);
+                  setSelectedStt(newStt);
+                  handleCloseDetail({ skipFetch: true });
+                  refresh({ silent: vouchers.length > 0 });
+                }
                 navToList();
                 showToast(
                   isNew
-                    ? "Đã tạo mới chứng từ thành công."
-                    : "Đã lưu thay đổi chứng từ thành công.",
+                    ? `Đã tạo mới chứng từ ${savedVoucher?.so_ct || ""} thành công.`
+                    : `Đã lưu thay đổi chứng từ ${savedVoucher?.so_ct || ""} thành công.`,
                   "success",
                 );
               }}
@@ -1006,6 +1224,7 @@ export function App() {
             filters={filters}
             loading={loading}
             selectedStt={selectedStt}
+            flashStt={flashStt}
             markedStts={marked}
             detailItems={listDetail}
             detailLoading={listDetailLoading}
@@ -1169,13 +1388,15 @@ export function App() {
               currentSelectedVoucher?.ngay_ct ||
               undefined
             }
+            hiddenStts={pickupHiddenStts}
+            optimisticSlip={pickupOptimisticSlip}
             refreshTrigger={pickupRefreshTrigger}
             focusStt={pickupFocusStt}
             onCreateWarehouseSlip={() => {
               void handleCreateWarehouseSlipFromPickup();
             }}
-            onEditWarehouseSlip={(stt) => {
-              void handleEditWarehouseSlipFromPickup(stt);
+            onEditWarehouseSlip={(stt, preview) => {
+              void handleEditWarehouseSlipFromPickup(stt, preview);
             }}
             onDeleteWarehouseSlip={(slip) => {
               setDeleteTarget({
@@ -1224,14 +1445,57 @@ export function App() {
               onPrint={() => {}}
               onViewDebt={(dt) => handleOpenDebt(dt)}
               onOpenPickup={() => {}}
-              onSaveSuccess={(savedStt) => {
+              onSaveSuccess={(savedStt, savedVoucher) => {
+                const wasCreate = warehouseOverlay.mode === "M";
                 setWarehouseOverlay(null);
                 setPickupFocusStt(savedStt);
+                if (savedVoucher) {
+                  // 0ms: cập nhật phiếu xuất kho ngay trên bảng PickupDialog trước khi đồng bộ nền
+                  const optSlip: PickupSlip = {
+                    stt: savedStt,
+                    so_ct: savedVoucher.so_ct,
+                    ngay_ct: savedVoucher.ngay_ct,
+                    ma_dt: savedVoucher.ma_dt,
+                    ten_dt: savedVoucher.ten_dt || "",
+                    dia_chi: savedVoucher.dia_chi || "",
+                    ma_xe: savedVoucher.ma_xe || "",
+                    total_items: savedVoucher.items.length,
+                    total_so_tam: savedVoucher.items.reduce(
+                      (s, it) => s + (Number(it.so_tam) || 0),
+                      0,
+                    ),
+                    total_so_luong9: savedVoucher.items.reduce(
+                      (s, it) => s + (Number(it.so_luong9) || 0),
+                      0,
+                    ),
+                  };
+                  const optItems: PickupItem[] = savedVoucher.items.map(
+                    (it, i) => ({
+                      stt: savedStt,
+                      stt0: it.stt0 || String(i),
+                      ma_kho: it.ma_kho || "K0101",
+                      ma_vt: (it.ma_vt || "").trim(),
+                      ten_vt: it.ten_vt || "",
+                      dvt: it.dvt || "",
+                      dvt_ban: it.dvt_ban || "",
+                      loai_vt: it.loai_vt || "1",
+                      so_tam: Number(it.so_tam) || 0,
+                      he_so8: Number(it.he_so8) || 1,
+                      so_luong8: Number(it.so_luong8) || 0,
+                      so_luong9: Number(it.so_luong9) || 0,
+                    }),
+                  );
+                  setPickupOptimisticSlip({
+                    slip: optSlip,
+                    items: optItems,
+                    version: Date.now(),
+                  });
+                }
                 setPickupRefreshTrigger((prev) => prev + 1);
                 showToast(
-                  warehouseOverlay.mode === "M"
-                    ? "Đã tạo mới phiếu xuất kho thành công."
-                    : "Đã cập nhật phiếu xuất kho thành công.",
+                  wasCreate
+                    ? `Đã tạo mới phiếu xuất kho ${savedVoucher?.so_ct || ""} thành công.`
+                    : `Đã cập nhật phiếu xuất kho ${savedVoucher?.so_ct || ""} thành công.`,
                   "success",
                 );
               }}
@@ -1246,9 +1510,13 @@ export function App() {
             isOpen={isDebtOpen}
             onClose={() => setIsDebtOpen(false)}
             maDt={debtMaDt}
-            onVoucherSaved={(savedStt) => {
-              if (savedStt) invalidatePrintCache(savedStt);
-              refresh({ silent: vouchers.length > 0 });
+            onVoucherSaved={(savedStt, savedVoucher) => {
+              if (savedVoucher && voucherMode === "sales") {
+                optimisticUpsertVoucher(savedVoucher, false);
+              } else {
+                if (savedStt) invalidatePrintCache(savedStt);
+                refresh({ silent: vouchers.length > 0 });
+              }
               showToast("Đã cập nhật chứng từ từ sổ công nợ.", "success");
             }}
           />

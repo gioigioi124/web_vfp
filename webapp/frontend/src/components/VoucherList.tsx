@@ -71,6 +71,7 @@ interface VoucherListProps {
   filters?: VoucherFilterParams;
   loading: boolean;
   selectedStt: string | null;
+  flashStt?: string | null;
   markedStts?: Set<string>;
   detailItems: VoucherDetail[];
   detailLoading?: boolean;
@@ -94,6 +95,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   summary,
   loading,
   selectedStt,
+  flashStt,
   markedStts,
   detailItems,
   detailLoading = false,
@@ -557,6 +559,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                 vouchers.map((v, rowIdx) => {
                   const isSelected = selectedStt === v.stt;
                   const isMarked = markedStts?.has(v.stt) ?? false;
+                  const isFlashed = flashStt === v.stt;
                   return (
                     <tr
                       key={v.stt}
@@ -574,13 +577,18 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                       onDoubleClick={() => {
                         onEditVoucher?.(v.stt);
                       }}
-                      className={
+                      className={[
                         isSelected
                           ? "xl-row-active"
                           : isMarked
                             ? "xl-row-marked"
-                            : undefined
-                      }
+                            : "",
+                        isFlashed
+                          ? "ring-2 ring-inset ring-emerald-500/80 bg-emerald-50/70 transition-all duration-500"
+                          : "transition-colors duration-300",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                     >
                       <td
                         className="xl-rowhead cursor-pointer"

@@ -8,12 +8,23 @@ import {
   VoucherSummaryTotals,
 } from "../types/voucher";
 import { getTodayDate } from "../lib/format";
-import { cachedFetch, peek, invalidate } from "../lib/apiCache";
+import {
+  cachedFetch,
+  peek,
+  isFresh,
+  invalidate,
+  prime,
+  removeKey,
+} from "../lib/apiCache";
 import {
   invalidatePrintCache,
   prefetchPrintPayload,
   preloadPrintLogo,
 } from "../lib/printCache";
+import {
+  broadcastVoucherMutation,
+  subscribeVoucherMutations,
+} from "../lib/syncChannel";
 
 /**
  * Khóa cache cho từng loại tài nguyên.
@@ -29,6 +40,68 @@ const listKey = (mode: "sales" | "warehouse", f: VoucherFilterParams) =>
 const voucherKey = (mode: "sales" | "warehouse", stt: string) =>
   `voucher:${mode}:${stt}`;
 const debtKey = (maDt: string) => `debt:${maDt}`;
+
+function toHeaderRow(v: VoucherFullDetail): VoucherHeader {
+  const { items: _items, ...header } = v;
+  return header;
+}
+
+function applySummaryDelta(
+  prev: VoucherSummaryTotals,
+  add?: Partial<VoucherHeader> | null,
+  sub?: Partial<VoucherHeader> | null,
+): VoucherSummaryTotals {
+  const d = (
+    key:
+      | "ttien_nt"
+      | "ttien_nt2"
+      | "ttien_nt3"
+      | "ttien_nt4"
+      | "ttien_nt0"
+      | "ttien"
+      | "ttien2"
+      | "ttien3"
+      | "ttien4"
+      | "ttien0",
+  ) => Number(add?.[key] || 0) - Number(sub?.[key] || 0);
+  return {
+    total_ttien_nt: prev.total_ttien_nt + d("ttien_nt"),
+    total_ttien_nt2: prev.total_ttien_nt2 + d("ttien_nt2"),
+    total_ttien_nt3: prev.total_ttien_nt3 + d("ttien_nt3"),
+    total_ttien_nt4: prev.total_ttien_nt4 + d("ttien_nt4"),
+    total_ttien_nt0: prev.total_ttien_nt0 + d("ttien_nt0"),
+    total_ttien: prev.total_ttien + d("ttien"),
+    total_ttien2: prev.total_ttien2 + d("ttien2"),
+    total_ttien3: prev.total_ttien3 + d("ttien3"),
+    total_ttien4: prev.total_ttien4 + d("ttien4"),
+    total_ttien0: prev.total_ttien0 + d("ttien0"),
+  };
+}
+
+function matchesActiveFilters(
+  v: VoucherHeader,
+  f: VoucherFilterParams,
+): boolean {
+  if (f.ma_ct && (v.ma_ct || "").trim().toUpperCase() !== f.ma_ct.trim().toUpperCase()) {
+    return false;
+  }
+  const d = (v.ngay_ct || "").slice(0, 10);
+  if (f.ngay_ct1 && d && d < f.ngay_ct1) return false;
+  if (f.ngay_ct2 && d && d > f.ngay_ct2) return false;
+  if (
+    f.ma_dt &&
+    !(v.ma_dt || "").toUpperCase().includes(f.ma_dt.trim().toUpperCase())
+  ) {
+    return false;
+  }
+  if (
+    f.dien_giai &&
+    !(v.dien_giai0 || "").toLowerCase().includes(f.dien_giai.trim().toLowerCase())
+  ) {
+    return false;
+  }
+  return true;
+}
 
 export function useVouchers() {
   const [voucherMode, setVoucherModeState] = useState<"sales" | "warehouse">(
@@ -167,12 +240,61 @@ export function useVouchers() {
     fetchVouchers();
   }, [fetchVouchers]);
 
-  // Ref giữ fetchVouchers và vouchers để effect chi tiết KHÔNG phụ thuộc chúng.
+  // Ref giữ state mới nhất cho optimistic mutations & effects (tránh stale closure).
   const fetchVouchersRef = useRef(fetchVouchers);
   fetchVouchersRef.current = fetchVouchers;
   const vouchersRef = useRef(vouchers);
   vouchersRef.current = vouchers;
+  const paginationRef = useRef(pagination);
+  paginationRef.current = pagination;
+  const summaryRef = useRef(summary);
+  summaryRef.current = summary;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+  const selectedSttRef = useRef(selectedStt);
+  selectedSttRef.current = selectedStt;
+  const listDetailRef = useRef(listDetail);
+  listDetailRef.current = listDetail;
+  const debtAmountRef = useRef(debtAmount);
+  debtAmountRef.current = debtAmount;
+  const voucherModeRef = useRef(voucherMode);
+  voucherModeRef.current = voucherMode;
   const lastHiddenAtRef = useRef<number>(0);
+
+  // Highlight tạm thời dòng vừa tạo mới / cập nhật để người dùng thấy phản hồi tức thì
+  const [flashStt, setFlashStt] = useState<string | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
+  const triggerFlash = useCallback((stt: string) => {
+    if (flashTimerRef.current !== null) {
+      window.clearTimeout(flashTimerRef.current);
+    }
+    setFlashStt(stt);
+    flashTimerRef.current = window.setTimeout(() => {
+      flashTimerRef.current = null;
+      setFlashStt(null);
+    }, 1400);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current !== null) {
+        window.clearTimeout(flashTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Đồng bộ tức thì khi tab trình duyệt khác vừa thêm / sửa / xóa chứng từ
+  useEffect(() => {
+    return subscribeVoucherMutations((ev) => {
+      invalidate("list:");
+      removeKey(voucherKey(ev.mode, ev.stt));
+      if (ev.ma_dt) invalidate(`debt:${ev.ma_dt.trim().toUpperCase()}`);
+      invalidatePrintCache(ev.stt);
+      if (ev.mode === voucherModeRef.current) {
+        void fetchVouchersRef.current({ force: true, silent: true });
+      }
+    });
+  }, []);
 
   // Tự động làm mới ngầm danh sách khi người dùng quay lại tab sau >= 30s
   useEffect(() => {
@@ -316,8 +438,11 @@ export function useVouchers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStt, voucherMode]);
 
-  const fetchVoucherDetail = async (stt: string): Promise<boolean> => {
-    setLoadingDetail(true);
+  const fetchVoucherDetail = async (
+    stt: string,
+    opts?: { silent?: boolean },
+  ): Promise<boolean> => {
+    if (!opts?.silent) setLoadingDetail(true);
     try {
       const data = await cachedFetch<any>(
         voucherKey(voucherMode, stt),
@@ -343,31 +468,191 @@ export function useVouchers() {
       }
       return false;
     } finally {
-      setLoadingDetail(false);
+      if (!opts?.silent) setLoadingDetail(false);
     }
   };
 
-  // Mở form chi tiết. Luôn fetch mới phiếu đang mở (để lấy dữ liệu mới nhất);
-  // nếu phiếu đã bị xóa (404) → đóng form + tải lại danh sách.
+  // Mở form chi tiết tức thì từ cache RAM (0ms), rồi chỉ revalidate ngầm (không hiện spinner chặn).
   const handleOpenDetail = async (stt: string) => {
     setSelectedStt(stt);
-    // Hiển thị tức thì từ cache (nếu có) để không nháy trắng, rồi fetch mới.
-    const cachedVoucher = peek<any>(voucherKey(voucherMode, stt));
-    if (cachedVoucher?.success && cachedVoucher.data) {
+    const vKey = voucherKey(voucherMode, stt);
+    const cachedVoucher = peek<any>(vKey);
+    const hasCached = Boolean(cachedVoucher?.success && cachedVoucher.data);
+    if (hasCached) {
       setActiveVoucher(cachedVoucher.data);
     }
-    await fetchVoucherDetail(stt);
+    // Nếu cache vừa tải trong vòng 5s và đã đủ items → không cần chặn chờ mạng;
+    // vẫn revalidate ngầm để phát hiện kịp nếu máy khác vừa sửa/xóa.
+    const freshEnough = hasCached && isFresh(vKey, 5_000);
+    await fetchVoucherDetail(stt, { silent: hasCached || freshEnough });
   };
 
   // Quay về từ trang chi tiết: đóng form và nạp ngầm danh sách (khi đã có dòng) để tránh nháy spinner.
   const handleCloseDetail = (opts?: { skipFetch?: boolean }) => {
     setActiveVoucher(null);
-    invalidate("list:");
-    invalidatePrintCache();
     if (!opts?.skipFetch) {
+      invalidate("list:");
+      invalidatePrintCache();
       fetchVouchers({ force: true, silent: vouchers.length > 0 });
     }
   };
+
+  /**
+   * Cập nhật tức thì (0ms) danh sách, dòng tổng, cache chi tiết & bảng chi tiết đáy ngay sau khi lưu
+   * (Thêm mới hoặc Sửa) — rồi đồng bộ ngầm với SQL Server mà không nháy spinner.
+   */
+  const optimisticUpsertVoucher = useCallback(
+    (saved: VoucherFullDetail, isCreate: boolean) => {
+      const mode = voucherModeRef.current;
+      const headerRow = toHeaderRow(saved);
+      const currList = vouchersRef.current;
+      const existingIdx = currList.findIndex((v) => v.stt === saved.stt);
+      const prevRow = existingIdx >= 0 ? currList[existingIdx] : null;
+      const matches = matchesActiveFilters(headerRow, filtersRef.current);
+
+      // 1) Seed RAM cache ngay lập tức để bấm xem/sửa lại không cần chờ GET /api/vouchers/{stt}
+      prime(voucherKey(mode, saved.stt), { success: true, data: saved });
+      setActiveVoucher(null);
+      setSelectedStt(saved.stt);
+      setListDetail(saved.items || []);
+      setListDetailLoading(false);
+
+      // 2) Patch danh sách & tổng tiền tại chỗ (0ms)
+      if (existingIdx >= 0) {
+        if (matches) {
+          const nextList = [...currList];
+          nextList[existingIdx] = headerRow;
+          setVouchers(nextList);
+          setSummary((prev) => applySummaryDelta(prev, headerRow, prevRow));
+        } else {
+          // Ngày hoặc khách hàng bị đổi ra khỏi bộ lọc đang xem
+          const nextList = currList.filter((v) => v.stt !== saved.stt);
+          setVouchers(nextList);
+          setSummary((prev) => applySummaryDelta(prev, null, prevRow));
+          setPagination((prev) => ({
+            ...prev,
+            total_records: Math.max(0, prev.total_records - 1),
+          }));
+        }
+      } else if (matches) {
+        const nextList = [...currList, headerRow];
+        setVouchers(nextList);
+        setSummary((prev) => applySummaryDelta(prev, headerRow, null));
+        setPagination((prev) => {
+          const total = prev.total_records + 1;
+          const totalPages = Math.max(1, Math.ceil(total / (prev.page_size || 50)));
+          return {
+            ...prev,
+            total_records: total,
+            total_pages: totalPages,
+            has_next: prev.page < totalPages,
+          };
+        });
+      }
+
+      triggerFlash(saved.stt);
+
+      // 3) Xóa chọn lọc cache list & công nợ khách liên quan (KHÔNG xóa cache phiếu khác)
+      invalidate("list:");
+      if (saved.ma_dt) invalidate(`debt:${saved.ma_dt.trim().toUpperCase()}`);
+      if (prevRow?.ma_dt && prevRow.ma_dt !== saved.ma_dt) {
+        invalidate(`debt:${prevRow.ma_dt.trim().toUpperCase()}`);
+      }
+      invalidatePrintCache(saved.stt);
+      prefetchPrintPayload(mode, saved.stt, true);
+
+      // 4) Thông báo tab khác & đồng bộ ngầm với SQL Server
+      broadcastVoucherMutation({
+        action: isCreate ? "create" : "update",
+        mode,
+        stt: saved.stt,
+        ma_dt: saved.ma_dt,
+      });
+      void fetchVouchersRef.current({ force: true, silent: true });
+    },
+    [triggerFlash],
+  );
+
+  /**
+   * Xóa lạc quan (0ms): gỡ chứng từ khỏi bảng + trừ tổng tiền + chuyển chọn sang dòng kế cận ngay lập tức.
+   * Trả về `commit()` khi API DELETE thành công và `rollback()` để hoàn tác nguyên trạng nếu lỗi.
+   */
+  const optimisticDeleteVoucher = useCallback((stt: string) => {
+    const mode = voucherModeRef.current;
+    const prevList = vouchersRef.current;
+    const prevPagination = paginationRef.current;
+    const prevSummary = summaryRef.current;
+    const prevSelected = selectedSttRef.current;
+    const prevDetail = listDetailRef.current;
+    const prevDebt = debtAmountRef.current;
+    const prevCachedDetail = peek<any>(voucherKey(mode, stt));
+
+    const idx = prevList.findIndex((v) => v.stt === stt);
+    const deletedRow = idx >= 0 ? prevList[idx] : undefined;
+
+    if (idx >= 0) {
+      const nextList = [...prevList.slice(0, idx), ...prevList.slice(idx + 1)];
+      setVouchers(nextList);
+      setSummary((s) => applySummaryDelta(s, null, deletedRow));
+      setPagination((p) => {
+        const total = Math.max(0, p.total_records - 1);
+        const totalPages = Math.max(1, Math.ceil(total / (p.page_size || 50)));
+        return {
+          ...p,
+          total_records: total,
+          total_pages: totalPages,
+          has_next: p.page < totalPages,
+        };
+      });
+
+      if (prevSelected === stt) {
+        const nextRow =
+          nextList[Math.min(idx, nextList.length - 1)] || null;
+        const nextStt = nextRow ? nextRow.stt : null;
+        setSelectedStt(nextStt);
+        if (nextStt) {
+          const nextCached = peek<any>(voucherKey(mode, nextStt));
+          if (nextCached?.success && nextCached.data) {
+            setListDetail(nextCached.data.items || []);
+          }
+        } else {
+          setListDetail([]);
+          setDebtAmount(null);
+        }
+      }
+    }
+
+    removeKey(voucherKey(mode, stt));
+    invalidatePrintCache(stt);
+
+    return {
+      deletedRow,
+      commit: () => {
+        invalidate("list:");
+        if (deletedRow?.ma_dt) {
+          invalidate(`debt:${deletedRow.ma_dt.trim().toUpperCase()}`);
+        }
+        broadcastVoucherMutation({
+          action: "delete",
+          mode,
+          stt,
+          ma_dt: deletedRow?.ma_dt,
+        });
+        void fetchVouchersRef.current({ force: true, silent: true });
+      },
+      rollback: () => {
+        setVouchers(prevList);
+        setPagination(prevPagination);
+        setSummary(prevSummary);
+        setSelectedStt(prevSelected);
+        setListDetail(prevDetail);
+        setDebtAmount(prevDebt);
+        if (prevCachedDetail) {
+          prime(voucherKey(mode, stt), prevCachedDetail);
+        }
+      },
+    };
+  }, []);
 
   const handleApplyFilter = (newFilters: VoucherFilterParams) => {
     // Bộ lọc đổi → dữ liệu danh sách cũ không còn hợp lệ, xóa cache list.
@@ -443,6 +728,7 @@ export function useVouchers() {
     loading,
     selectedStt,
     setSelectedStt,
+    flashStt,
     listDetail,
     listDetailLoading,
     debtAmount,
@@ -450,6 +736,8 @@ export function useVouchers() {
     loadingDetail,
     handleOpenDetail,
     handleCloseDetail,
+    optimisticUpsertVoucher,
+    optimisticDeleteVoucher,
     isFilterOpen,
     setIsFilterOpen,
     handleApplyFilter,

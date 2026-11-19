@@ -92,6 +92,17 @@ export function invalidate(prefix?: string): void {
   }
 }
 
+/** Ghi đè trực tiếp 1 key cache (tăng generation để request cũ đang bay không ghi đè dữ liệu mới). */
+export function prime<T>(key: string, data: T): void {
+  const reqGen = nextGen++;
+  touchEntry(key, { data, ts: Date.now(), gen: reqGen });
+}
+
+/** Xóa chính xác 1 key cache mà không ảnh hưởng tới các key khác. */
+export function removeKey(key: string): void {
+  store.delete(key);
+}
+
 export interface CachedFetchOptions {
   /** Bỏ qua cache "tươi", buộc gọi mạng mới nhất. */
   force?: boolean;

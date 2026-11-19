@@ -3,6 +3,7 @@ import { Button } from "./ui/Button";
 import { PickupSlip, PickupItem } from "../types/pickup";
 import { formatQuantity, formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
+import { cachedFetch, peek, prime, invalidate } from "../lib/apiCache";
 import {
   arrowDir,
   handleExcelMouseDown,
@@ -18,8 +19,15 @@ interface PickupDialogProps {
   ngayCt?: string;
   onAccept: (selectedSlips: PickupSlip[], items: any[], maXe?: string) => void;
   onCreateWarehouseSlip?: () => void;
-  onEditWarehouseSlip?: (stt: string) => void;
+  onEditWarehouseSlip?: (
+    stt: string,
+    preview?: { slip?: PickupSlip; items?: PickupItem[] },
+  ) => void;
   onDeleteWarehouseSlip?: (slip: PickupSlip) => void;
+  /** Danh sách STT đang bị xóa lạc quan (ẩn ngay 0ms, tự hiện lại nếu API lỗi) */
+  hiddenStts?: Set<string>;
+  /** Dữ liệu phiếu vừa lưu để cập nhật tức thì 0ms trước khi đồng bộ nền */
+  optimisticSlip?: { slip: PickupSlip; items: PickupItem[]; version: number } | null;
   refreshTrigger?: number;
   focusStt?: string | null;
 }
@@ -41,10 +49,19 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   onCreateWarehouseSlip,
   onEditWarehouseSlip,
   onDeleteWarehouseSlip,
+  hiddenStts,
+  optimisticSlip = null,
   refreshTrigger = 0,
   focusStt = null,
 }) => {
-  const [slips, setSlips] = useState<PickupSlip[]>([]);
+  const [rawSlips, setRawSlips] = useState<PickupSlip[]>([]);
+  const slips = useMemo(
+    () =>
+      hiddenStts && hiddenStts.size > 0
+        ? rawSlips.filter((s) => !hiddenStts.has(s.stt))
+        : rawSlips,
+    [rawSlips, hiddenStts],
+  );
   const [selectedStts, setSelectedStts] = useState<Set<string>>(new Set());
   const [activeStt, setActiveStt] = useState<string | null>(null);
   const [activeItems, setActiveItems] = useState<PickupItem[]>([]);
@@ -159,26 +176,81 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     [],
   );
 
-  // Fetch slips
+  // Cập nhật lạc quan (0ms) khi vừa tạo/sửa phiếu xuất kho từ overlay
+  const lastAppliedOptVerRef = useRef<number>(0);
+  useEffect(() => {
+    if (!optimisticSlip || optimisticSlip.version === lastAppliedOptVerRef.current) {
+      return;
+    }
+    lastAppliedOptVerRef.current = optimisticSlip.version;
+    const { slip, items } = optimisticSlip;
+    prime(`pickup:detail:${slip.stt}`, { success: true, data: { items } });
+    invalidate("pickup:list:");
+    setRawSlips((prev) => {
+      const idx = prev.findIndex((s) => s.stt === slip.stt);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = slip;
+        return next;
+      }
+      return [slip, ...prev];
+    });
+    setActiveStt(slip.stt);
+    setActiveItems(items);
+  }, [optimisticSlip]);
+
+  // Khi dòng đang chọn bị ẩn do xóa lạc quan -> tự động chuyển chọn sang dòng kế cận ở 0ms
+  useEffect(() => {
+    if (!activeStt || !hiddenStts || !hiddenStts.has(activeStt)) return;
+    const nextStt = slips[0]?.stt ?? null;
+    setActiveStt(nextStt);
+    setSelectedStts((prev) => {
+      if (!prev.has(activeStt)) return prev;
+      const next = new Set(prev);
+      next.delete(activeStt);
+      return next;
+    });
+  }, [activeStt, hiddenStts, slips]);
+
+  // Fetch slips (SWR: hiển thị tức thì từ cache RAM nếu có, đồng bộ ngầm với SQL)
   const loadSlips = useCallback(
-    async (preferredStt?: string | null) => {
-      setLoading(true);
-      // Xóa chi tiết cũ ngay để không hiển thị dữ liệu cũ trong lúc chờ.
-      setActiveItems([]);
+    async (preferredStt?: string | null, opts?: { force?: boolean }) => {
+      const q = new URLSearchParams();
+      if (maDt) q.append("ma_dt", maDt);
+      if (ngayCt) {
+        q.append("ngay_ct1", ngayCt);
+        q.append("ngay_ct2", ngayCt);
+      }
+      const listCacheKey = `pickup:list:${maDt || ""}:${ngayCt || ""}`;
+      const url = `/api/pickup/list?${q.toString()}`;
+      const cached = peek<any>(listCacheKey);
+      const hasCached = Boolean(cached?.success && Array.isArray(cached.data?.items));
+
+      if (hasCached) {
+        const cachedItems: PickupSlip[] = cached.data.items;
+        setRawSlips(cachedItems);
+        setActiveStt((prev) => {
+          if (preferredStt && cachedItems.some((s) => s.stt === preferredStt)) {
+            return preferredStt;
+          }
+          if (prev && cachedItems.some((s) => s.stt === prev)) {
+            return prev;
+          }
+          return cachedItems.length > 0 ? cachedItems[0].stt : null;
+        });
+      } else {
+        setLoading(true);
+      }
+
       try {
-        const q = new URLSearchParams();
-        if (maDt) q.append("ma_dt", maDt);
-        if (ngayCt) {
-          q.append("ngay_ct1", ngayCt);
-          q.append("ngay_ct2", ngayCt);
-        }
-        const url = `/api/pickup/list?${q.toString()}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (res.ok && data.success && data.data?.items) {
+        const data = await cachedFetch<any>(listCacheKey, url, {
+          force: opts?.force ?? true,
+          ttl: 5_000,
+        });
+        if (data?.success && data.data?.items) {
           setErrorMsg(null);
           const items: PickupSlip[] = data.data.items;
-          setSlips(items);
+          setRawSlips(items);
           setActiveStt((prev) => {
             if (preferredStt && items.some((s) => s.stt === preferredStt)) {
               return preferredStt;
@@ -198,23 +270,28 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             return next;
           });
         } else {
-          if (!res.ok) {
+          if (!hasCached) {
             setErrorMsg(
               data?.detail?.message ||
                 data?.message ||
-                `Không tải được danh sách phiếu xuất kho (HTTP ${res.status}).`,
+                "Không tải được danh sách phiếu xuất kho.",
             );
+            setRawSlips([]);
+            setActiveStt(null);
+            setSelectedStts(new Set());
           }
-          setSlips([]);
-          setActiveStt(null);
-          setSelectedStts(new Set());
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error fetching pickup slips", e);
-        setErrorMsg("Lỗi kết nối khi tải danh sách phiếu xuất kho.");
+        if (!hasCached) {
+          setErrorMsg(
+            e?.status
+              ? `Không tải được danh sách phiếu xuất kho (HTTP ${e.status}).`
+              : "Lỗi kết nối khi tải danh sách phiếu xuất kho.",
+          );
+        }
       } finally {
         setLoading(false);
-        // Luôn tăng để effect chi tiết & focus sau tải chạy lại (kể cả activeStt giữ nguyên).
         setDetailVersion((v) => v + 1);
         listFetchSeqRef.current += 1;
         setListFetchSeq(listFetchSeqRef.current);
@@ -227,7 +304,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     if (isOpen) {
       openAtSeqRef.current = listFetchSeqRef.current;
       pendingInitialFocusRef.current = true;
-      loadSlips(focusStt);
+      loadSlips(focusStt, { force: true });
     }
   }, [isOpen, refreshTrigger, loadSlips, focusStt]);
 
@@ -242,7 +319,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         } else {
           cancelBtnRef.current?.focus({ preventScroll: true });
         }
-      }, 40);
+      }, 20);
       prevSuspendedRef.current = isSuspended;
       return () => window.clearTimeout(timer);
     }
@@ -257,7 +334,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
       pendingInitialFocusRef.current = false;
       const timer = window.setTimeout(() => {
         cancelBtnRef.current?.focus({ preventScroll: true });
-      }, 35);
+      }, 20);
       return () => window.clearTimeout(timer);
     }
     if (!pendingInitialFocusRef.current) return;
@@ -265,7 +342,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     const firstStt = activeStt || slips[0]?.stt;
     const timer = window.setTimeout(() => {
       if (firstStt) focusMasterCell(firstStt, masterActiveColRef.current);
-    }, 35);
+    }, 20);
     return () => window.clearTimeout(timer);
   }, [isOpen, loading, listFetchSeq, slips, activeStt, focusMasterCell]);
 
@@ -279,7 +356,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     );
   }, [activeStt, slips, ensureRowVisible]);
 
-  // Fetch items when active slip changes (hoặc khi danh sách phiếu vừa nạp lại).
+  // Fetch items when active slip changes (SWR: hiển thị 0ms từ cache RAM rồi đồng bộ ngầm).
   useEffect(() => {
     if (!isOpen || !activeStt) {
       setActiveItems([]);
@@ -287,34 +364,45 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
+    const detailKey = `pickup:detail:${activeStt}`;
+    const cached = peek<any>(detailKey);
+    const hasCached = Boolean(cached?.success && Array.isArray(cached.data?.items));
+    if (hasCached) {
+      setActiveItems(cached.data.items);
+      setActiveDetailRow(0);
+    }
+
     const fetchDetail = async () => {
-      setLoadingDetail(true);
+      if (!hasCached) setLoadingDetail(true);
       try {
-        const res = await fetch(
+        const data = await cachedFetch<any>(
+          detailKey,
           `/api/pickup/detail/${encodeURIComponent(activeStt)}`,
+          { ttl: 10_000, signal: controller.signal },
         );
-        const data = await res.json();
-        if (!cancelled && res.ok && data.success && data.data?.items) {
+        if (!cancelled && data?.success && data.data?.items) {
           setActiveItems(data.data.items);
           setActiveDetailRow(0);
-        } else if (!cancelled && !res.ok) {
-          setErrorMsg(
-            data?.detail?.message ||
-              `Không tải được chi tiết phiếu kho (HTTP ${res.status}).`,
-          );
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (cancelled || e?.name === "AbortError") return;
         console.error("Error fetching pickup detail", e);
-        if (!cancelled) {
-          setErrorMsg("Lỗi kết nối khi tải chi tiết phiếu kho.");
+        if (!hasCached) {
+          setErrorMsg(
+            e?.status
+              ? `Không tải được chi tiết phiếu kho (HTTP ${e.status}).`
+              : "Lỗi kết nối khi tải chi tiết phiếu kho.",
+          );
         }
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
     };
-    fetchDetail();
+    void fetchDetail();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [activeStt, detailVersion, isOpen]);
 
@@ -563,7 +651,11 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         if (onEditWarehouseSlip && activeStt) {
           e.preventDefault();
           e.stopPropagation();
-          onEditWarehouseSlip(activeStt);
+          const activeSlip = slips.find((s) => s.stt === activeStt);
+          onEditWarehouseSlip(activeStt, {
+            slip: activeSlip,
+            items: activeItems,
+          });
         }
         return;
       }
@@ -641,6 +733,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     isSuspended,
     slips,
     activeStt,
+    activeItems,
     selectedStts,
     selectAll,
     deselectAll,
@@ -1303,7 +1396,14 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => activeStt && onEditWarehouseSlip(activeStt)}
+                onClick={() => {
+                  if (!activeStt) return;
+                  const activeSlip = slips.find((s) => s.stt === activeStt);
+                  onEditWarehouseSlip(activeStt, {
+                    slip: activeSlip,
+                    items: activeItems,
+                  });
+                }}
                 disabled={!activeStt}
                 type="button"
                 className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"

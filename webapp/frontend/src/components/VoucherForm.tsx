@@ -18,6 +18,7 @@ import {
 } from "../lib/format";
 import { Autocomplete, AutocompleteOption } from "./ui/Autocomplete";
 import { fetchPrice } from "../lib/lookups";
+import { cachedFetch, peek } from "../lib/apiCache";
 import {
   initCustomerIndex,
   isCustomerIndexReady,
@@ -67,11 +68,13 @@ interface VoucherFormProps {
   voucherMode?: "sales" | "warehouse";
   isSuspended?: boolean;
   initialInherited?: Partial<VoucherFullDetail>;
+  /** Gợi ý số chứng từ tức thì (0ms) tính từ danh sách đang mở khi tạo phiếu mới */
+  suggestedSoCt?: string;
   onBack: () => void;
   onPrint?: () => void;
   onViewDebt?: (maDt: string) => void;
   onOpenPickup?: (maDt?: string, ngayCt?: string) => void;
-  onSaveSuccess?: (stt: string) => void;
+  onSaveSuccess?: (stt: string, savedVoucher?: VoucherFullDetail) => void;
   pickupPayload?: { items: VoucherDetail[]; ma_xe?: string } | null;
   onClearPickupPayload?: () => void;
 }
@@ -169,6 +172,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   voucherMode = "sales",
   isSuspended = false,
   initialInherited,
+  suggestedSoCt,
   onBack,
   onPrint,
   onViewDebt,
@@ -202,7 +206,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const pickupBtnRef = useRef<HTMLButtonElement | null>(null);
   const firstMaVtRef = useRef<HTMLInputElement | null>(null);
   const detailGridRef = useRef<DetailGridHandle | null>(null);
-  const autoSuggestedSoCtRef = useRef<string>("");
+  const initialSuggested = isCreate ? (suggestedSoCt || "").trim().toUpperCase() : "";
+  const autoSuggestedSoCtRef = useRef<string>(initialSuggested);
   const userEditedSoCtRef = useRef<boolean>(false);
 
   // Header State
@@ -210,7 +215,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     voucher?.ngay_ct || initialInherited?.ngay_ct || getTodayDate(),
   );
   const [soCt, setSoCt] = useState<string>(
-    isCreate ? "" : voucher?.so_ct || initialInherited?.so_ct || "",
+    isCreate
+      ? initialSuggested
+      : voucher?.so_ct || initialInherited?.so_ct || "",
   );
   const [maDt, setMaDt] = useState<string>(
     voucher?.ma_dt || initialInherited?.ma_dt || "",
@@ -377,6 +384,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   );
   const savedSnapshotRef = useRef<string>(currentSnapshot);
   const isDirty = isEditable && currentSnapshot !== savedSnapshotRef.current;
+  const isDirtyRef = useRef<boolean>(false);
+  isDirtyRef.current = isDirty;
 
   const clearDraft = useCallback(() => {
     try {
@@ -620,6 +629,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     if (isCreate || !voucher?.stt) return;
     const nextKey = `${voucher.stt}:${voucher.items?.length ?? 0}`;
     if (syncedVoucherKeyRef.current === nextKey) return;
+    // Nếu người dùng đã bắt đầu gõ sửa cùng 1 phiếu (trong khi API revalidate ngầm về sau) → KHÔNG ghi đè thao tác đang gõ
+    if (
+      isDirtyRef.current &&
+      syncedVoucherKeyRef.current.startsWith(`${voucher.stt}:`)
+    ) {
+      return;
+    }
     syncedVoucherKeyRef.current = nextKey;
 
     const cleanDt = (voucher.ma_dt || "").trim().toUpperCase();
@@ -778,16 +794,16 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
     const focusKey = isCreate ? "NEW" : voucherStt;
     if (!focusKey || initialFocusedKeyRef.current === focusKey) return;
-    const timer = setTimeout(() => {
+    const rafId = window.requestAnimationFrame(() => {
       if (isSuspended || isModalOpen() || pendingFocusLastRowAfterPickupRef.current) return;
       if (maDtInputRef.current) {
-        // Chỉ đánh dấu đã focus sau khi thực sự chạy xong timer (tránh lỗi cleanup của React.StrictMode làm kẹt ref).
+        // Chỉ đánh dấu đã focus sau khi thực sự chạy xong frame (tránh lỗi cleanup của React.StrictMode làm kẹt ref).
         initialFocusedKeyRef.current = focusKey;
         maDtInputRef.current.focus();
         maDtInputRef.current.select();
       }
-    }, 50);
-    return () => clearTimeout(timer);
+    });
+    return () => window.cancelAnimationFrame(rafId);
   }, [isEditable, isSuspended, isCreate, voucherStt, pickupPayload]);
 
   // 1. Tự động lấy số phiếu tiếp theo (VD: lớn nhất HD1000 -> tự điền HD1001) khi tạo phiếu mới
@@ -797,7 +813,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       userEditedSoCtRef.current = false;
       return;
     }
-    autoSuggestedSoCtRef.current = "";
     userEditedSoCtRef.current = false;
     let cancelled = false;
     const fetchNextSoCt = async () => {
@@ -809,8 +824,17 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           const data = await res.json();
           const suggested = data?.data?.so_ct;
           if (!cancelled && suggested) {
-            autoSuggestedSoCtRef.current = String(suggested).trim().toUpperCase();
-            setSoCt((prev) => (prev.trim() ? prev : suggested));
+            const cleanSuggested = String(suggested).trim().toUpperCase();
+            const prevAuto = autoSuggestedSoCtRef.current;
+            autoSuggestedSoCtRef.current = cleanSuggested;
+            setSoCt((prev) => {
+              const p = prev.trim().toUpperCase();
+              // Cập nhật nếu ô đang trống hoặc vẫn đang giữ số gợi ý lạc quan chưa bị người dùng sửa tay
+              if (!userEditedSoCtRef.current && (!p || p === prevAuto)) {
+                return suggested;
+              }
+              return prev;
+            });
           }
         }
       } catch {
@@ -938,7 +962,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     };
   }, [maXe, tenXe]);
 
-  // Nạp thông tin công nợ của khách hàng (đến NGÀY HIỆN TẠI).
+  // Nạp thông tin công nợ của khách hàng (đến NGÀY HIỆN TẠI) với SWR (hiển thị tức thì 0ms nếu đã có cache).
   // Chỉ bật dialog cảnh báo khi `showWarningDialog = true` (sau khi người dùng đã chọn/xác nhận xong khách hàng).
   const loadDebtInfo = useCallback(
     async (dt: string, showWarningDialog: boolean = false) => {
@@ -951,68 +975,78 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         setDebtInfo(null);
         return;
       }
+      const excludeStt = !isCreate && voucherStt ? voucherStt.trim() : "";
+      const cacheKey = excludeStt
+        ? `debt:${cleanDt}:${excludeStt}`
+        : `debt:${cleanDt}`;
+
+      const parseDebt = (d: any) => ({
+        du_no: d.du_no ?? 0,
+        du_co: d.du_co ?? 0,
+        du_cuoi: d.du_cuoi ?? 0,
+        du_cuoi_kiem_tra: d.du_cuoi_kiem_tra ?? d.du_cuoi ?? 0,
+        gioi_han: d.gioi_han ?? 0,
+        toi_han: d.toi_han ?? 0,
+        is_over_limit: !!d.is_over_limit,
+        is_near_limit: !!d.is_near_limit,
+        status_message: d.status_message ?? "",
+      });
+
+      // SWR: hiển thị ngay công nợ từ RAM cache (nếu đã nạp từ màn danh sách hoặc trước đó)
+      const cached = peek<any>(cacheKey) || peek<any>(`debt:${cleanDt}`);
+      if (cached?.success && cached.data) {
+        setDebtInfo(parseDebt(cached.data));
+      }
+
       try {
-        const excludeStt = !isCreate && voucherStt ? voucherStt.trim() : "";
         const sttQuery = excludeStt
           ? `&stt=${encodeURIComponent(excludeStt)}`
           : "";
-        const res = await fetch(
+        const data = await cachedFetch<any>(
+          cacheKey,
           `/api/debt/customer?ma_dt=${encodeURIComponent(cleanDt)}${sttQuery}`,
+          { ttl: 15_000 },
         );
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && data.data) {
-            // Nếu người dùng đã gõ sang mã khác trong lúc đang tải -> bỏ qua
-            if (maDtValueRef.current.trim().toUpperCase() !== cleanDt) return;
-            const d = data.data;
-            const nextDebt = {
-              du_no: d.du_no ?? 0,
-              du_co: d.du_co ?? 0,
-              du_cuoi: d.du_cuoi ?? 0,
-              du_cuoi_kiem_tra: d.du_cuoi_kiem_tra ?? d.du_cuoi ?? 0,
-              gioi_han: d.gioi_han ?? 0,
-              toi_han: d.toi_han ?? 0,
-              is_over_limit: !!d.is_over_limit,
-              is_near_limit: !!d.is_near_limit,
-              status_message: d.status_message ?? "",
-            };
-            setDebtInfo(nextDebt);
+        if (data?.success && data.data) {
+          // Nếu người dùng đã gõ sang mã khác trong lúc đang tải -> bỏ qua
+          if (maDtValueRef.current.trim().toUpperCase() !== cleanDt) return;
+          const nextDebt = parseDebt(data.data);
+          setDebtInfo(nextDebt);
 
-            if (showWarningDialog) {
-              const fmt = (n: number) => formatCurrency(n, "VND");
-              const extraCheckLine =
-                excludeStt &&
-                nextDebt.du_cuoi_kiem_tra !== undefined &&
-                nextDebt.du_cuoi_kiem_tra !== nextDebt.du_cuoi
-                  ? `Dư nợ kiểm tra (trừ đơn đang mở): ${fmt(nextDebt.du_cuoi_kiem_tra)}\n`
-                  : "";
-              if (nextDebt.is_over_limit) {
-                setDebtDialog({
-                  title: "Vượt quá hạn mức nợ",
-                  tone: "danger",
-                  message:
-                    `Khách hàng ${cleanDt} vượt quá hạn mức nợ cho phép!\n\n` +
-                    `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
-                    extraCheckLine +
-                    `Giới hạn nợ: ${fmt(nextDebt.gioi_han)}\n\n` +
-                    `Vui lòng kiểm tra lại trước khi lưu chứng từ.`,
-                });
-              } else if (nextDebt.is_near_limit) {
-                setDebtDialog({
-                  title: "Đến hạn mức thanh toán",
-                  tone: "warning",
-                  message:
-                    `Khách hàng ${cleanDt} đã chạm ngưỡng cảnh báo thanh toán.\n\n` +
-                    `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
-                    extraCheckLine +
-                    `Ngưỡng cảnh báo: ${fmt(nextDebt.toi_han)}`,
-                });
-              }
+          if (showWarningDialog) {
+            const fmt = (n: number) => formatCurrency(n, "VND");
+            const extraCheckLine =
+              excludeStt &&
+              nextDebt.du_cuoi_kiem_tra !== undefined &&
+              nextDebt.du_cuoi_kiem_tra !== nextDebt.du_cuoi
+                ? `Dư nợ kiểm tra (trừ đơn đang mở): ${fmt(nextDebt.du_cuoi_kiem_tra)}\n`
+                : "";
+            if (nextDebt.is_over_limit) {
+              setDebtDialog({
+                title: "Vượt quá hạn mức nợ",
+                tone: "danger",
+                message:
+                  `Khách hàng ${cleanDt} vượt quá hạn mức nợ cho phép!\n\n` +
+                  `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
+                  extraCheckLine +
+                  `Giới hạn nợ: ${fmt(nextDebt.gioi_han)}\n\n` +
+                  `Vui lòng kiểm tra lại trước khi lưu chứng từ.`,
+              });
+            } else if (nextDebt.is_near_limit) {
+              setDebtDialog({
+                title: "Đến hạn mức thanh toán",
+                tone: "warning",
+                message:
+                  `Khách hàng ${cleanDt} đã chạm ngưỡng cảnh báo thanh toán.\n\n` +
+                  `Dư nợ hiện tại: ${fmt(nextDebt.du_cuoi)}\n` +
+                  extraCheckLine +
+                  `Ngưỡng cảnh báo: ${fmt(nextDebt.toi_han)}`,
+              });
             }
           }
         }
       } catch {
-        setDebtInfo(null);
+        if (!cached?.success) setDebtInfo(null);
       }
     },
     [isWarehouse, isCreate, voucherStt],
@@ -1422,7 +1456,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
     setSaving(true);
     try {
-      let currentSoCt = soCt.trim().toUpperCase();
+      const currentSoCt = soCt.trim().toUpperCase();
       const origSoCt = (voucher?.so_ct || "").trim().toUpperCase();
       const isCustomSoCt =
         Boolean(currentSoCt) &&
@@ -1432,54 +1466,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               currentSoCt !== autoSuggestedSoCtRef.current)
           : currentSoCt !== origSoCt);
 
-      // Chỉ tự động cấp số lớn nhất trong tháng + 1 khi tạo phiếu mới với số tự động (hoặc bỏ trống).
-      // Nếu người dùng tự gõ số riêng (VD: HD2057-1 để treo tạm/tách phiếu) -> giữ nguyên số đã nhập, chỉ kiểm tra trùng.
-      if ((isCreate && !isCustomSoCt) || !currentSoCt) {
-        try {
-          const nextRes = await fetch(
-            `/api/vouchers/next-number?ma_dvcs=S1&ma_ct=${encodeURIComponent(maCt || "X1")}&ngay_ct=${encodeURIComponent(ngayCt)}&db_mode=${encodeURIComponent(voucherMode)}&prefix_so_ct=${encodeURIComponent(currentSoCt)}`,
-          );
-          if (nextRes.ok) {
-            const nextData = await nextRes.json();
-            const suggested = nextData?.data?.so_ct;
-            if (suggested) {
-              currentSoCt = suggested;
-              setSoCt(suggested);
-            }
-          }
-        } catch {
-          // Nếu next-number gặp lỗi mạng tạm thời, backend save_voucher vẫn cấp số lớn nhất trong tháng + 1 trong ACID transaction
-        }
-      } else if (isCustomSoCt) {
-        // Người dùng tự nhập số riêng hoặc đổi số khi sửa -> chỉ kiểm tra chống trùng với ST_Check_Number
-        try {
-          const chkRes = await fetch(
-            `/api/vouchers/check-number?db_mode=${encodeURIComponent(voucherMode)}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                ma_dvcs: "S1",
-                moi_sua: isCreate ? "M" : "S",
-                stt: isCreate ? "" : voucherStt,
-                ma_ct: maCt || "X1",
-                ngay_ct: ngayCt,
-                so_ct: currentSoCt,
-              }),
-            },
-          );
-          if (chkRes.ok) {
-            const chkData = await chkRes.json();
-            const suggested = chkData?.data?.valid_so_ct;
-            if (suggested) {
-              currentSoCt = suggested;
-              setSoCt(suggested);
-            }
-          }
-        } catch {
-          // Nếu check-number gặp lỗi mạng tạm thời, backend save_voucher vẫn kiểm tra trong ACID transaction
-        }
-      }
+      // Không gọi thêm /next-number hay /check-number trước khi POST/PUT:
+      // backend save_voucher đã cấp số lớn nhất + 1 / kiểm tra trùng ST_Check_Number
+      // bên trong cùng 1 ACID transaction có sp_getapplock → cắt bỏ 1 vòng HTTP + SQL thừa trên mỗi lần Lưu.
+      const normalizedItems: VoucherDetail[] = validItems.map((it) => ({
+        ...it,
+        ma_vt: (it.ma_vt || "").trim().toUpperCase(),
+        ma_kho: (it.ma_kho || "K0101").trim().toUpperCase(),
+        tk: it.tk || (isWarehouse ? "6322" : "632"),
+        tk_du: it.tk_du || (isWarehouse ? "155" : "1561"),
+        tk_du2: it.tk_du2 || (isWarehouse ? "5112" : "5111"),
+        tk_du4: it.tk_du4 || "521",
+        gia_tb_tt: "C",
+      }));
 
       const payload = {
         ma_dvcs: "S1",
@@ -1516,16 +1515,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         user_name: isCreate ? CURRENT_USER : (voucher?.user_name ?? ""),
         skip_debt_check: bypassChecks,
         custom_so_ct: isCustomSoCt,
-        items: validItems.map((it) => ({
-          ...it,
-          ma_vt: (it.ma_vt || "").trim().toUpperCase(),
-          ma_kho: (it.ma_kho || "K0101").trim().toUpperCase(),
-          tk: it.tk || (isWarehouse ? "6322" : "632"),
-          tk_du: it.tk_du || (isWarehouse ? "155" : "1561"),
-          tk_du2: it.tk_du2 || (isWarehouse ? "5112" : "5111"),
-          tk_du4: it.tk_du4 || "521",
-          gia_tb_tt: "C",
-        })),
+        items: normalizedItems,
       };
 
       const url = isCreate
@@ -1556,15 +1546,58 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         return;
       }
 
-      const savedSoCt = data.data?.so_ct || currentSoCt;
+      const savedStt: string = data.data?.stt || voucherStt;
+      const savedSoCt: string = data.data?.so_ct || currentSoCt;
       if (savedSoCt) {
         setSoCt(savedSoCt);
       }
       clearDraft();
       savedSnapshotRef.current = currentSnapshot;
 
-      if (onSaveSuccess && data.data?.stt) {
-        onSaveSuccess(data.data.stt);
+      if (onSaveSuccess && savedStt) {
+        const savedVoucher: VoucherFullDetail = {
+          stt: savedStt,
+          ma_dvcs: "S1",
+          ma_ct: payload.ma_ct,
+          nh_ct: payload.nh_ct,
+          ma_tte: payload.ma_tte,
+          ty_gia: payload.ty_gia,
+          ngay_ct: payload.ngay_ct,
+          ngay_ps: payload.ngay_ct,
+          so_ct: savedSoCt,
+          ma_dt: payload.ma_dt,
+          ten_dt: payload.ten_dt,
+          ong_ba: payload.ong_ba,
+          dia_chi: payload.dia_chi,
+          dien_giai0: payload.dien_giai0,
+          ma_bp: payload.ma_bp,
+          ten_bp: tenBp,
+          ma_xe: payload.ma_xe,
+          ten_xe: tenXe,
+          han_tt: payload.han_tt,
+          ma_nx: payload.ma_nx,
+          tk2: payload.tk2,
+          tk3: payload.tk3,
+          thue_gtgt: payload.thue_gtgt,
+          loai_ck: payload.loai_ck,
+          ma_dtgtgt: payload.ma_dtgtgt,
+          ttien_nt: isWarehouse ? 0 : payload.ttien_nt,
+          ttien_nt4: isWarehouse ? 0 : payload.ttien_nt4,
+          ttien_nt2: isWarehouse ? 0 : payload.ttien_nt2,
+          ttien_nt3: isWarehouse ? 0 : payload.ttien_nt3,
+          ttien_nt0: isWarehouse ? 0 : payload.ttien_nt0,
+          ttien: isWarehouse ? 0 : payload.ttien,
+          ttien4: isWarehouse ? 0 : payload.ttien4,
+          ttien2: isWarehouse ? 0 : payload.ttien2,
+          ttien3: isWarehouse ? 0 : payload.ttien3,
+          ttien0: isWarehouse ? 0 : payload.ttien0,
+          confirmed: true,
+          posted: false,
+          printed: voucher?.printed ?? false,
+          user_name: payload.user_name || CURRENT_USER,
+          items: normalizedItems.map((it) => ({ ...it, stt: savedStt })),
+        };
+        onSaveSuccess(savedStt, savedVoucher);
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Lỗi mạng hoặc máy chủ không phản hồi.");

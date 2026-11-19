@@ -30,7 +30,7 @@ interface DebtPanelProps {
   isOpen: boolean;
   onClose: () => void;
   maDt: string;
-  onVoucherSaved?: (stt?: string) => void;
+  onVoucherSaved?: (stt?: string, savedVoucher?: VoucherFullDetail) => void;
 }
 
 const SESSION_FROM_KEY = "debtPanel.fromDate";
@@ -1154,10 +1154,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             mode="S"
             voucherMode="sales"
             onBack={() => setViewVoucher(null)}
-            onSaveSuccess={(savedStt) => {
+            onSaveSuccess={(savedStt, savedVoucher) => {
               setViewVoucher(null);
               void fetchLedger();
-              onVoucherSaved?.(savedStt);
+              onVoucherSaved?.(savedStt, savedVoucher);
             }}
           />
         </div>
