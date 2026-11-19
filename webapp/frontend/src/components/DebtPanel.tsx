@@ -30,7 +30,12 @@ interface DebtPanelProps {
   isOpen: boolean;
   onClose: () => void;
   maDt: string;
+  onVoucherSaved?: (stt?: string) => void;
 }
+
+const SESSION_FROM_KEY = "debtPanel.fromDate";
+const SESSION_TO_KEY = "debtPanel.toDate";
+const SESSION_MAX_KEY = "debtPanel.isMaximized";
 
 function getCurrentMonthBounds(): { start: string; end: string } {
   const now = new Date();
@@ -44,6 +49,20 @@ function getCurrentMonthBounds(): { start: string; end: string } {
   };
 }
 
+function getInitialDateBounds(): { start: string; end: string } {
+  const defaults = getCurrentMonthBounds();
+  try {
+    const savedFrom = window.sessionStorage.getItem(SESSION_FROM_KEY);
+    const savedTo = window.sessionStorage.getItem(SESSION_TO_KEY);
+    return {
+      start: savedFrom && /^\d{4}-\d{2}-\d{2}$/.test(savedFrom) ? savedFrom : defaults.start,
+      end: savedTo && /^\d{4}-\d{2}-\d{2}$/.test(savedTo) ? savedTo : defaults.end,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
 function formatSpaceNumber(val: number | undefined | null): string {
   const num = Math.round(Number(val) || 0);
   const absStr = Math.abs(num)
@@ -52,18 +71,19 @@ function formatSpaceNumber(val: number | undefined | null): string {
   return num < 0 ? `-${absStr}` : absStr;
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function escapeCsvCell(val: string | number | null | undefined): string {
+  const str = val === null || val === undefined ? "" : String(val);
+  if (/[",\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
 }
 
 export const DebtPanel: React.FC<DebtPanelProps> = ({
   isOpen,
   onClose,
   maDt,
+  onVoucherSaved,
 }) => {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
@@ -73,10 +93,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
   const maDtLatestRef = useRef<string>("");
 
   const [fromDate, setFromDate] = useState<string>(
-    () => getCurrentMonthBounds().start,
+    () => getInitialDateBounds().start,
   );
   const [toDate, setToDate] = useState<string>(
-    () => getCurrentMonthBounds().end,
+    () => getInitialDateBounds().end,
   );
   const [inputMaDt, setInputMaDt] = useState<string>("");
   const [tenDt, setTenDt] = useState<string>("");
@@ -85,9 +105,32 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
-  const [isMaximized, setIsMaximized] = useState<boolean>(false);
+  const [isMaximized, setIsMaximized] = useState<boolean>(() => {
+    try {
+      return window.sessionStorage.getItem(SESSION_MAX_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [viewVoucher, setViewVoucher] = useState<VoucherFullDetail | null>(null);
   const [loadingVoucher, setLoadingVoucher] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(SESSION_FROM_KEY, fromDate);
+      window.sessionStorage.setItem(SESSION_TO_KEY, toDate);
+    } catch {
+      /* ignore */
+    }
+  }, [fromDate, toDate]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(SESSION_MAX_KEY, isMaximized ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [isMaximized]);
 
   useModalLock(isOpen && !viewVoucher, panelRef);
 
@@ -170,7 +213,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    const { start, end } = getCurrentMonthBounds();
+    const { start, end } = getInitialDateBounds();
     const initialCode = (maDt || "").trim().toUpperCase();
     setFromDate(start);
     setToDate(end);
@@ -178,7 +221,6 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     maDtLatestRef.current = initialCode;
     setSelectedRowKey(null);
     setErrorMsg(null);
-    setIsMaximized(false);
     setViewVoucher(null);
     setLoadingVoucher(false);
 
@@ -225,61 +267,60 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     const customerName = tenDt || ledger?.ten_dt || "";
     const entries: DebtLedgerEntry[] = ledger?.entries || [];
 
-    const rowsHtml = [
-      `<tr style="background:#1e3a8a;color:#ffffff;font-weight:bold;">
-        <td></td><td></td><td></td>
-        <td>Dư đầu kỳ</td>
-        <td style="text-align:right;">${ledger && ledger.du_dau_tang > 0 ? Math.round(ledger.du_dau_tang) : ""}</td>
-        <td style="text-align:right;">${ledger && ledger.du_dau_giam > 0 ? Math.round(ledger.du_dau_giam) : ""}</td>
-      </tr>`,
-      ...entries.map(
-        (en) => `<tr>
-          <td style="text-align:center;">${escapeHtml(en.ma_ct)}</td>
-          <td style="text-align:center;">${escapeHtml(formatDate(en.ngay_ct))}</td>
-          <td>${escapeHtml(en.so_ct)}</td>
-          <td>${escapeHtml(en.dien_giai)}</td>
-          <td style="text-align:right;">${en.ps_tang !== 0 ? Math.round(en.ps_tang) : ""}</td>
-          <td style="text-align:right;">${en.ps_giam !== 0 ? Math.round(en.ps_giam) : ""}</td>
-        </tr>`,
-      ),
-      `<tr style="background:#f1f5f9;font-weight:bold;">
-        <td></td><td></td><td></td>
-        <td>Phát sinh trong kỳ</td>
-        <td style="text-align:right;">${Math.round(ledger?.tong_ps_tang || 0)}</td>
-        <td style="text-align:right;">${Math.round(ledger?.tong_ps_giam || 0)}</td>
-      </tr>`,
-      `<tr style="background:#eff6ff;font-weight:bold;">
-        <td></td><td></td><td></td>
-        <td>Dư cuối kỳ</td>
-        <td style="text-align:right;">${Math.round(ledger?.du_cuoi_tang || 0)}</td>
-        <td style="text-align:right;">${Math.round(ledger?.du_cuoi_giam || 0)}</td>
-      </tr>`,
-    ].join("\n");
+    const csvRows: (string | number)[][] = [
+      [`SỔ CHI TIẾT CÔNG NỢ PHẢI THU (TK ${ledger?.tk || "131"})`],
+      [
+        `Đối tượng: ${code}${customerName ? ` - ${customerName}` : ""}`,
+        `Từ ngày: ${formatDate(fromDate)}`,
+        `Đến ngày: ${formatDate(toDate)}`,
+      ],
+      [],
+      ["Mã CT", "Ngày", "Số phiếu", "Diễn giải", "Ps tăng", "Ps giảm"],
+      [
+        "",
+        "",
+        "",
+        "Dư đầu kỳ",
+        ledger && ledger.du_dau_tang > 0 ? Math.round(ledger.du_dau_tang) : "",
+        ledger && ledger.du_dau_giam > 0 ? Math.round(ledger.du_dau_giam) : "",
+      ],
+      ...entries.map((en) => [
+        en.ma_ct || "",
+        formatDate(en.ngay_ct),
+        en.so_ct || "",
+        en.dien_giai || "",
+        en.ps_tang !== 0 ? Math.round(en.ps_tang) : "",
+        en.ps_giam !== 0 ? Math.round(en.ps_giam) : "",
+      ]),
+      [
+        "",
+        "",
+        "",
+        "Phát sinh trong kỳ",
+        Math.round(ledger?.tong_ps_tang || 0),
+        Math.round(ledger?.tong_ps_giam || 0),
+      ],
+      [
+        "",
+        "",
+        "",
+        "Dư cuối kỳ",
+        Math.round(ledger?.du_cuoi_tang || 0),
+        Math.round(ledger?.du_cuoi_giam || 0),
+      ],
+    ];
 
-    const htmlDoc = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8" /></head>
-<body>
-  <h3 style="margin:0 0 4px 0;">SỔ CHI TIẾT CÔNG NỢ PHẢI THU (TK ${escapeHtml(ledger?.tk || "131")})</h3>
-  <p style="margin:0 0 8px 0;">Đối tượng: <b>${escapeHtml(code)}</b>${customerName ? ` - ${escapeHtml(customerName)}` : ""} | Từ ngày: ${escapeHtml(formatDate(fromDate))} - Đến ngày: ${escapeHtml(formatDate(toDate))}</p>
-  <table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:12px;">
-    <thead>
-      <tr style="background:#e2e8f0;font-weight:bold;">
-        <th>Mã CT</th><th>Ngày</th><th>Số phiếu</th><th>Diễn giải</th><th>Ps tăng</th><th>Ps giảm</th>
-      </tr>
-    </thead>
-    <tbody>${rowsHtml}</tbody>
-  </table>
-</body>
-</html>`;
+    const csvContent = csvRows
+      .map((row) => row.map(escapeCsvCell).join(","))
+      .join("\r\n");
 
-    const blob = new Blob(["\ufeff", htmlDoc], {
-      type: "application/vnd.ms-excel;charset=utf-8",
+    const blob = new Blob(["\uFEFF", csvContent], {
+      type: "text/csv;charset=utf-8;",
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `SoChiTietCongNo_${code}_${fromDate}_${toDate}.xls`;
+    a.download = `SoChiTietCongNo_${code}_${fromDate}_${toDate}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -937,11 +978,15 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
               ) : (
                 entries.map((entry, rowIdx) => {
                   const isCreditRow = entry.ps_giam > 0 && entry.ps_tang === 0;
+                  const maCtUpper = (entry.ma_ct || "").trim().toUpperCase();
+                  const isDrillable = Boolean(
+                    entry.stt && (maCtUpper === "X1" || maCtUpper === "N5"),
+                  );
                   return renderGridRow({
                     key: `entry-${rowIdx}`,
                     entry,
                     rowHead: String(rowIdx + 1),
-                    maCt: entry.ma_ct || "",
+                    maCt: isDrillable ? `${maCtUpper} ↗` : entry.ma_ct || "",
                     ngay: formatDate(entry.ngay_ct),
                     soCt: entry.so_ct || "",
                     dienGiai: entry.dien_giai || "",
@@ -954,12 +999,16 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
                         ? formatSpaceNumber(entry.ps_giam)
                         : "",
                     isMarked: isCreditRow,
-                    maCtClassName: isCreditRow
-                      ? "font-bold text-amber-700"
-                      : "font-medium text-neutral-600",
-                    soCtClassName: isCreditRow
-                      ? "text-emerald-700"
-                      : "text-primary-700",
+                    maCtClassName: isDrillable
+                      ? "font-bold text-primary-700"
+                      : isCreditRow
+                        ? "font-bold text-amber-700"
+                        : "font-medium text-neutral-600",
+                    soCtClassName: isDrillable
+                      ? "text-primary-700 underline decoration-dotted cursor-pointer"
+                      : isCreditRow
+                        ? "text-emerald-700"
+                        : "text-primary-700",
                     psGiamClassName:
                       entry.ps_giam !== 0
                         ? "font-bold text-emerald-700"
@@ -1072,10 +1121,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
               className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
               onClick={handleExportExcel}
               type="button"
-              title="Xuất Excel (Ctrl+E)"
+              title="Xuất Excel UTF-8 CSV (Ctrl+E)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Xuất Excel</span>
+              <span>Xuất CSV</span>
               <kbd className="text-[9px] py-0 px-1 ml-0.5 border-emerald-300 bg-white text-emerald-800">
                 Ctrl+E
               </kbd>
@@ -1105,9 +1154,10 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             mode="S"
             voucherMode="sales"
             onBack={() => setViewVoucher(null)}
-            onSaveSuccess={() => {
+            onSaveSuccess={(savedStt) => {
               setViewVoucher(null);
               void fetchLedger();
+              onVoucherSaved?.(savedStt);
             }}
           />
         </div>

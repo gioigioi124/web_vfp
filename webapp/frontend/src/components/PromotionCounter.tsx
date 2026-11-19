@@ -9,7 +9,7 @@ import {
   resolvePromotionProgram,
 } from "../lib/promotionPrograms";
 import { formatCurrency, formatDate, formatQuantity } from "../lib/format";
-import { useModalLock } from "../lib/modalLock";
+import { isModalOpen, useModalLock } from "../lib/modalLock";
 import {
   Gift,
   X,
@@ -47,6 +47,20 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = React.memo(({
   useEffect(() => {
     setExcludeNominalGiftRows(!isWarehouse);
   }, [voucherKey, isWarehouse]);
+
+  // Phím tắt Alt+K mở/đóng nhanh bảng Đếm Hàng Khuyến Mại
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "k") {
+        if (!isOpen && isModalOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setIsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onGlobalKeyDown, true);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown, true);
+  }, [isOpen]);
 
   // Đóng dialog bằng Escape ở pha capture để không thoát VoucherForm.
   useEffect(() => {
@@ -184,13 +198,16 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = React.memo(({
       {/* Modal chi tiết các nhóm khuyến mại */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-xs p-3"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-3"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setIsOpen(false);
           }}
         >
           <div
             ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Đếm hàng khuyến mại"
             className="bg-white rounded-md shadow-2xl border border-neutral-300 w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95"
           >
             {/* Modal Header */}

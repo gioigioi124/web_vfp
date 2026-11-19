@@ -15,14 +15,23 @@ import { peek } from "./lib/apiCache";
 import { initCustomerIndex, getCustomer } from "./lib/customerIndex";
 import { VoucherList } from "./components/VoucherList";
 import { TopHeaderBar } from "./components/TopHeaderBar";
-import { formatDate } from "./lib/format";
+import { formatDate, getTodayDate } from "./lib/format";
 import { invalidatePrintCache } from "./lib/printCache";
 import {
   VoucherFullDetail,
   VoucherDetail,
   VoucherHeader,
 } from "./types/voucher";
-import { ShieldCheck, RefreshCw, Trash2, X, Keyboard } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  RefreshCw,
+  Trash2,
+  X,
+  Keyboard,
+  Filter,
+} from "lucide-react";
 
 const loadVoucherForm = () =>
   import("./components/VoucherForm").then((m) => ({ default: m.VoucherForm }));
@@ -82,7 +91,12 @@ export function App() {
     handleOpenDebt,
   } = useVouchers();
 
-  const [notification, setNotification] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error" | "warning" | "info";
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const customerSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   // Tùy chọn in từ thanh đáy danh sách: "1" = In giá bán, "0" = Không in giá.
   const [printPrice, setPrintPrice] = useState<"1" | "0">("1");
@@ -127,10 +141,41 @@ export function App() {
     ma_xe?: string;
   } | null>(null);
 
-  const showToast = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3500);
-  };
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast(null);
+  }, []);
+
+  const showToast = useCallback(
+    (
+      message: string,
+      type: "success" | "error" | "warning" | "info" = "info",
+    ) => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      setToast({ message, type });
+      toastTimerRef.current = window.setTimeout(
+        () => {
+          toastTimerRef.current = null;
+          setToast(null);
+        },
+        type === "error" ? 5000 : 3500,
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   const toggleMark = useCallback((stt: string | null) => {
     if (!stt) return;
@@ -141,6 +186,13 @@ export function App() {
       return next;
     });
   }, []);
+
+  const handleToggleSelectAll = useCallback(
+    (selectAll: boolean) => {
+      setMarked(selectAll ? new Set(vouchers.map((v) => v.stt)) : new Set());
+    },
+    [vouchers],
+  );
 
   // ==== Đồng bộ URL route (/sales-invoices, /sales-invoices/new, /sales-invoices/:stt) ====
   const { stt: sttParam } = useParams();
@@ -282,10 +334,11 @@ export function App() {
       } else {
         showToast(
           `Không thể tải phiếu kho ${stt}: ${data?.message || "Lỗi không xác định"}`,
+          "error",
         );
       }
     } catch (err: any) {
-      showToast(`Lỗi tải phiếu kho: ${err.message}`);
+      showToast(`Lỗi tải phiếu kho: ${err.message}`, "error");
     }
   };
 
@@ -326,6 +379,7 @@ export function App() {
       navToNew();
       showToast(
         `Đã sao chép nội dung chứng từ số ${activeVoucher.so_ct || activeVoucher.stt}.`,
+        "success",
       );
     } else if (currentSelectedVoucher) {
       setInheritedData({
@@ -341,9 +395,10 @@ export function App() {
       navToNew();
       showToast(
         `Đã sao chép nội dung chứng từ số ${currentSelectedVoucher.so_ct || currentSelectedVoucher.stt}.`,
+        "success",
       );
     } else {
-      showToast("Chưa chọn chứng từ để sao chép.");
+      showToast("Chưa chọn chứng từ để sao chép.", "warning");
     }
   };
 
@@ -352,7 +407,7 @@ export function App() {
     if (selectedStt) {
       navToDetail(selectedStt);
     } else {
-      showToast("Chưa chọn chứng từ để sửa.");
+      showToast("Chưa chọn chứng từ để sửa.", "warning");
     }
   };
 
@@ -369,7 +424,7 @@ export function App() {
         fromPickup: false,
       });
     } else {
-      showToast("Chưa chọn chứng từ để xóa.");
+      showToast("Chưa chọn chứng từ để xóa.", "warning");
     }
   };
 
@@ -396,7 +451,7 @@ export function App() {
       pendingClearMarkedRef.current = usedMarked;
       handleOpenPrint(targets, options);
     } else {
-      showToast("Chưa chọn chứng từ để in.");
+      showToast("Chưa chọn chứng từ để in.", "warning");
     }
   };
 
@@ -415,12 +470,14 @@ export function App() {
       if (!res.ok || !data.success) {
         showToast(
           `Lỗi khi xóa: ${data?.detail?.message || data?.message || "Không thể xóa chứng từ."}`,
+          "error",
         );
         return;
       }
       if (target.fromPickup) {
         showToast(
           `Đã xóa thành công phiếu xuất kho số ${target.so_ct || target.stt}.`,
+          "success",
         );
         setDeleteTarget(null);
         setPickupFocusStt(null);
@@ -428,6 +485,7 @@ export function App() {
       } else {
         showToast(
           `Đã xóa thành công chứng từ số ${target.so_ct || target.stt}.`,
+          "success",
         );
         setDeleteTarget(null);
         refresh();
@@ -436,7 +494,7 @@ export function App() {
         }
       }
     } catch (err: any) {
-      showToast(`Lỗi kết nối: ${err.message}`);
+      showToast(`Lỗi kết nối: ${err.message}`, "error");
     } finally {
       setDeleting(false);
     }
@@ -610,22 +668,173 @@ export function App() {
     }
   };
 
+  // Phím `/` trên danh sách: nhảy nhanh vào ô tìm kiếm khách hàng
+  const hasAnyModalOpen =
+    !!warehouseOverlay ||
+    isPickupOpen ||
+    isFilterOpen ||
+    isDebtOpen ||
+    isShortcutsOpen ||
+    isPrintOpen ||
+    !!deleteTarget;
+
+  useEffect(() => {
+    if (sttParam || hasAnyModalOpen) return;
+    const onSlashKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLInputElement &&
+        !active.readOnly &&
+        ["text", "search", "email", "password", "tel", "url", "number", "date"].includes(
+          (active.type || "text").toLowerCase(),
+        )
+      ) {
+        return;
+      }
+      if (
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      customerSearchInputRef.current?.focus();
+      customerSearchInputRef.current?.select();
+    };
+    window.addEventListener("keydown", onSlashKey);
+    return () => window.removeEventListener("keydown", onSlashKey);
+  }, [sttParam, hasAnyModalOpen]);
+
+  // Danh sách bộ lọc đang kích hoạt (Active Filter Chips) để người dùng nhìn thấy & xóa nhanh từng tiêu chí
+  const activeFilterChips = useMemo(() => {
+    const today = getTodayDate();
+    const chips: Array<{ key: string; label: string; onClear: () => void }> = [];
+    const d1 = filters.ngay_ct1 || "";
+    const d2 = filters.ngay_ct2 || "";
+    if (d1 !== today || d2 !== today) {
+      const dateLabel =
+        !d1 && !d2
+          ? "Ngày: Tất cả"
+          : d1 && d2 && d1 === d2
+            ? `Ngày: ${formatDate(d1)}`
+            : `Ngày: ${d1 ? formatDate(d1) : "…"} → ${d2 ? formatDate(d2) : "…"}`;
+      chips.push({
+        key: "date",
+        label: dateLabel,
+        onClear: () => handleApplyFilter({ ngay_ct1: today, ngay_ct2: today }),
+      });
+    }
+    if (filters.ma_dt?.trim()) {
+      chips.push({
+        key: "ma_dt",
+        label: `KH: ${filters.ma_dt.trim().toUpperCase()}`,
+        onClear: () => handleApplyFilter({ ma_dt: "" }),
+      });
+    }
+    if (filters.dien_giai?.trim()) {
+      chips.push({
+        key: "dien_giai",
+        label: `Diễn giải: ${filters.dien_giai.trim()}`,
+        onClear: () => handleApplyFilter({ dien_giai: "" }),
+      });
+    }
+    if (filters.so_ct1?.trim() || filters.so_ct2?.trim()) {
+      chips.push({
+        key: "so_ct",
+        label: `Số phiếu: ${filters.so_ct1?.trim() || "…"} → ${filters.so_ct2?.trim() || "…"}`,
+        onClear: () => handleApplyFilter({ so_ct1: "", so_ct2: "" }),
+      });
+    }
+    if (filters.ma_kho?.trim()) {
+      chips.push({
+        key: "ma_kho",
+        label: `Kho: ${filters.ma_kho.trim().toUpperCase()}`,
+        onClear: () => handleApplyFilter({ ma_kho: "" }),
+      });
+    }
+    if (filters.ma_vt?.trim()) {
+      chips.push({
+        key: "ma_vt",
+        label: `Vật tư: ${filters.ma_vt.trim().toUpperCase()}`,
+        onClear: () => handleApplyFilter({ ma_vt: "" }),
+      });
+    }
+    if (filters.ma_tte?.trim()) {
+      chips.push({
+        key: "ma_tte",
+        label: `Tiền tệ: ${filters.ma_tte.trim().toUpperCase()}`,
+        onClear: () => handleApplyFilter({ ma_tte: "" }),
+      });
+    }
+    return chips;
+  }, [filters, handleApplyFilter]);
+
+  const handleClearAllFilters = useCallback(() => {
+    const today = getTodayDate();
+    handleApplyFilter({
+      ngay_ct1: today,
+      ngay_ct2: today,
+      ma_dt: "",
+      dien_giai: "",
+      so_ct1: "",
+      so_ct2: "",
+      ma_kho: "",
+      ma_vt: "",
+      ma_tte: "",
+    });
+  }, [handleApplyFilter]);
+
   return (
     <>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface print:hidden">
         {/* Toast Notification */}
-      {notification && (
-        <div className="fixed top-4 right-4 z-[80] bg-neutral-900 text-white px-4 py-2 rounded shadow-lg text-xs flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-top-2">
-          <ShieldCheck className="w-4 h-4 text-tertiary-300" />
-          <span>{notification}</span>
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-4 right-4 z-[80] max-w-md px-3.5 py-2 rounded shadow-lg text-xs flex items-center gap-2 border animate-in fade-in slide-in-from-top-2 ${
+            toast.type === "success"
+              ? "bg-emerald-900 text-emerald-50 border-emerald-700"
+              : toast.type === "error"
+                ? "bg-danger-800 text-white border-danger-600"
+                : toast.type === "warning"
+                  ? "bg-amber-800 text-amber-50 border-amber-600"
+                  : "bg-neutral-900 text-white border-neutral-700"
+          }`}
+        >
+          {toast.type === "success" ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
+          ) : toast.type === "error" || toast.type === "warning" ? (
+            <AlertTriangle
+              className={`w-4 h-4 shrink-0 ${
+                toast.type === "error" ? "text-rose-200" : "text-amber-200"
+              }`}
+            />
+          ) : (
+            <Info className="w-4 h-4 text-primary-300 shrink-0" />
+          )}
+          <span className="leading-snug">{toast.message}</span>
+          <button
+            type="button"
+            onClick={dismissToast}
+            className="ml-1 text-white/70 hover:text-white cursor-pointer shrink-0"
+            aria-label="Đóng thông báo"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
           <div
             ref={deleteDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Xác nhận xóa chứng từ"
             className="bg-white rounded shadow-2xl border border-neutral-300 w-[440px] overflow-hidden animate-in fade-in zoom-in-95"
           >
             <div className="bg-danger-700 text-white px-4 py-2.5 flex items-center justify-between shadow">
@@ -638,8 +847,10 @@ export function App() {
                 </span>
               </div>
               <button
+                type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="text-white/80 hover:text-white"
+                className="text-white/80 hover:text-white cursor-pointer"
+                aria-label="Đóng"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -665,19 +876,21 @@ export function App() {
                 </div>
               </div>
               <p className="text-danger-700 font-medium text-[11px]">
-                Lưu ý: Thao tác sẽ gọi thủ tục CtBH_Delete để hoàn nhập kho và
-                xóa bút toán trên CSDL{" "}
-                {deleteTarget.dbMode === "warehouse" ? "KH_2014" : "VP_2014"}.
+                {deleteTarget.dbMode === "warehouse"
+                  ? "Lưu ý: Thao tác sẽ xóa phiếu xuất kho và hoàn nhập tồn kho tương ứng (không thể hoàn tác)."
+                  : "Lưu ý: Thao tác sẽ hoàn nhập tồn kho và xóa các bút toán công nợ liên quan (không thể hoàn tác)."}
               </p>
             </div>
             <div className="bg-neutral-100 px-4 py-2 flex justify-end gap-2 border-t border-neutral-200">
               <button
+                type="button"
                 onClick={() => setDeleteTarget(null)}
                 className="px-3 py-1 bg-white border border-neutral-300 hover:bg-neutral-50 rounded text-neutral-700 font-medium text-xs cursor-pointer"
               >
                 Hủy bỏ (Esc)
               </button>
               <button
+                type="button"
                 onClick={handleConfirmDelete}
                 disabled={deleting}
                 className="px-3.5 py-1 bg-danger-600 hover:bg-danger-700 text-white font-semibold rounded text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -692,14 +905,51 @@ export function App() {
 
       {/* ===== Top Global Header (ẩn khi đang mở form Thêm mới / Sửa chứng từ) ===== */}
       {!sttParam && (
-        <TopHeaderBar
-          voucherMode={voucherMode}
-          onChangeVoucherMode={setVoucherMode}
-          filters={filters}
-          loading={loading}
-          onApplyFilter={handleApplyFilter}
-          onRefresh={refresh}
-        />
+        <>
+          <TopHeaderBar
+            voucherMode={voucherMode}
+            onChangeVoucherMode={setVoucherMode}
+            filters={filters}
+            loading={loading}
+            onApplyFilter={handleApplyFilter}
+            onRefresh={refresh}
+            customerSearchInputRef={customerSearchInputRef}
+          />
+          {activeFilterChips.length > 0 && (
+            <div className="bg-primary-50/70 border-b border-primary-200/80 px-3.5 py-1 flex items-center flex-wrap gap-1.5 text-[11px] flex-shrink-0">
+              <span className="inline-flex items-center gap-1 text-primary-800 font-semibold mr-0.5">
+                <Filter className="w-3 h-3" />
+                Đang lọc:
+              </span>
+              {activeFilterChips.map((chip) => (
+                <span
+                  key={chip.key}
+                  className="inline-flex items-center gap-1 bg-white border border-primary-200 text-primary-900 px-2 py-0.5 rounded-full shadow-sm font-medium"
+                >
+                  <span>{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={chip.onClear}
+                    className="text-primary-500 hover:text-danger-600 cursor-pointer"
+                    title={`Bỏ lọc ${chip.label}`}
+                    aria-label={`Bỏ lọc ${chip.label}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+              {activeFilterChips.length >= 2 && (
+                <button
+                  type="button"
+                  onClick={handleClearAllFilters}
+                  className="ml-1 text-primary-700 hover:text-danger-700 underline font-medium cursor-pointer"
+                >
+                  Xóa bộ lọc
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* Main View Area */}
@@ -739,6 +989,12 @@ export function App() {
                 handleCloseDetail({ skipFetch: true });
                 refresh({ silent: vouchers.length > 0 });
                 navToList();
+                showToast(
+                  isNew
+                    ? "Đã tạo mới chứng từ thành công."
+                    : "Đã lưu thay đổi chứng từ thành công.",
+                  "success",
+                );
               }}
             />
           </Suspense>
@@ -758,6 +1014,7 @@ export function App() {
             onSelectStt={setSelectedStt}
             onEditVoucher={navToDetail}
             onToggleMark={toggleMark}
+            onToggleSelectAll={handleToggleSelectAll}
             onOpenFilter={openFilterModal}
             onOpenPrint={handleOpenPrint}
             onOpenPickup={handleOpenPickup}
@@ -937,7 +1194,7 @@ export function App() {
                 // If currently on list view, open new voucher form with pickup items
                 navToNew();
               }
-              showToast(`Đã lấy ${items.length} dòng hàng từ kho.`);
+              showToast(`Đã lấy ${items.length} dòng hàng từ kho.`, "success");
             }}
           />
         </Suspense>
@@ -975,6 +1232,7 @@ export function App() {
                   warehouseOverlay.mode === "M"
                     ? "Đã tạo mới phiếu xuất kho thành công."
                     : "Đã cập nhật phiếu xuất kho thành công.",
+                  "success",
                 );
               }}
             />
@@ -988,6 +1246,11 @@ export function App() {
             isOpen={isDebtOpen}
             onClose={() => setIsDebtOpen(false)}
             maDt={debtMaDt}
+            onVoucherSaved={(savedStt) => {
+              if (savedStt) invalidatePrintCache(savedStt);
+              refresh({ silent: vouchers.length > 0 });
+              showToast("Đã cập nhật chứng từ từ sổ công nợ.", "success");
+            }}
           />
         </Suspense>
       )}
@@ -1016,7 +1279,7 @@ export function App() {
                 setMarked(new Set());
               }
             }}
-            onError={(msg) => showToast(msg)}
+            onError={(msg) => showToast(msg, "error")}
             stts={printStts}
             inGia={printInGia ?? printPrice}
             copies={printCopies}

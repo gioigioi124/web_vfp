@@ -52,6 +52,8 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const ngayCt1Ref = useRef<HTMLInputElement | null>(null);
   const ngayCt2Ref = useRef<HTMLInputElement | null>(null);
+  const soCt1Ref = useRef<HTMLInputElement | null>(null);
+  const soCt2Ref = useRef<HTMLInputElement | null>(null);
   const maDtRef = useRef<HTMLInputElement | null>(null);
   const maKhoRef = useRef<HTMLInputElement | null>(null);
   const maVtRef = useRef<HTMLInputElement | null>(null);
@@ -180,10 +182,35 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
     updateForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const setDateShortcut = (type: "today" | "all") => {
+  const formatIsoLocal = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  const setDateShortcut = (
+    type: "today" | "yesterday" | "7days" | "thisMonth" | "lastMonth" | "all",
+  ) => {
+    const now = new Date();
     if (type === "today") {
       const today = getTodayDate();
       updateForm({ ngay_ct1: today, ngay_ct2: today });
+    } else if (type === "yesterday") {
+      const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const iso = formatIsoLocal(y);
+      updateForm({ ngay_ct1: iso, ngay_ct2: iso });
+    } else if (type === "7days") {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+      updateForm({ ngay_ct1: formatIsoLocal(start), ngay_ct2: getTodayDate() });
+    } else if (type === "thisMonth") {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      updateForm({ ngay_ct1: formatIsoLocal(first), ngay_ct2: formatIsoLocal(last) });
+    } else if (type === "lastMonth") {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      updateForm({ ngay_ct1: formatIsoLocal(first), ngay_ct2: formatIsoLocal(last) });
     } else {
       updateForm({ ngay_ct1: "", ngay_ct2: "" });
     }
@@ -191,6 +218,8 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
 
   const handleSubmit = useCallback(async () => {
     const current = { ...formRef.current };
+    current.so_ct1 = (current.so_ct1 || "").trim();
+    current.so_ct2 = (current.so_ct2 || "").trim();
     if (current.ma_dt?.trim()) {
       const resolved = await resolveCustomerValue(current.ma_dt);
       current.ma_dt = resolved.code;
@@ -263,6 +292,8 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
     const list: (HTMLElement | null)[] = [
       ngayCt1Ref.current,
       ngayCt2Ref.current,
+      soCt1Ref.current,
+      soCt2Ref.current,
       maDtRef.current,
     ];
     if (enableKhoRef.current) list.push(maKhoRef.current);
@@ -291,14 +322,16 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      // Từ ngày (0) và Đến ngày (1) nằm cùng hàng -> xuống thẳng Đối tượng (2)
-      const nextPos = pos <= 1 ? 2 : Math.min(pos + 1, controls.length - 1);
+      // Từ ngày (0)/Đến ngày (1) -> Từ số phiếu (2); Số phiếu (2/3) -> Đối tượng (4)
+      const nextPos =
+        pos <= 1 ? 2 : pos <= 3 ? 4 : Math.min(pos + 1, controls.length - 1);
       focusControl(controls[nextPos]);
       return;
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      const prevPos = pos === 2 ? 0 : Math.max(pos - 1, 0);
+      const prevPos =
+        pos === 4 ? 2 : pos === 2 || pos === 3 ? 0 : Math.max(pos - 1, 0);
       focusControl(controls[prevPos]);
       return;
     }
@@ -328,10 +361,13 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-900/45 backdrop-blur-[1px]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-900/45 backdrop-blur-[2px]">
       <div
         ref={containerRef}
-        className="w-full max-w-xl bg-white rounded-md shadow-2xl border border-neutral-400 flex flex-col overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tìm kiếm đơn hàng"
+        className="w-full max-w-xl bg-white rounded-md shadow-2xl border border-neutral-400 flex flex-col overflow-hidden animate-in fade-in zoom-in-95"
       >
         {/* Header đồng bộ font & phong cách ERP */}
         <header className="h-10 bg-primary-800 px-4 flex items-center justify-between select-none">
@@ -359,25 +395,39 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
           }}
           className="p-4 flex flex-col gap-3 bg-white"
         >
+          {/* Quick Date Presets */}
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="text-neutral-500 font-semibold mr-0.5">Kỳ nhanh:</span>
+            {(
+              [
+                ["today", "Hôm nay"],
+                ["yesterday", "Hôm qua"],
+                ["7days", "7 ngày"],
+                ["thisMonth", "Tháng này"],
+                ["lastMonth", "Tháng trước"],
+                ["all", "Tất cả ngày"],
+              ] as const
+            ).map(([preset, label]) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setDateShortcut(preset)}
+                className="px-2 py-0.5 rounded border border-neutral-300 bg-neutral-50 hover:bg-primary-50 hover:border-primary-400 hover:text-primary-800 text-neutral-700 font-medium transition-colors cursor-pointer"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Row 1: Từ ngày - Đến ngày */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="filter-ngay-ct1"
-                  className="erp-label text-neutral-700"
-                >
-                  Từ ngày:
-                </label>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={() => setDateShortcut("today")}
-                  className="text-[11px] font-medium text-primary-700 hover:underline cursor-pointer"
-                >
-                  Hôm nay
-                </button>
-              </div>
+              <label
+                htmlFor="filter-ngay-ct1"
+                className="erp-label text-neutral-700"
+              >
+                Từ ngày:
+              </label>
               <input
                 ref={ngayCt1Ref}
                 data-autofocus="true"
@@ -398,22 +448,12 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
             </div>
 
             <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <label
-                  htmlFor="filter-ngay-ct2"
-                  className="erp-label text-neutral-700"
-                >
-                  Đến ngày:
-                </label>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={() => setDateShortcut("all")}
-                  className="text-[11px] font-medium text-neutral-600 hover:underline cursor-pointer"
-                >
-                  Tất cả ngày
-                </button>
-              </div>
+              <label
+                htmlFor="filter-ngay-ct2"
+                className="erp-label text-neutral-700"
+              >
+                Đến ngày:
+              </label>
               <input
                 ref={ngayCt2Ref}
                 id="filter-ngay-ct2"
@@ -423,12 +463,66 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
                     e.preventDefault();
-                    focusControl(maDtRef.current);
+                    focusControl(soCt1Ref.current);
                     return;
                   }
                   handleFieldArrowNav(e);
                 }}
                 className="erp-input w-full h-8 bg-white text-neutral-900 font-mono text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Row 1b: Từ số phiếu - Đến số phiếu */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="filter-so-ct1"
+                className="erp-label text-neutral-700"
+              >
+                Từ số phiếu:
+              </label>
+              <input
+                ref={soCt1Ref}
+                id="filter-so-ct1"
+                type="text"
+                placeholder="VD: HD0001"
+                value={form.so_ct1 || ""}
+                onChange={(e) => handleChange("so_ct1", e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    focusControl(soCt2Ref.current);
+                    return;
+                  }
+                  handleFieldArrowNav(e);
+                }}
+                className="erp-input w-full h-8 bg-white text-neutral-900 font-mono text-xs uppercase"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="filter-so-ct2"
+                className="erp-label text-neutral-700"
+              >
+                Đến số phiếu:
+              </label>
+              <input
+                ref={soCt2Ref}
+                id="filter-so-ct2"
+                type="text"
+                placeholder="VD: HD9999"
+                value={form.so_ct2 || ""}
+                onChange={(e) => handleChange("so_ct2", e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    focusControl(maDtRef.current);
+                    return;
+                  }
+                  handleFieldArrowNav(e);
+                }}
+                className="erp-input w-full h-8 bg-white text-neutral-900 font-mono text-xs uppercase"
               />
             </div>
           </div>
@@ -504,7 +598,6 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
               <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  tabIndex={-1}
                   checked={enableKho}
                   onChange={(e) => {
                     const checked = e.target.checked;
@@ -597,7 +690,6 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
               <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  tabIndex={-1}
                   checked={enableVt}
                   onChange={(e) => {
                     const checked = e.target.checked;

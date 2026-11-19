@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "./ui/Button";
 import { PickupSlip, PickupItem } from "../types/pickup";
 import { formatQuantity, formatDate } from "../lib/format";
@@ -8,7 +8,7 @@ import {
   handleExcelMouseDown,
   selectAllLater,
 } from "./ui/excelCell";
-import { Check, X, Minus, Square, RefreshCw, Plus, Edit3, Trash2 } from "lucide-react";
+import { Check, X, Minimize2, Square, RefreshCw, Plus, Edit3, Trash2, Search } from "lucide-react";
 
 interface PickupDialogProps {
   isOpen: boolean;
@@ -52,6 +52,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   // Tăng mỗi lần nạp lại danh sách phiếu -> buộc nạp lại chi tiết kể cả khi
   // activeStt không đổi (dialog luôn mounted nên state cũ vẫn còn).
   const [detailVersion, setDetailVersion] = useState(0);
@@ -651,32 +653,78 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     onDeleteWarehouseSlip,
   ]);
 
+  const filteredSlips = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return slips;
+    return slips.filter((s) => {
+      const hay = `${s.so_ct || ""} ${s.ma_dt || ""} ${s.ten_dt || ""} ${s.dia_chi || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [slips, searchQuery]);
+
+  const activeSlipTotalSheets = useMemo(
+    () => activeItems.reduce((sum, it) => sum + (Number(it.so_tam) || 0), 0),
+    [activeItems],
+  );
+
   if (!isOpen) return null;
 
-  const allSelected = slips.length > 0 && selectedStts.size === slips.length;
+  const allSelected =
+    filteredSlips.length > 0 &&
+    filteredSlips.every((s) => selectedStts.has(s.stt));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Chọn phiếu xuất kho"
+    >
       <div
         ref={containerRef}
-        className="flex flex-col w-full max-w-6xl bg-white rounded-xl shadow-2xl border border-neutral-300 overflow-hidden h-full max-h-[92vh]"
+        className={`flex flex-col w-full bg-white rounded-xl shadow-2xl border border-neutral-300 overflow-hidden transition-all animate-in fade-in zoom-in-95 ${
+          isMaximized
+            ? "max-w-[98vw] h-[96vh]"
+            : "max-w-6xl h-full max-h-[92vh]"
+        }`}
       >
         {/* ===== Modal Header (navy gradient) ===== */}
-        <header className="flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0">
-          <div className="flex items-center space-x-2.5">
+        <header className="flex items-center justify-between gap-3 px-4 py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0">
+          <div className="flex items-center space-x-2.5 shrink-0">
             <div className="w-2 h-2 rounded-full bg-secondary-300" />
             <h1 className="text-sm font-bold tracking-wide uppercase text-white">
               Chọn Phiếu Xuất Kho
             </h1>
           </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-[11px] text-neutral-300 font-mono bg-white/10 px-2 py-0.5 rounded border border-white/10 hidden sm:inline-block">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-neutral-300 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Lọc số phiếu / KH..."
+                aria-label="Lọc nhanh phiếu xuất kho"
+                className="h-6 w-44 sm:w-56 pl-7 pr-6 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-xs outline-none focus:bg-white/20 focus:border-white/50"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Xóa từ khóa lọc"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <span className="text-[11px] text-neutral-300 font-mono bg-white/10 px-2 py-0.5 rounded border border-white/10 hidden md:inline-block shrink-0">
               Esc: Đóng
             </span>
             <button
               onClick={() => loadSlips(activeStt)}
               disabled={loading}
-              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center"
+              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
               title="Làm mới"
               type="button"
             >
@@ -686,22 +734,20 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             </button>
             <div className="flex items-center space-x-1">
               <button
-                className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center"
-                title="Thu nhỏ"
+                onClick={() => setIsMaximized((prev) => !prev)}
+                className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
+                title={isMaximized ? "Thu gọn" : "Phóng to"}
                 type="button"
               >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <button
-                className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center"
-                title="Phóng to"
-                type="button"
-              >
-                <Square className="w-3 h-3" />
+                {isMaximized ? (
+                  <Minimize2 className="w-3.5 h-3.5" />
+                ) : (
+                  <Square className="w-3 h-3" />
+                )}
               </button>
               <button
                 onClick={onClose}
-                className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-6 h-6 flex items-center justify-center ml-1"
+                className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-6 h-6 flex items-center justify-center ml-1 cursor-pointer"
                 title="Đóng (Esc)"
                 type="button"
               >
@@ -780,7 +826,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
-                  {slips.length === 0 ? (
+                  {filteredSlips.length === 0 ? (
                     <tr>
                       <td
                         colSpan={6}
@@ -788,11 +834,13 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                       >
                         {loading
                           ? "Đang tải dữ liệu từ CSDL Kho..."
-                          : "Không có phiếu xuất nào sẵn sàng"}
+                          : searchQuery.trim()
+                            ? `Không tìm thấy phiếu xuất phù hợp "${searchQuery.trim()}"`
+                            : "Không có phiếu xuất nào sẵn sàng"}
                       </td>
                     </tr>
                   ) : (
-                    slips.map((s, rowIdx) => {
+                    filteredSlips.map((s, rowIdx) => {
                       const isChecked = selectedStts.has(s.stt);
                       const isActive = activeStt === s.stt;
                       return (
@@ -1196,22 +1244,43 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
 
         {/* ===== Modal Footer ===== */}
         <footer className="px-3 py-2 bg-neutral-100 border-t border-neutral-300 flex items-center justify-between gap-2 shrink-0">
-          {/* Bộ đếm phiếu đã chọn */}
-          <div className="flex items-center bg-white px-2.5 py-1 rounded border border-neutral-300 shadow-xs shrink-0">
-            <label className="text-xs font-semibold text-neutral-700 mr-2 whitespace-nowrap">
-              Số phiếu đã chọn
-            </label>
-            <div className="flex items-center font-mono font-bold text-xs">
-              <input
-                readOnly
-                value={selectedStts.size}
-                className="w-8 h-5 text-center font-bold text-primary-900 bg-primary-50 border border-primary-400 rounded p-0 text-xs focus:outline-none select-all"
-              />
-              <span className="mx-1.5 text-neutral-400">/</span>
-              <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 bg-neutral-200 text-neutral-700 rounded text-xs">
-                {slips.length}
-              </span>
+          {/* Bộ đếm phiếu đã chọn + tóm tắt phiếu đang xem */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center bg-white px-2.5 py-1 rounded border border-neutral-300 shadow-sm shrink-0">
+              <label className="text-xs font-semibold text-neutral-700 mr-2 whitespace-nowrap">
+                Số phiếu đã chọn
+              </label>
+              <div className="flex items-center font-mono font-bold text-xs">
+                <input
+                  readOnly
+                  value={selectedStts.size}
+                  className="w-8 h-5 text-center font-bold text-primary-900 bg-primary-50 border border-primary-400 rounded p-0 text-xs focus:outline-none select-all"
+                />
+                <span className="mx-1.5 text-neutral-400">/</span>
+                <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 bg-neutral-200 text-neutral-700 rounded text-xs">
+                  {filteredSlips.length}
+                </span>
+              </div>
             </div>
+            {activeItems.length > 0 && (
+              <div className="hidden md:flex items-center gap-1.5 text-[11px] text-neutral-600 bg-white/80 px-2 py-1 rounded border border-neutral-200 truncate">
+                <span>
+                  Phiếu đang xem:{" "}
+                  <b className="font-mono text-neutral-800">{activeItems.length}</b> dòng
+                </span>
+                {activeSlipTotalSheets > 0 && (
+                  <>
+                    <span className="text-neutral-300">·</span>
+                    <span>
+                      Tổng tấm:{" "}
+                      <b className="font-mono text-amber-800">
+                        {formatQuantity(activeSlipTotalSheets)}
+                      </b>
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Nhóm nút thao tác nhỏ gọn */}

@@ -21,15 +21,25 @@ export function isModalOpen(): boolean {
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+function isVisibleFocusable(el: HTMLElement): boolean {
+  if (el.hasAttribute("disabled") || el.getAttribute("aria-hidden") === "true") {
+    return false;
+  }
+  return el.offsetParent !== null || el.getClientRects().length > 0;
+}
+
 function getFocusable(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    isVisibleFocusable,
+  );
 }
 
 /**
  * Gắn hành vi modal cho một dialog:
  * - Tăng/giảm bộ đếm modal (để tầng ngoài biết mà khóa phím).
+ * - Lưu và khôi phục focus của phần tử trước khi mở dialog.
  * - Tự focus phần tử `[data-autofocus]` (hoặc phần tử focusable đầu tiên).
- * - Giữ focus (Tab/Shift+Tab) luẩn quẩn trong dialog.
+ * - Giữ focus (Tab/Shift+Tab) luẩn quẩn trong dialog kể cả khi focus đang ở body.
  */
 export function useModalLock(
   isOpen: boolean,
@@ -37,6 +47,11 @@ export function useModalLock(
 ): void {
   useEffect(() => {
     if (!isOpen) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
     pushModal();
 
     const root = containerRef?.current ?? null;
@@ -47,7 +62,11 @@ export function useModalLock(
       const preferred =
         root.querySelector<HTMLElement>("[data-autofocus]") ??
         getFocusable(root)[0];
-      preferred?.focus();
+      if (preferred && isVisibleFocusable(preferred)) {
+        preferred.focus();
+      } else {
+        getFocusable(root)[0]?.focus();
+      }
     }, 30);
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -57,6 +76,13 @@ export function useModalLock(
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
       const active = document.activeElement as HTMLElement | null;
+      const insideRoot = active !== null && root.contains(active);
+
+      if (!insideRoot) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
       if (e.shiftKey && active === first) {
         e.preventDefault();
         last.focus();
@@ -71,6 +97,13 @@ export function useModalLock(
       clearTimeout(timer);
       document.removeEventListener("keydown", onKeyDown, true);
       popModal();
+      if (previouslyFocused && previouslyFocused.isConnected) {
+        requestAnimationFrame(() => {
+          if (previouslyFocused.isConnected) {
+            previouslyFocused.focus({ preventScroll: true });
+          }
+        });
+      }
     };
   }, [isOpen, containerRef]);
 }

@@ -90,6 +90,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const [isFetching, setIsFetching] = useState<boolean>(false);
   const [previewInNoCk, setPreviewInNoCk] = useState<"C" | "K">("K");
   const [previewInGia, setPreviewInGia] = useState<"1" | "0">(inGia);
+  const [previewCopies, setPreviewCopies] = useState<number>(
+    Math.min(4, Math.max(1, Math.floor(copies || 1))),
+  );
+  const [fitToWidth, setFitToWidth] = useState<boolean>(false);
   const [printingFromPreview, setPrintingFromPreview] = useState<boolean>(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const printAreaRef = useRef<HTMLDivElement | null>(null);
@@ -109,12 +113,13 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     if (isOpen && !wasOpenRef.current) {
       setPreviewInNoCk("K");
       setPreviewInGia(inGia);
+      setPreviewCopies(Math.min(4, Math.max(1, Math.floor(copies || 1))));
       setPrintingFromPreview(false);
     } else if (!isOpen) {
       setPrintingFromPreview(false);
     }
     wasOpenRef.current = isOpen;
-  }, [isOpen, inGia]);
+  }, [isOpen, inGia, copies]);
 
   const effectiveInGia: "1" | "0" =
     dbMode === "warehouse" ? "0" : isPreviewMode ? previewInGia : inGia;
@@ -123,7 +128,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const targetStts =
     stts && stts.length > 0 ? stts : stt ? [stt] : [];
   const joinedStts = targetStts.join(",");
-  const safeCopies = Math.max(1, Math.floor(copies || 1));
+  const safeCopies = Math.min(
+    4,
+    Math.max(1, Math.floor((isPreviewMode ? previewCopies : copies) || 1)),
+  );
   const requestKey =
     isOpen && joinedStts
       ? `${joinedStts}|${dbMode}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`
@@ -949,10 +957,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
 
   if (isPreviewMode && !printingFromPreview) {
     return (
-      <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print-preview-root">
+      <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-2 sm:p-4 print-preview-root">
         <div
           ref={dialogRef}
-          className="bg-neutral-200 rounded shadow-2xl border border-neutral-400 w-full max-w-5xl h-[94vh] flex flex-col overflow-hidden print-preview-scroll"
+          className="bg-neutral-200 rounded shadow-2xl border border-neutral-400 w-full max-w-5xl h-[94vh] flex flex-col overflow-hidden print-preview-scroll animate-in fade-in zoom-in-95"
           role="dialog"
           aria-modal="true"
           aria-label="Xem trước khi in"
@@ -977,7 +985,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
               )}
             </div>
 
-            {/* Tùy chọn In nợ cũ & In giá bán */}
+            {/* Tùy chọn In nợ cũ, In giá bán, Số bản & Phóng to/Thu gọn */}
             <div className="flex items-center flex-wrap gap-2">
               <label
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/25 cursor-pointer select-none text-xs font-semibold"
@@ -1009,13 +1017,55 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 </label>
               )}
 
+              {/* Copies stepper 1..4 */}
+              <div
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/10 border border-white/25 text-xs"
+                title="Số bản in cho mỗi phiếu (1–4 bản)"
+              >
+                <span className="text-primary-100 text-[11px]">Số bản:</span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewCopies((c) => Math.max(1, c - 1))}
+                  disabled={previewCopies <= 1}
+                  className="w-5 h-5 rounded bg-white/10 hover:bg-white/25 disabled:opacity-40 font-bold leading-none cursor-pointer"
+                  aria-label="Giảm số bản"
+                >
+                  −
+                </button>
+                <span className="w-4 text-center font-mono font-bold">
+                  {previewCopies}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewCopies((c) => Math.min(4, c + 1))}
+                  disabled={previewCopies >= 4}
+                  className="w-5 h-5 rounded bg-white/10 hover:bg-white/25 disabled:opacity-40 font-bold leading-none cursor-pointer"
+                  aria-label="Tăng số bản"
+                >
+                  +
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFitToWidth((v) => !v)}
+                className={`px-2 py-1 rounded border text-[11px] font-medium cursor-pointer transition-colors ${
+                  fitToWidth
+                    ? "bg-white text-primary-900 border-white"
+                    : "bg-white/10 hover:bg-white/20 text-white border-white/25"
+                }`}
+                title="Chuyển đổi giữa kích thước A4 chuẩn (100%) và vừa khung màn hình"
+              >
+                {fitToWidth ? "100% A4" : "Vừa khung"}
+              </button>
+
               <div className="h-4 w-px bg-white/25 mx-0.5" />
 
               <button
                 type="button"
                 onClick={handleManualPrint}
                 disabled={isFetching || printDocs.length === 0}
-                className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded text-xs font-semibold border border-primary-400 cursor-pointer shadow-xs"
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded text-xs font-semibold border border-primary-400 cursor-pointer shadow-sm"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>In phiếu</span>
@@ -1052,9 +1102,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             ) : (
               <div
                 ref={printAreaRef}
-                className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-[6mm] print-preview-sheet"
+                className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-[6mm] print-preview-sheet transition-all"
                 style={{
-                  width: "210mm",
+                  width: fitToWidth ? "100%" : "210mm",
+                  maxWidth: fitToWidth ? "100%" : undefined,
                   fontFamily: '"Times New Roman", Times, serif',
                   color: "#000",
                 }}

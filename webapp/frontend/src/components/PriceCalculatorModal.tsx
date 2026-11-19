@@ -475,7 +475,7 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 backdrop-blur-xs"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 backdrop-blur-[2px]"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -705,7 +705,7 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={handleApply}
-            className="px-2.5 py-0.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-[11px] font-semibold cursor-pointer shadow-xs"
+            className="px-2.5 py-0.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-[11px] font-semibold cursor-pointer shadow-sm"
           >
             Điền đơn giá{" "}
             <kbd className="ml-0.5 bg-primary-900/40 text-primary-100 border-primary-600 text-[9px]">

@@ -1503,7 +1503,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(({
                               }}
                               onKeyDown={handleReadOnlyCellKeyDown}
                               onCopy={handleReadOnlyCopy}
-                              className="xl-ro-input text-center font-normal text-neutral-400"
+                              className="xl-ro-input text-center font-mono font-normal text-neutral-600"
                             />
                           </td>
                         )}
@@ -1544,7 +1544,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(({
                             onFocusRow={() => handleSelectRow(idx)}
                             fetcher={fetchKhoOptionsLocal}
                             dropdownMinWidth={300}
-                            className="xl-input text-center font-mono font-normal text-neutral-400 uppercase grid-cell-input"
+                            className="xl-input text-center font-mono font-normal text-neutral-600 uppercase grid-cell-input"
                           />
                         </td>
                         {/* Số tấm */}
@@ -1625,7 +1625,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(({
                               it.loai_vt !== "4" ||
                               Math.abs(Number(it.he_so8 ?? 1) - 1) > 1e-6
                                 ? "font-bold text-amber-700"
-                                : "font-normal text-neutral-400"
+                                : "font-normal text-neutral-600"
                             }`}
                           />
                         </td>

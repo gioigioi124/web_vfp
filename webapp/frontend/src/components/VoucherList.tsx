@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   VoucherHeader,
   VoucherDetail,
@@ -20,7 +20,24 @@ import {
   ChevronLeft,
   ChevronRight,
   Info,
+  GripHorizontal,
 } from "lucide-react";
+
+const SPLIT_STORAGE_KEY = "voucherList.splitRatio";
+const DEFAULT_SPLIT_RATIO = 0.54;
+
+function loadSplitRatio(): number {
+  try {
+    const raw = window.localStorage.getItem(SPLIT_STORAGE_KEY);
+    const parsed = raw ? parseFloat(raw) : NaN;
+    if (Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 0.8) {
+      return parsed;
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return DEFAULT_SPLIT_RATIO;
+}
 
 function isEditableTarget(el: Element | null): boolean {
   if (!el) return false;
@@ -62,6 +79,7 @@ interface VoucherListProps {
   onSelectStt: (stt: string) => void;
   onEditVoucher?: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
+  onToggleSelectAll?: (selectAll: boolean) => void;
   onOpenFilter: () => void;
   onOpenPrint: (stt: string | string[]) => void;
   onOpenPickup?: () => void;
@@ -74,7 +92,6 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   vouchers,
   pagination,
   summary,
-  filters,
   loading,
   selectedStt,
   markedStts,
@@ -85,10 +102,8 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   onSelectStt,
   onEditVoucher,
   onToggleMark,
-  onOpenFilter,
-  onOpenPrint,
+  onToggleSelectAll,
   onOpenDebt,
-  onRefresh,
   onChangePage,
 }) => {
   const isWarehouse = voucherMode === "warehouse";
@@ -96,6 +111,38 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
     vouchers.find((v) => v.stt === selectedStt) ||
     vouchers[vouchers.length - 1];
   const detailCurrency = activeVoucher?.ma_tte || "VND";
+
+  const rootContainerRef = useRef<HTMLDivElement | null>(null);
+  const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const root = rootContainerRef.current;
+    if (!root) return;
+    setIsDraggingSplit(true);
+    const rect = root.getBoundingClientRect();
+    const totalH = Math.max(200, rect.height);
+
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(0.8, Math.max(0.25, (ev.clientY - rect.top) / totalH));
+      setSplitRatio(next);
+    };
+    const onUp = (ev: MouseEvent) => {
+      const finalRatio = Math.min(0.8, Math.max(0.25, (ev.clientY - rect.top) / totalH));
+      setSplitRatio(finalRatio);
+      setIsDraggingSplit(false);
+      try {
+        window.localStorage.setItem(SPLIT_STORAGE_KEY, finalRatio.toFixed(3));
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
 
   const masterScrollRef = useRef<HTMLDivElement | null>(null);
   const masterHeadRef = useRef<HTMLTableSectionElement | null>(null);
@@ -400,10 +447,20 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
     clearScheduledScroll,
   ]);
 
+  const allVisibleMarked =
+    vouchers.length > 0 &&
+    Boolean(markedStts && vouchers.every((v) => markedStts.has(v.stt)));
+
   return (
-    <div className="flex flex-col h-full w-full bg-surface min-h-0">
+    <div
+      ref={rootContainerRef}
+      className={`flex flex-col h-full w-full bg-surface min-h-0 ${isDraggingSplit ? "select-none cursor-row-resize" : ""}`}
+    >
       {/* ===== KHU VỰC 1: MASTER — DANH SÁCH PHIẾU XUẤT BÁN ===== */}
-      <section className="flex-[1.2] flex flex-col min-h-0 bg-white border-b border-neutral-300">
+      <section
+        style={{ flexBasis: `${Math.round(splitRatio * 1000) / 10}%` }}
+        className="shrink-0 grow-0 flex flex-col min-h-[120px] bg-white border-b border-neutral-300 overflow-hidden"
+      >
         {/* Data Grid Table: Phiếu Xuất Master */}
         <div
           ref={masterScrollRef}
@@ -418,9 +475,19 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                 <th
                   className="w-8 text-center border-r border-neutral-200"
                   scope="col"
-                  title="Đánh dấu (Space)"
+                  title="Chọn / bỏ chọn tất cả (Ctrl+A / Ctrl+U)"
                 >
-                  ✓
+                  {onToggleSelectAll ? (
+                    <input
+                      type="checkbox"
+                      checked={allVisibleMarked}
+                      onChange={(e) => onToggleSelectAll(e.target.checked)}
+                      aria-label="Chọn tất cả chứng từ trên trang"
+                      className="w-3.5 h-3.5 accent-tertiary-600 cursor-pointer align-middle"
+                    />
+                  ) : (
+                    "✓"
+                  )}
                 </th>
                 <th
                   className="w-14 text-center border-r border-neutral-200"
@@ -441,16 +508,23 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                   Số
                 </th>
                 <th
-                  className="min-w-[280px] border-r border-neutral-200"
+                  className="min-w-[240px] border-r border-neutral-200"
                   scope="col"
                 >
                   Diễn giải
                 </th>
                 <th
-                  className="min-w-[220px] border-r border-neutral-200"
+                  className="min-w-[200px] border-r border-neutral-200"
                   scope="col"
                 >
                   Đối tượng
+                </th>
+                <th
+                  className="w-20 text-center border-r border-neutral-200"
+                  scope="col"
+                  title="Người lập chứng từ"
+                >
+                  Người lập
                 </th>
                 {!isWarehouse && (
                   <th className="w-36 text-right pr-3" scope="col">
@@ -463,7 +537,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
               {loading ? (
                 <tr>
                   <td
-                    colSpan={isWarehouse ? 6 : 7}
+                    colSpan={isWarehouse ? 7 : 8}
                     className="px-4 py-12 text-center text-neutral-400"
                   >
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-600" />
@@ -473,7 +547,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
               ) : vouchers.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={isWarehouse ? 6 : 7}
+                    colSpan={isWarehouse ? 7 : 8}
                     className="px-4 py-12 text-center text-neutral-400 italic"
                   >
                     Không tìm thấy chứng từ nào phù hợp bộ lọc.
@@ -575,7 +649,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                           className="xl-input font-mono font-semibold text-primary-700 grid-cell-input"
                         />
                       </td>
-                      <td className="xl-cell min-w-[280px]">
+                      <td className="xl-cell min-w-[240px]">
                         <input
                           type="text"
                           readOnly
@@ -594,7 +668,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                           className="xl-input text-black truncate grid-cell-input"
                         />
                       </td>
-                      <td className="xl-cell min-w-[220px]">
+                      <td className="xl-cell min-w-[200px]">
                         <input
                           type="text"
                           readOnly
@@ -613,6 +687,25 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                           className="xl-input text-black truncate grid-cell-input"
                         />
                       </td>
+                      <td className="xl-cell">
+                        <input
+                          type="text"
+                          readOnly
+                          data-mode="select"
+                          value={v.user_name || ""}
+                          placeholder="—"
+                          title={v.user_name || ""}
+                          onMouseDown={(e) => handleExcelMouseDown(e, "select")}
+                          onFocus={(e) =>
+                            handleMasterCellFocus(6, v.stt, e.currentTarget)
+                          }
+                          onKeyDown={(e) =>
+                            handleMasterCellKeyDown(e, rowIdx, 6)
+                          }
+                          onCopy={handleMasterCellCopy}
+                          className="xl-input text-center font-mono text-[11px] text-neutral-600 grid-cell-input"
+                        />
+                      </td>
                       {!isWarehouse && (
                         <td className="xl-cell">
                           <input
@@ -624,10 +717,10 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
                               handleExcelMouseDown(e, "select")
                             }
                             onFocus={(e) =>
-                              handleMasterCellFocus(6, v.stt, e.currentTarget)
+                              handleMasterCellFocus(7, v.stt, e.currentTarget)
                             }
                             onKeyDown={(e) =>
-                              handleMasterCellKeyDown(e, rowIdx, 6)
+                              handleMasterCellKeyDown(e, rowIdx, 7)
                             }
                             onCopy={handleMasterCellCopy}
                             className="xl-input text-right font-mono font-medium text-neutral-900 pr-3 grid-cell-input"
@@ -650,9 +743,28 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
         </div>
       </section>
 
-      {/* ===== THANH SPLITTER & THÔNG TIN DƯ NỢ KHÁCH HÀNG ===== */}
-      <div className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 px-2.5 py-0.5 flex items-center justify-between gap-2 border-y border-neutral-300 flex-shrink-0">
-        <div className="flex items-center gap-1.5 min-w-0">
+      {/* ===== THANH SPLITTER KÉO GIÃN & THÔNG TIN DƯ NỢ KHÁCH HÀNG ===== */}
+      <div
+        onMouseDown={handleSplitterMouseDown}
+        onDoubleClick={() => {
+          setSplitRatio(DEFAULT_SPLIT_RATIO);
+          try {
+            window.localStorage.setItem(
+              SPLIT_STORAGE_KEY,
+              DEFAULT_SPLIT_RATIO.toFixed(3),
+            );
+          } catch {
+            /* ignore */
+          }
+        }}
+        title="Kéo lên/xuống để thay đổi tỷ lệ bảng (nhấp đúp để đặt lại mặc định)"
+        className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 hover:from-primary-100 hover:via-neutral-100 hover:to-primary-100 px-2.5 py-0.5 flex items-center justify-between gap-2 border-y border-neutral-300 flex-shrink-0 cursor-row-resize transition-colors"
+      >
+        <div
+          className="flex items-center gap-1.5 min-w-0 cursor-default"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <GripHorizontal className="w-3.5 h-3.5 text-neutral-400 shrink-0 cursor-row-resize" />
           <div className="flex items-center justify-center w-4 h-4 rounded-full bg-info-100 text-primary-700 shrink-0">
             <Info className="w-2.5 h-2.5" />
           </div>
@@ -700,7 +812,10 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div
+          className="flex items-center gap-2 shrink-0 cursor-default"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {!isWarehouse && summary && pagination.total_records > 0 && (
             <span
               className="hidden lg:inline-flex items-center gap-1 text-[11px] text-neutral-700 bg-white/80 px-2 py-0 rounded border border-neutral-300"
@@ -741,7 +856,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
       {/* ===== KHU VỰC 2: DETAIL — CHI TIẾT VẬT TƯ / HÀNG HÓA ===== */}
       <section
         ref={detailSectionRef}
-        className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden relative"
+        className="flex-1 flex flex-col min-h-[120px] bg-white overflow-hidden relative"
       >
         {detailLoading && (
           <div

@@ -29,6 +29,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { keys: ["F3"], desc: "Sửa chứng từ đang chọn" },
       { keys: ["F8"], desc: "Xóa chứng từ đang chọn" },
       { keys: ["F9"], desc: "Mở hộp thoại lọc / tìm kiếm chứng từ" },
+      { keys: ["/"], desc: "Nhảy nhanh vào ô lọc khách hàng trên thanh công cụ" },
       {
         keys: ["Ctrl", "Shift", "E"],
         desc: "Mở Sổ chi tiết công nợ khách hàng (theo phiếu đang chọn)",
@@ -77,6 +78,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
         keys: ["Ctrl", "Shift", "E"],
         desc: "Mở Sổ chi tiết công nợ khách hàng hiện tại",
       },
+      { keys: ["Alt", "K"], desc: "Mở / đóng bảng Đếm hàng khuyến mại" },
       { keys: ["Ctrl", "Q"], desc: "Nhảy nhanh và bôi đen ô Mã đối tượng" },
       {
         keys: ["Ctrl", "D"],
@@ -85,13 +87,16 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { keys: ["F5"], desc: "Mở Máy tính tính đơn giá cho dòng đang chọn" },
       { keys: ["F4"], desc: "Chọn nhanh Tài khoản Có (TK doanh thu) dòng đang chọn" },
       { keys: ["Ctrl", "+"], desc: "Thêm dòng hàng hóa mới" },
+      { keys: ["Ctrl", "Shift", "D"], desc: "Nhân đôi dòng hàng hóa đang chọn" },
+      { keys: ["Ctrl", "Z"], desc: "Hoàn tác (Undo) thay đổi trên bảng chi tiết" },
+      { keys: ["Ctrl", "Y"], desc: "Làm lại (Redo) thay đổi vừa hoàn tác" },
       { keys: ["Ctrl", "-"], desc: "Xóa dòng hàng hóa đang chọn" },
       { keys: ["F8"], desc: "Xóa dòng hàng hóa đang chọn" },
       {
         keys: ["Enter"],
         desc: "Sang ô tiếp theo; nhấn ở ô cuối dòng để tự thêm dòng mới",
       },
-      { keys: ["Esc"], desc: "Thoát khỏi form chứng từ" },
+      { keys: ["Esc"], desc: "Thoát khỏi form chứng từ (có hỏi khi chưa lưu)" },
     ],
   },
   {
@@ -103,7 +108,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
         desc: "(Sổ công nợ — ô lọc) Tìm kiếm; (trên dòng) Xem hóa đơn ở chế độ sửa",
       },
       { keys: ["F3"], desc: "(Sổ công nợ / Chọn phiếu kho) Mở hoặc sửa chứng từ đang chọn" },
-      { keys: ["Ctrl", "E"], desc: "(Sổ công nợ) Xuất dữ liệu ra Excel (.xls)" },
+      { keys: ["Ctrl", "E"], desc: "(Sổ công nợ) Xuất dữ liệu ra Excel (.csv UTF-8)" },
       { keys: ["F4"], desc: "(Sổ công nợ) Nhảy nhanh về ô Mã đối tượng" },
       { keys: ["F5"], desc: "(Sổ công nợ) Tải lại dữ liệu" },
       { keys: ["Space"], desc: "(Chọn phiếu kho) Đánh dấu / bỏ chọn phiếu xuất kho" },
@@ -213,7 +218,7 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
               {filteredSections.map((section) => (
                 <section
                   key={section.title}
-                  className="bg-white rounded-lg border border-neutral-200 shadow-xs overflow-hidden flex flex-col"
+                  className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden flex flex-col"
                 >
                   <div
                     className={`px-3 py-1.5 border-b text-xs font-bold uppercase tracking-wide ${section.accent}`}
@@ -260,7 +265,7 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 bg-white hover:bg-neutral-200 text-neutral-700 border border-neutral-300 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+            className="px-3 py-1 bg-white hover:bg-neutral-200 text-neutral-700 border border-neutral-300 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
             <X className="w-3.5 h-3.5 text-neutral-500" />
             <span>Đóng</span>

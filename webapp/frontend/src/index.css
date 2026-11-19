@@ -8,29 +8,51 @@
   #root {
     height: 100%;
   }
-  *,
-  *::before,
-  *::after,
-  html,
-  body,
-  input,
-  button,
-  select,
-  option,
-  optgroup,
-  textarea,
-  code,
-  kbd,
-  samp,
-  pre,
-  .font-sans,
-  .font-mono,
-  .font-serif {
-    font-family: "Hanken Grotesk", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-  }
   body {
-    @apply bg-surface text-on-surface text-[13px];
+    @apply bg-surface text-on-surface text-[13px] font-sans;
   }
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ===== Lightweight transition utilities (replaces missing tailwindcss-animate) ===== */
+@keyframes erp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes erp-zoom-in-95 {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes erp-slide-in-top-2 {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-in.fade-in {
+  animation: erp-fade-in 150ms ease-out both;
+}
+.animate-in.zoom-in-95 {
+  animation: erp-zoom-in-95 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-in.slide-in-from-top-2 {
+  animation: erp-slide-in-top-2 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* ===== Scrollbar thanh mảnh chuẩn desktop app ===== */
