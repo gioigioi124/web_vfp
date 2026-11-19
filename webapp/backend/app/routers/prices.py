@@ -6,7 +6,7 @@ from app.services.price_service import price_service
 router = APIRouter(prefix="/api/prices", tags=["Prices"])
 
 
-@router.get("/{ma_vt}", response_model=dict)
+@router.get("/{ma_vt}")
 def get_price(
     ma_vt: str,
     ma_dt: str = Query("", description="Mã khách hàng (để chọn bảng giá theo khách/khu vực)"),
@@ -20,7 +20,7 @@ def get_price(
     return {"success": True, "data": item.model_dump() if item else None}
 
 
-@router.post("/batch", response_model=dict)
+@router.post("/batch")
 def get_prices_batch(payload: PriceBatchRequest):
     """
     Tra giá cho nhiều mã vật tư trong một lượt (dùng khi đổ dòng hàng từ phiếu xuất).

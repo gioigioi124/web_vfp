@@ -4,7 +4,7 @@ from app.services.debt_service import debt_service
 
 router = APIRouter(prefix="/api/debt", tags=["Debt"])
 
-@router.get("/customer", response_model=dict)
+@router.get("/customer")
 def get_customer_debt(
     ma_dt: str = Query(..., description="Mã khách hàng cần kiểm tra công nợ"),
     tk: str = Query("131", description="Tài khoản công nợ (mặc định 131)"),
@@ -20,7 +20,7 @@ def get_customer_debt(
         "data": debt_info.model_dump()
     }
 
-@router.get("/detail/{stt}", response_model=dict)
+@router.get("/detail/{stt}")
 def get_debt_detail(stt: str):
     """
     Chi tiết phát sinh công nợ và lịch sử thanh toán liên quan đến chứng từ.
@@ -32,7 +32,7 @@ def get_debt_detail(stt: str):
         "data": detail.model_dump()
     }
 
-@router.get("/ledger", response_model=dict)
+@router.get("/ledger")
 def get_customer_debt_ledger(
     ma_dt: Optional[str] = Query("", description="Mã khách hàng (bỏ trống trả bảng rỗng)"),
     ngay_bd: Optional[str] = Query(None, description="Từ ngày (YYYY-MM-DD), mặc định đầu tháng hiện tại"),

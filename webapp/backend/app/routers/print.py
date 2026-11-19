@@ -102,7 +102,7 @@ def _fetch_print_metadata(
     }
 
 
-@router.get("/{stt}", response_model=dict)
+@router.get("/{stt}")
 def get_print_payload(
     stt: str,
     loai: Optional[str] = Query("hd", description="'hd' (ctpxg/ctpng) hoặc 'px'"),

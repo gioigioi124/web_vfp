@@ -1,10 +1,12 @@
 import ctypes
+import logging
 import os
 import socket
 import sys
 import threading
 import time
 import webbrowser
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -15,14 +17,11 @@ PID_FILE = LOG_DIR / "server.pid"
 
 # Redirect stdout/stderr BEFORE importing uvicorn/fastapi because pythonw.exe sets them to None.
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-if LOG_FILE.exists() and LOG_FILE.stat().st_size > 5 * 1024 * 1024:
-    backup_log = LOG_DIR / "server.log.1"
-    try:
-        if backup_log.exists():
-            backup_log.unlink()
-        LOG_FILE.rename(backup_log)
-    except OSError:
-        pass
+_log_handler = RotatingFileHandler(
+    LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
+_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.basicConfig(level=logging.INFO, handlers=[_log_handler])
 
 _log_stream = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
 sys.stdout = _log_stream
@@ -31,12 +30,7 @@ sys.stderr = _log_stream
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import pystray
-import uvicorn
-from PIL import Image, ImageDraw, ImageFont
-
 from app.config import settings
-from app.main import app as fastapi_app
 
 
 def _show_message(title: str, text: str, flags: int = 0x40) -> None:
@@ -47,11 +41,30 @@ def _show_message(title: str, text: str, flags: int = 0x40) -> None:
         print(f"[{title}] {text}")
 
 
+def _parse_db_probe_target() -> tuple[str, int]:
+    """Tách host và port từ settings.DB_SERVER (vd '192.168.10.8,14333' hoặc 'host:1433')."""
+    raw = (settings.DB_SERVER or "").strip()
+    if "," in raw:
+        host, _, port_s = raw.partition(",")
+        try:
+            return host.strip() or "192.168.10.8", int(port_s.strip())
+        except ValueError:
+            return host.strip() or "192.168.10.8", 1433
+    if ":" in raw:
+        host, _, port_s = raw.partition(":")
+        try:
+            return host.strip() or "192.168.10.8", int(port_s.strip())
+        except ValueError:
+            return host.strip() or "192.168.10.8", 1433
+    return raw or "192.168.10.8", 1433
+
+
 def _get_lan_ip() -> str:
     """Lấy địa chỉ IP LAN hiện tại của máy chủ (ưu tiên card mạng ra LAN)."""
+    probe_host, probe_port = _parse_db_probe_target()
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("192.168.10.8", 14333))
+            s.connect((probe_host, probe_port))
             ip = s.getsockname()[0]
             if ip and not ip.startswith("127."):
                 return ip
@@ -72,8 +85,10 @@ def _is_port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _create_tray_icon_image() -> Image.Image:
+def _create_tray_icon_image():
     """Tạo icon 64x64 sắc nét cho khay hệ thống Windows."""
+    from PIL import Image, ImageDraw, ImageFont
+
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -119,6 +134,7 @@ def main() -> None:
     port = settings.APP_PORT
     host = settings.APP_HOST
 
+    # Kiểm tra cổng TRƯỚC khi import app.main để tiến trình mở trùng không khởi tạo pool/thread nền.
     if _is_port_in_use(port):
         lan_ip = _get_lan_ip()
         _show_message(
@@ -129,6 +145,10 @@ def main() -> None:
         )
         webbrowser.open(f"http://localhost:{port}/sales-invoices")
         return
+
+    import pystray
+    import uvicorn
+    from app.main import app as fastapi_app
 
     _write_pid_file()
     lan_ip = _get_lan_ip()
@@ -146,8 +166,9 @@ def main() -> None:
         fastapi_app,
         host=host,
         port=port,
-        log_level="info",
-        access_log=True,
+        log_level="warning",
+        access_log=False,
+        timeout_keep_alive=30,
         use_colors=False,
     )
     server = uvicorn.Server(config)

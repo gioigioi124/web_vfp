@@ -106,12 +106,22 @@ def main():
         print("\nDang tat he thong...")
     finally:
         for proc, name in [(backend_proc, "Backend"), (frontend_proc, "Frontend")]:
+            if proc.poll() is not None:
+                continue
             try:
                 proc.terminate()
                 proc.wait(timeout=2)
             except Exception:
                 try:
-                    proc.kill()
+                    if os.name == "nt":
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            timeout=3,
+                        )
+                    else:
+                        proc.kill()
                 except Exception:
                     pass
         print("Da tat toan bo he thong.")

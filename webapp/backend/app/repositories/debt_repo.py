@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from app.config import settings
 from app.database import get_db_cursor
 from app.utils.unicode import tcvn_to_unicode
@@ -13,6 +13,7 @@ from app.schemas.debt import (
 
 logger = logging.getLogger("app.repositories.debt")
 
+
 class DebtRepository:
     def __init__(self):
         self.vp_db = settings.DB_VP
@@ -21,14 +22,19 @@ class DebtRepository:
         self.fn_uni = f"{self.vp_db}.dbo.fn_TCVNToUnicode"
 
     def _query_customer_balance(
-        self, ma_dt: str, tk: str, today_str: str, exclude_stt: str = ""
+        self,
+        ma_dt: str,
+        tk: str,
+        today_str: str,
+        exclude_stt: str = "",
+        cur: Optional[Any] = None,
     ) -> tuple[float, float, float, float, float, str]:
         """
         Query customer (du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, ten_dt) up to today_str,
         optionally excluding voucher `exclude_stt`.
         """
         clean_stt = (exclude_stt or "").strip()
-        stt_filter = " AND RTRIM(Stt) <> ?" if clean_stt else ""
+        stt_filter = " AND Stt <> ?" if clean_stt else ""
         tk_param = f"{tk}%"
 
         debit_sql = f"""
@@ -46,37 +52,37 @@ class DebtRepository:
             WHERE Tk_Co LIKE ? AND Ma_Dt_Co = ? AND Ngay_Ct <= ?{stt_filter}
         """
 
-        ps_no = 0.0
-        ps_co = 0.0
-        ps_no_nt = 0.0
-        ps_co_nt = 0.0
-        du_cuoi = 0.0
-        sp_ten_dt = ""
-        sp_success = False
+        sp_sql = f"""
+            SET NOCOUNT ON;
+            DECLARE @p_Ten_Tk nvarchar(64), @p_Ten_Tk_E nvarchar(64), @p_Ten_Dt nvarchar(64), @p_Du_No numeric(18,2), @p_Du_Co numeric(18,2);
+            EXEC {self.vp_db}.dbo.GL_Alert_ClosingAccount4Customer
+                @p_Ma_Dvcs='S1',
+                @p_Stt=?,
+                @p_Ngay_Ct=?,
+                @p_Tk=?,
+                @p_Ten_Tk=@p_Ten_Tk OUTPUT,
+                @p_Ten_Tk_E=@p_Ten_Tk_E OUTPUT,
+                @p_Ma_Dt=?,
+                @p_Ten_Dt=@p_Ten_Dt OUTPUT,
+                @p_Du_No=@p_Du_No OUTPUT,
+                @p_Du_Co=@p_Du_Co OUTPUT;
+            SELECT @p_Du_No AS Du_No, @p_Du_Co AS Du_Co, @p_Ten_Dt AS Ten_Dt;
+        """
 
-        # Try calling standard SP GL_Alert_ClosingAccount4Customer (realtime balance at current date).
-        # NOTE: Mọi EXEC SP PHẢI có SET NOCOUNT ON; nếu không pyodbc sẽ ném
-        # "No results. Previous SQL was not a query" và rơi vào nhánh fallback sai.
-        try:
-            with get_db_cursor(self.vp_db) as cur:
-                sp_sql = f"""
-                    SET NOCOUNT ON;
-                    DECLARE @p_Ten_Tk nvarchar(64), @p_Ten_Tk_E nvarchar(64), @p_Ten_Dt nvarchar(64), @p_Du_No numeric(18,2), @p_Du_Co numeric(18,2);
-                    EXEC {self.vp_db}.dbo.GL_Alert_ClosingAccount4Customer
-                        @p_Ma_Dvcs='S1',
-                        @p_Stt=?,
-                        @p_Ngay_Ct=?,
-                        @p_Tk=?,
-                        @p_Ten_Tk=@p_Ten_Tk OUTPUT,
-                        @p_Ten_Tk_E=@p_Ten_Tk_E OUTPUT,
-                        @p_Ma_Dt=?,
-                        @p_Ten_Dt=@p_Ten_Dt OUTPUT,
-                        @p_Du_No=@p_Du_No OUTPUT,
-                        @p_Du_Co=@p_Du_Co OUTPUT;
-                    SELECT @p_Du_No AS Du_No, @p_Du_Co AS Du_Co, @p_Ten_Dt AS Ten_Dt;
-                """
-                cur.execute(sp_sql, [clean_stt, today_str, tk or "131", ma_dt])
-                row = cur.fetchone()
+        def _run(c: Any) -> tuple[float, float, float, float, float, str]:
+            ps_no = 0.0
+            ps_co = 0.0
+            ps_no_nt = 0.0
+            ps_co_nt = 0.0
+            du_cuoi = 0.0
+            sp_ten_dt = ""
+            sp_success = False
+
+            # NOTE: Mọi EXEC SP PHẢI có SET NOCOUNT ON; nếu không pyodbc sẽ ném
+            # "No results. Previous SQL was not a query" và rơi vào nhánh fallback sai.
+            try:
+                c.execute(sp_sql, [clean_stt, today_str, tk or "131", ma_dt])
+                row = c.fetchone()
                 if row:
                     du_no = float(row[0] or 0.0)
                     du_co = float(row[1] or 0.0)
@@ -86,39 +92,49 @@ class DebtRepository:
                     if row[2]:
                         sp_ten_dt = (row[2] or "").strip()
                     sp_success = True
-        except Exception as e:
-            logger.warning(f"Error calling GL_Alert_ClosingAccount4Customer: {e}")
+            except Exception as e:
+                logger.warning(f"Error calling GL_Alert_ClosingAccount4Customer: {e}")
 
-        if not sp_success:
-            # Fallback: cộng sổ cái TK 131 ĐẾN NGÀY HIỆN TẠI (không lấy toàn bộ lịch sử).
-            try:
-                with get_db_cursor(self.vp_db) as cur:
+            if not sp_success:
+                try:
                     socai_params = [tk_param, ma_dt, today_str]
                     if clean_stt:
                         socai_params.append(clean_stt)
-                    cur.execute(debit_sql, socai_params)
-                    r = cur.fetchone()
+                    c.execute(debit_sql, socai_params)
+                    r = c.fetchone()
                     if r:
                         ps_no = float(r[0] or 0.0)
                         ps_no_nt = float(r[1] or 0.0)
 
-                    cur.execute(credit_sql, socai_params)
-                    r = cur.fetchone()
+                    c.execute(credit_sql, socai_params)
+                    r = c.fetchone()
                     if r:
                         ps_co = float(r[0] or 0.0)
                         ps_co_nt = float(r[1] or 0.0)
-                du_cuoi = ps_no - ps_co
-            except Exception as e:
-                logger.warning(f"Error querying SoCai for balance: {e}")
-                du_cuoi = 0.0
+                    du_cuoi = ps_no - ps_co
+                except Exception as e:
+                    logger.warning(f"Error querying SoCai for balance: {e}")
+                    du_cuoi = 0.0
 
-        return du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt
+            return du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt
 
-    def get_customer_debt_summary(self, ma_dt: str, tk: str = "131", stt: str = "") -> CustomerDebtSummary:
+        if cur is not None:
+            return _run(cur)
+        with get_db_cursor(self.vp_db) as c:
+            return _run(c)
+
+    def get_customer_debt_summary(
+        self,
+        ma_dt: str,
+        tk: str = "131",
+        stt: str = "",
+        check_only: bool = False,
+    ) -> CustomerDebtSummary:
         """
         Query customer realtime debt and credit limit according to Fix #1, #2, #3.
         `du_cuoi` always reflects the current balance up to today; when `stt` is passed
         (edit mode), `du_cuoi_kiem_tra` / `is_over_limit` / `is_near_limit` exclude `stt`.
+        When `check_only=True` (pre-save limit check), runs only 1 SP call excluding `stt`.
         100% READ-ONLY (SELECT only).
         """
         import datetime
@@ -139,32 +155,66 @@ class DebtRepository:
         ten_dt = ""
         gioi_han = 0.0
         toi_han = 0.0
+        du_cuoi = 0.0
+        ps_no = 0.0
+        ps_co = 0.0
+        ps_no_nt = 0.0
+        ps_co_nt = 0.0
+        du_cuoi_check = 0.0
 
         try:
-            with get_db_cursor(self.sys_db) as cur:
-                cur.execute(limit_sql, [ma_dt])
-                r = cur.fetchone()
-                if r:
-                    ten_dt = (r[0] or "").strip()
-                    gioi_han = float(r[1] or 0.0)
-                    toi_han = float(r[2] or 0.0)
+            with get_db_cursor(self.vp_db) as cur:
+                try:
+                    cur.execute(limit_sql, [ma_dt])
+                    r = cur.fetchone()
+                    if r:
+                        ten_dt = (r[0] or "").strip()
+                        gioi_han = float(r[1] or 0.0)
+                        toi_han = float(r[2] or 0.0)
+                except Exception as e:
+                    logger.warning(f"Error querying DmDt for debt limit: {e}")
+
+                if check_only and clean_stt:
+                    # Chỉ cần dư nợ loại trừ phiếu đang sửa để kiểm tra hạn mức khi lưu
+                    du_cuoi_check, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt = (
+                        self._query_customer_balance(
+                            ma_dt=ma_dt,
+                            tk=tk,
+                            today_str=today_str,
+                            exclude_stt=clean_stt,
+                            cur=cur,
+                        )
+                    )
+                    du_cuoi = du_cuoi_check
+                    if sp_ten_dt and not ten_dt:
+                        ten_dt = sp_ten_dt
+                else:
+                    # 1. Dư nợ hiển thị luôn là công nợ đến hiện tại (bao gồm mọi phiếu đã lưu)
+                    du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt = (
+                        self._query_customer_balance(
+                            ma_dt=ma_dt,
+                            tk=tk,
+                            today_str=today_str,
+                            exclude_stt="",
+                            cur=cur,
+                        )
+                    )
+                    if sp_ten_dt and not ten_dt:
+                        ten_dt = sp_ten_dt
+
+                    # 2. Dư nợ dùng để kiểm tra quá hạn: khi đang sửa phiếu -> trừ đi chính phiếu đang mở
+                    if clean_stt:
+                        du_cuoi_check, *_ = self._query_customer_balance(
+                            ma_dt=ma_dt,
+                            tk=tk,
+                            today_str=today_str,
+                            exclude_stt=clean_stt,
+                            cur=cur,
+                        )
+                    else:
+                        du_cuoi_check = du_cuoi
         except Exception as e:
-            logger.warning(f"Error querying DmDt for debt limit: {e}")
-
-        # 1. Dư nợ hiển thị luôn là công nợ đến hiện tại (bao gồm mọi phiếu đã lưu)
-        du_cuoi, ps_no, ps_co, ps_no_nt, ps_co_nt, sp_ten_dt = self._query_customer_balance(
-            ma_dt=ma_dt, tk=tk, today_str=today_str, exclude_stt=""
-        )
-        if sp_ten_dt and not ten_dt:
-            ten_dt = sp_ten_dt
-
-        # 2. Dư nợ dùng để kiểm tra quá hạn: khi đang sửa phiếu -> trừ đi chính phiếu đang mở
-        if clean_stt:
-            du_cuoi_check, *_ = self._query_customer_balance(
-                ma_dt=ma_dt, tk=tk, today_str=today_str, exclude_stt=clean_stt
-            )
-        else:
-            du_cuoi_check = du_cuoi
+            logger.warning(f"Error querying customer debt summary ({ma_dt}): {e}")
 
         is_over_limit = (gioi_han > 0 and du_cuoi_check >= gioi_han)
         # Fix #3: Only warn near limit if Toi_Han <> 0
@@ -205,11 +255,42 @@ class DebtRepository:
             WHERE h.Stt = ?
         """
 
+        # Rewrite OR on SoCai into two SARGable UNION ALL branches (derived tables required by T-SQL for TOP+ORDER BY)
+        tx_sql = f"""
+            SELECT TOP 50
+                Ngay_Ct, So_Ct, {self.fn_uni}(Dien_Giai) AS Dien_Giai,
+                Ps_No, Ps_Co, Ps_No_Nt, Ps_Co_Nt
+            FROM (
+                SELECT * FROM (
+                    SELECT TOP 50
+                        Ngay_Ct, So_Ct, Dien_Giai,
+                        ISNULL(Tien, 0) AS Ps_No, CAST(0 AS float) AS Ps_Co,
+                        ISNULL(Tien_Nt, 0) AS Ps_No_Nt, CAST(0 AS float) AS Ps_Co_Nt
+                    FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                    WHERE Tk_No LIKE '131%' AND Ma_Dt_No = ?
+                    ORDER BY Ngay_Ct DESC, So_Ct DESC
+                ) d_leg
+                UNION ALL
+                SELECT * FROM (
+                    SELECT TOP 50
+                        Ngay_Ct, So_Ct, Dien_Giai,
+                        CAST(0 AS float) AS Ps_No, ISNULL(Tien, 0) AS Ps_Co,
+                        CAST(0 AS float) AS Ps_No_Nt, ISNULL(Tien_Nt, 0) AS Ps_Co_Nt
+                    FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                    WHERE Tk_Co LIKE '131%' AND Ma_Dt_Co = ?
+                    ORDER BY Ngay_Ct DESC, So_Ct DESC
+                ) c_leg
+            ) t
+            ORDER BY Ngay_Ct DESC, So_Ct DESC
+        """
+
         ma_dt = ""
         ten_dt = ""
         so_ct = ""
         ngay_ct = ""
         tong_no = 0.0
+        transactions: List[DebtTransaction] = []
+        da_thanh_toan = 0.0
 
         try:
             with get_db_cursor(self.vp_db) as cur:
@@ -221,31 +302,10 @@ class DebtRepository:
                     so_ct = (r[2] or "").strip()
                     ngay_ct = r[3].strftime("%Y-%m-%d") if r[3] else ""
                     tong_no = float(r[5] or r[4] or 0.0)
-        except Exception as e:
-            logger.warning(f"Error querying voucher header for debt detail: {e}")
 
-        # Query transactions from SoCai for this customer (both Dr and Cr legs on TK 131x)
-        tx_sql = f"""
-            SELECT TOP 50
-                Ngay_Ct, So_Ct, {self.fn_uni}(Dien_Giai) AS Dien_Giai,
-                CASE WHEN Tk_No LIKE '131%' THEN ISNULL(Tien, 0) ELSE 0 END      AS Ps_No,
-                CASE WHEN Tk_Co LIKE '131%' THEN ISNULL(Tien, 0) ELSE 0 END      AS Ps_Co,
-                CASE WHEN Tk_No LIKE '131%' THEN ISNULL(Tien_Nt, 0) ELSE 0 END   AS Ps_No_Nt,
-                CASE WHEN Tk_Co LIKE '131%' THEN ISNULL(Tien_Nt, 0) ELSE 0 END   AS Ps_Co_Nt
-            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
-            WHERE (Tk_No LIKE '131%' AND Ma_Dt_No = ?)
-               OR (Tk_Co LIKE '131%' AND Ma_Dt_Co = ?)
-            ORDER BY Ngay_Ct DESC, So_Ct DESC
-        """
-
-        transactions: List[DebtTransaction] = []
-        da_thanh_toan = 0.0
-        try:
-            if ma_dt:
-                with get_db_cursor(self.vp_db) as cur:
+                if ma_dt:
                     cur.execute(tx_sql, [ma_dt, ma_dt])
-                    rows = cur.fetchall()
-                    for tr in rows:
+                    for tr in cur.fetchall():
                         p_co = float(tr[4] or 0.0)
                         da_thanh_toan += p_co
                         transactions.append(DebtTransaction(
@@ -258,7 +318,7 @@ class DebtRepository:
                             ps_co_nt=float(tr[6] or 0.0)
                         ))
         except Exception as e:
-            logger.warning(f"Error querying SoCai transactions: {e}")
+            logger.warning(f"Error querying voucher debt detail ({stt}): {e}")
 
         con_lai = max(0.0, tong_no - da_thanh_toan)
 
@@ -307,25 +367,12 @@ class DebtRepository:
 
         ten_dt = ""
         gioi_han = 0.0
-        try:
-            with get_db_cursor(self.sys_db) as cur:
-                cur.execute(
-                    f"SELECT TOP 1 {self.fn_uni}(Ten_Dt), ISNULL(Gioi_Han, 0) FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt = ?",
-                    [clean_ma_dt],
-                )
-                r = cur.fetchone()
-                if r:
-                    if r[0]:
-                        ten_dt = r[0].strip()
-                    gioi_han = float(r[1] or 0.0)
-        except Exception as e:
-            logger.warning(f"Error querying DmDt in debt ledger: {e}")
-
         du_dau = 0.0
         entries: List[DebtLedgerEntry] = []
         tong_ps_tang = 0.0
         tong_ps_giam = 0.0
 
+        # SARGable opening balance: tách riêng nhánh Nợ & Có thay vì OR trên 2 cặp cột khác nhau
         opening_sql = f"""
             SELECT
                 ISNULL((
@@ -335,41 +382,70 @@ class DebtRepository:
                 ), 0)
                 +
                 ISNULL((
-                    SELECT
-                        ISNULL(SUM(CASE WHEN Tk_No LIKE ? AND Ma_Dt_No = ? THEN Tien ELSE 0 END), 0)
-                      - ISNULL(SUM(CASE WHEN Tk_Co LIKE ? AND Ma_Dt_Co = ? THEN Tien ELSE 0 END), 0)
+                    SELECT SUM(ISNULL(Tien, 0))
                     FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
-                    WHERE Ngay_Ct < ?
-                      AND ((Tk_No LIKE ? AND Ma_Dt_No = ?) OR (Tk_Co LIKE ? AND Ma_Dt_Co = ?))
+                    WHERE Ngay_Ct < ? AND Tk_No LIKE ? AND Ma_Dt_No = ?
+                ), 0)
+                -
+                ISNULL((
+                    SELECT SUM(ISNULL(Tien, 0))
+                    FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                    WHERE Ngay_Ct < ? AND Tk_Co LIKE ? AND Ma_Dt_Co = ?
                 ), 0)
         """
 
+        # SARGable ledger: UNION ALL 2 nhánh Nợ/Có + giới hạn TOP (5000) để tránh OOM khi chọn khoảng nhiều năm
         ledger_sql = f"""
-            SELECT
+            SELECT TOP (5000)
                 RTRIM(Stt) AS Stt,
                 RTRIM(Ma_Ct) AS Ma_Ct,
                 Ngay_Ct,
                 RTRIM(So_Ct) AS So_Ct,
                 {self.fn_uni}(Dien_Giai) AS Dien_Giai,
-                CASE WHEN Tk_No LIKE ? AND Ma_Dt_No = ? THEN ISNULL(Tien, 0) ELSE 0 END AS Ps_Tang,
-                CASE WHEN Tk_Co LIKE ? AND Ma_Dt_Co = ? THEN ISNULL(Tien, 0) ELSE 0 END AS Ps_Giam
-            FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
-            WHERE Ngay_Ct >= ? AND Ngay_Ct <= ?
-              AND ((Tk_No LIKE ? AND Ma_Dt_No = ?) OR (Tk_Co LIKE ? AND Ma_Dt_Co = ?))
+                Ps_Tang,
+                Ps_Giam
+            FROM (
+                SELECT
+                    Stt, Ma_Ct, Ngay_Ct, So_Ct, Dien_Giai, Stt_Bt,
+                    ISNULL(Tien, 0) AS Ps_Tang,
+                    CAST(0 AS float) AS Ps_Giam
+                FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                WHERE Ngay_Ct >= ? AND Ngay_Ct <= ?
+                  AND Tk_No LIKE ? AND Ma_Dt_No = ?
+                UNION ALL
+                SELECT
+                    Stt, Ma_Ct, Ngay_Ct, So_Ct, Dien_Giai, Stt_Bt,
+                    CAST(0 AS float) AS Ps_Tang,
+                    ISNULL(Tien, 0) AS Ps_Giam
+                FROM {self.vp_db}.dbo.SoCai WITH (NOLOCK)
+                WHERE Ngay_Ct >= ? AND Ngay_Ct <= ?
+                  AND Tk_Co LIKE ? AND Ma_Dt_Co = ?
+            ) t
             ORDER BY Ngay_Ct ASC, So_Ct ASC, Stt ASC, Stt_Bt ASC
         """
 
         try:
             with get_db_cursor(self.vp_db) as cur:
+                try:
+                    cur.execute(
+                        f"SELECT TOP 1 {self.fn_uni}(Ten_Dt), ISNULL(Gioi_Han, 0) "
+                        f"FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt = ?",
+                        [clean_ma_dt],
+                    )
+                    r = cur.fetchone()
+                    if r:
+                        if r[0]:
+                            ten_dt = r[0].strip()
+                        gioi_han = float(r[1] or 0.0)
+                except Exception as e:
+                    logger.warning(f"Error querying DmDt in debt ledger: {e}")
+
                 cur.execute(
                     opening_sql,
                     [
                         tk_param, clean_ma_dt,
-                        tk_param, clean_ma_dt,
-                        tk_param, clean_ma_dt,
-                        start_str,
-                        tk_param, clean_ma_dt,
-                        tk_param, clean_ma_dt,
+                        start_str, tk_param, clean_ma_dt,
+                        start_str, tk_param, clean_ma_dt,
                     ],
                 )
                 r_open = cur.fetchone()
@@ -379,11 +455,8 @@ class DebtRepository:
                 cur.execute(
                     ledger_sql,
                     [
-                        tk_param, clean_ma_dt,
-                        tk_param, clean_ma_dt,
-                        start_str, end_str,
-                        tk_param, clean_ma_dt,
-                        tk_param, clean_ma_dt,
+                        start_str, end_str, tk_param, clean_ma_dt,
+                        start_str, end_str, tk_param, clean_ma_dt,
                     ],
                 )
                 for row in cur.fetchall():
@@ -426,5 +499,6 @@ class DebtRepository:
             du_cuoi_giam=-du_cuoi if du_cuoi < 0 else 0.0,
             entries=entries,
         )
+
 
 debt_repository = DebtRepository()

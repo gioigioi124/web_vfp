@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 from app.config import settings
 from app.database import get_db_cursor, get_db_transaction
+from app.utils.ttl_cache import TTLCache
 from app.utils.unicode import tcvn_to_unicode
 from app.utils.money import round_amount, round_vnd
 from app.repositories.debt_repo import debt_repository
@@ -18,6 +19,11 @@ from app.schemas.voucher import (
 )
 
 logger = logging.getLogger("app.repositories.voucher")
+
+# Multi-row INSERT batch size for CtBH0 (50 rows * 35 params = 1750 < 2100 SQL Server limit)
+_DETAIL_INSERT_BATCH_SIZE = 50
+_CLOSING_DATE_SENTINEL = ""
+
 
 def increment_voucher_number(s: str) -> str:
     """
@@ -34,6 +40,7 @@ def increment_voucher_number(s: str) -> str:
         return f"{pfx}{new_dgts}"
     return f"{s}1"
 
+
 class VoucherRepository:
 
     def __init__(self):
@@ -42,6 +49,7 @@ class VoucherRepository:
         self.sys_db = settings.DB_SYS
         self.fn_uni = f"{self.vp_db}.dbo.fn_TCVNToUnicode"
         self.fn_tcvn = f"{self.vp_db}.dbo.fn_UnicodeToTCVN"
+        self._closing_date_cache = TTLCache(max_size=32, default_ttl=60.0)
 
     def _is_warehouse(self, db_mode: Optional[str] = "sales") -> bool:
         return (db_mode or "").strip().lower() == "warehouse"
@@ -225,8 +233,16 @@ class VoucherRepository:
             WHERE {where_sql}
         """
 
-        # 2. Main data query (46 Header columns + joined names with SQL font conversion)
+        # 2. Main data query: phân trang CtBH trong CTE Page trước khi LEFT JOIN 6 bảng danh mục
+        #    và chạy fn_TCVNToUnicode chỉ trên <= 50 dòng kết quả thay vì toàn bộ tập lọc.
         data_sql = f"""
+            WITH Page AS (
+                SELECT h.*
+                FROM {target_db}.dbo.CtBH h WITH (NOLOCK)
+                WHERE {where_sql}
+                ORDER BY h.Ngay_Ct DESC, h.So_Ct DESC, h.Stt DESC
+                OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+            )
             SELECT
                 h.Stt, h.Ma_DvCs, h.Ma_Ct, h.Nh_Ct, h.Ma_Tte, h.Ty_Gia,
                 h.Ngay_Ps, h.Ngay_Ct, h.So_Ct, h.Ma_Xe, h.Ma_Bp, h.Ma_HD,
@@ -250,16 +266,14 @@ class VoucherRepository:
                 {self.fn_uni}(hd.Ten_HD) AS Ten_HD,
                 {self.fn_uni}(c.Dia_Chi) AS DmDt_Dia_Chi,
                 RTRIM(ISNULL(c.Phone, '')) AS DmDt_Phone
-            FROM {target_db}.dbo.CtBH h WITH (NOLOCK)
+            FROM Page h
             LEFT JOIN {self.sys_db}.dbo.DmDt c WITH (NOLOCK) ON c.Ma_Dt = h.Ma_Dt
             LEFT JOIN {self.sys_db}.dbo.DmXe x WITH (NOLOCK) ON x.Ma_Xe = h.Ma_Xe
             LEFT JOIN {self.sys_db}.dbo.DmBp bp WITH (NOLOCK) ON bp.Ma_Bp = h.Ma_Bp
             LEFT JOIN {self.sys_db}.dbo.DmNx nx WITH (NOLOCK) ON nx.Ma_Nx = h.Ma_Nx
             LEFT JOIN {self.sys_db}.dbo.DmTk tk WITH (NOLOCK) ON tk.Tk = h.Tk2
             LEFT JOIN {self.sys_db}.dbo.DmHD hd WITH (NOLOCK) ON hd.Ma_HD = h.Ma_HD
-            WHERE {where_sql}
             ORDER BY h.Ngay_Ct DESC, h.So_Ct DESC, h.Stt DESC
-            OFFSET {offset} ROWS FETCH NEXT {page_size} ROWS ONLY
         """
 
         total_records = 0
@@ -286,13 +300,14 @@ class VoucherRepository:
                         total_ttien0=float(sum_row[10] or 0.0),
                     )
 
-                # Execute items
-                cur.execute(data_sql, params)
-                rows = cur.fetchall()
-                for r in rows:
-                    items.append(self._row_to_header_schema(r))
-                # Hiển thị số mới nhất ở cuối danh sách (cũ ở trên, mới nhất ở dưới cùng)
-                items.reverse()
+                # Short-circuit: không chạy câu truy vấn chi tiết khi tập lọc rỗng
+                if total_records > 0:
+                    cur.execute(data_sql, [*params, offset, page_size])
+                    rows = cur.fetchall()
+                    for r in rows:
+                        items.append(self._row_to_header_schema(r))
+                    # Hiển thị số mới nhất ở cuối danh sách (cũ ở trên, mới nhất ở dưới cùng)
+                    items.reverse()
         except Exception as e:
             logger.error(f"Error querying vouchers ({db_mode}): {e}")
 
@@ -487,15 +502,21 @@ class VoucherRepository:
 
     def get_closing_date(self, ma_dvcs: str = "S1") -> Optional[str]:
         """
-        Query accounting closing lock date M_Ngay_Kt_Ht from VTSYS.dbo.DmDvCs.
+        Query accounting closing lock date M_Ngay_Kt_Ht from VTSYS.dbo.DmDvCs (TTL 60s).
         """
+        clean_dvcs = (ma_dvcs or "S1").strip().upper()
+        cached = self._closing_date_cache.get(clean_dvcs)
+        if cached is not None:
+            return cached or None
+
         sql = f"SELECT Ngay_Kt_Ht FROM {self.sys_db}.dbo.DmDvCs WITH (NOLOCK) WHERE Ma_DvCs = ?"
         try:
             with get_db_cursor(self.sys_db) as cur:
-                cur.execute(sql, [ma_dvcs or "S1"])
+                cur.execute(sql, [clean_dvcs])
                 r = cur.fetchone()
-                if r and r[0]:
-                    return r[0].strftime("%Y-%m-%d")
+                val = r[0].strftime("%Y-%m-%d") if (r and r[0]) else _CLOSING_DATE_SENTINEL
+                self._closing_date_cache.set(clean_dvcs, val)
+                return val or None
         except Exception as e:
             logger.warning(f"Error querying DmDvCs for closing date: {e}")
         return None
@@ -670,19 +691,23 @@ class VoucherRepository:
 
         check_ngay = ngay_ct or date.today().strftime("%Y-%m-%d")
         try:
-            for _ in range(500):
-                if cur is not None:
+            if cur is not None:
+                for _ in range(500):
                     is_dup = self._exec_check_number(
                         cur, target_db, ma_dvcs or "S1", "M", "", clean_ma_ct, check_ngay, candidate
                     )
-                else:
-                    with get_db_cursor(target_db) as c:
+                    if not is_dup:
+                        return candidate
+                    candidate = increment_voucher_number(candidate)
+            else:
+                with get_db_cursor(target_db) as c:
+                    for _ in range(500):
                         is_dup = self._exec_check_number(
                             c, target_db, ma_dvcs or "S1", "M", "", clean_ma_ct, check_ngay, candidate
                         )
-                if not is_dup:
-                    return candidate
-                candidate = increment_voucher_number(candidate)
+                        if not is_dup:
+                            return candidate
+                        candidate = increment_voucher_number(candidate)
         except Exception:
             pass
         return candidate
@@ -718,10 +743,16 @@ class VoucherRepository:
                     SET NOCOUNT ON;
                     DECLARE @rc int;
                     EXEC @rc = sp_getapplock @Resource=?, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=15000;
+                    IF @rc < 0
+                        THROW 50001, 'Could not acquire voucher number lock (sp_getapplock timeout)', 1;
                     """,
                     [f"web_vfp_soct:{target_db}:{clean_ma_ct}:{ym_key}"],
                 )
             except Exception as e:
+                if "50001" in str(e) or "sp_getapplock timeout" in str(e):
+                    raise ValueError(
+                        "Hệ thống đang bận cấp số chứng từ cho máy khác, vui lòng thử lưu lại sau giây lát."
+                    ) from e
                 logger.warning(f"sp_getapplock warning ({target_db}): {e}")
 
         if prefer_month_max or not curr_so_ct:
@@ -737,24 +768,27 @@ class VoucherRepository:
 
         is_dup_initially = False
         check_so_ct = curr_so_ct
-        for attempt in range(500):
-            if cur is not None:
+        if cur is not None:
+            for attempt in range(500):
                 is_dup = self._exec_check_number(
                     cur, target_db, ma_dvcs or "S1", moi_sua or "S", stt or "", clean_ma_ct, ngay_ct, check_so_ct
                 )
-            else:
-                with get_db_cursor(target_db) as c:
+                if attempt == 0:
+                    is_dup_initially = is_dup
+                if not is_dup:
+                    return is_dup_initially, check_so_ct
+                check_so_ct = increment_voucher_number(check_so_ct)
+        else:
+            with get_db_cursor(target_db) as c:
+                for attempt in range(500):
                     is_dup = self._exec_check_number(
                         c, target_db, ma_dvcs or "S1", moi_sua or "S", stt or "", clean_ma_ct, ngay_ct, check_so_ct
                     )
-
-            if attempt == 0:
-                is_dup_initially = is_dup
-
-            if not is_dup:
-                return is_dup_initially, check_so_ct
-
-            check_so_ct = increment_voucher_number(check_so_ct)
+                    if attempt == 0:
+                        is_dup_initially = is_dup
+                    if not is_dup:
+                        return is_dup_initially, check_so_ct
+                    check_so_ct = increment_voucher_number(check_so_ct)
 
         return is_dup_initially, check_so_ct
 
@@ -791,6 +825,46 @@ class VoucherRepository:
         tail = f"{t_ns}{rnd}"[-18:].zfill(18)
         return f"{clean_dvcs}{tail}"
 
+    def generate_stts_batch(self, ma_dvcs: str, count: int, cur: Optional[Any] = None) -> List[str]:
+        """
+        Cấp phát `count` mã Stt0 trong 1 lượt round-trip T-SQL duy nhất khi lưu chứng từ nhiều dòng,
+        fallback an toàn về `generate_stt` nếu SP không trả đủ khóa.
+        """
+        if count <= 0:
+            return []
+        if count == 1 or cur is None:
+            return [self.generate_stt(ma_dvcs, cur) for _ in range(count)]
+
+        clean_dvcs = (ma_dvcs or "S1").strip().upper()[:2]
+        batch_sql = f"""
+            SET NOCOUNT ON;
+            DECLARE @i int = 0;
+            DECLARE @p_Stt char(20);
+            DECLARE @keys TABLE (seq int IDENTITY(1,1), stt char(20));
+            WHILE @i < ?
+            BEGIN
+                SET @p_Stt = '';
+                EXEC {self.sys_db}.dbo.ST_Increase_KeyIndex @p_Ma_DvCs=?, @p_Stt=@p_Stt OUTPUT;
+                INSERT INTO @keys(stt) VALUES (@p_Stt);
+                SET @i = @i + 1;
+            END
+            SELECT stt FROM @keys ORDER BY seq;
+        """
+        try:
+            cur.execute(batch_sql, [count, clean_dvcs])
+            rows = cur.fetchall()
+            keys = [
+                str(r[0]).strip()
+                for r in (rows or [])
+                if r and r[0] and isinstance(r[0], str) and r[0].strip()
+            ]
+            if len(keys) == count:
+                return keys
+        except Exception as e:
+            logger.warning(f"Batch ST_Increase_KeyIndex warning, falling back to per-row: {e}")
+
+        return [self.generate_stt(ma_dvcs, cur) for _ in range(count)]
+
     def save_voucher(
         self,
         data: VoucherCreateRequest,
@@ -821,11 +895,12 @@ class VoucherRepository:
         # ===== CHỐT 3: KIỂM TRA HẠN MỨC CÔNG NỢ REALTIME (CHỈ ÁP DỤNG CHO PHIẾU BÁN VP_2014) =====
         if not is_wh and not getattr(data, "skip_debt_check", False):
             # Khi sửa phiếu (mode == "S"), loại trừ chính stt của phiếu đang sửa khỏi dư nợ
-            # để tránh tính trùng phiếu này (khách có thể chỉ vượt hạn mức sau khi đã lưu phiếu này).
+            # (check_only=True chỉ chạy 1 lần SP thay vì 2 lần).
             exclude_stt = (stt_override or "").strip() if mode == "S" else ""
             debt_summary = debt_repository.get_customer_debt_summary(
                 data.ma_dt.strip(),
                 stt=exclude_stt,
+                check_only=True,
             )
             if debt_summary.is_over_limit:
                 raw_check = getattr(debt_summary, "du_cuoi_kiem_tra", None)
@@ -952,11 +1027,11 @@ class VoucherRepository:
 
         # ===== CHỐT 7: CHỐNG TRÙNG SỐ & GHI BỀN VỮNG TRONG TRANSACTION ACID =====
         with get_db_transaction(target_db) as (conn, cur):
-            # CHỐT 2b (trong transaction): MÃ KHÁCH HÀNG PHẢI TỒN TẠI TRONG DmDt.
+            # CHỐT 2b (trong transaction): MÃ KHÁCH HÀNG PHẢI TỒN TẠI TRONG DmDt (SARGable).
             clean_ma_dt = (data.ma_dt or "").strip().upper()
             cur.execute(
                 f"SELECT TOP 1 1 FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) "
-                f"WHERE UPPER(RTRIM(Ma_Dt)) = ?",
+                f"WHERE Ma_Dt = ?",
                 [clean_ma_dt],
             )
             if cur.fetchone() is None:
@@ -1059,11 +1134,20 @@ class VoucherRepository:
                     stt
                 ])
 
-            # 2. Ghi Detail dbo.CtBH0 (Delete cũ nếu 'S' + Insert mới)
+            # 2. Ghi Detail dbo.CtBH0 (Delete cũ nếu 'S' + Batch cấp Stt0 & Multi-row INSERT)
             if mode == "S":
                 cur.execute(f"DELETE FROM {target_db}.dbo.CtBH0 WHERE Stt = ?", [stt])
 
-            insert_detail_sql = f"""
+            stt0_list = self.generate_stts_batch(data.ma_dvcs or "S1", len(data.items), cur)
+            row_placeholder = (
+                f"(?, ?, ?, ?, ?, ?, ?, "
+                f"?, ?, {self.fn_tcvn}(?), {self.fn_tcvn}(?), ?, ?, "
+                f"?, ?, ?, ?, ?, "
+                f"?, ?, ?, ?, ?, ?, "
+                f"?, ?, ?, ?, ?, ?, "
+                f"?, ?, ?, ?, ?)"
+            )
+            insert_detail_prefix = f"""
                 INSERT INTO {target_db}.dbo.CtBH0 (
                     Stt_PX, Stt0, Stt, Tk, Tk_Du, Tk_Du2, Tk_Du4,
                     Ma_Kho, Ma_Vt, Dvt, Dvt_Ban, So_Tam, He_So8,
@@ -1071,54 +1155,52 @@ class VoucherRepository:
                     Tien_Nt9, Tien9, So_Luong, Gia_Nt, Gia, Tien_Nt,
                     Tien, Gia_Nt2, Gia2, Tien_Nt2, Tien2, Tien_Nt3,
                     Tien3, Chiet_Khau, Tien_Nt4, Tien4, Gia_Tb_TT
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, {self.fn_tcvn}(?), {self.fn_tcvn}(?), ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?
-                )
-            """
-            for it in data.items:
-                stt0 = self.generate_stt(data.ma_dvcs or "S1", cur)
-                cur.execute(insert_detail_sql, [
-                    None if is_wh else (it.stt_px or None),
-                    stt0,
-                    stt,
-                    it.tk or ("6322" if is_wh else "632"),
-                    it.tk_du or ("155" if is_wh else "1561"),
-                    it.tk_du2 or ("5112" if is_wh else "5111"),
-                    it.tk_du4 or None,
-                    it.ma_kho or "",
-                    it.ma_vt,
-                    it.dvt or "",
-                    it.dvt_ban or None,
-                    it.so_tam or 0.0,
-                    it.he_so8 or 1.0,
-                    it.so_luong8 or 0.0,
-                    it.he_so9 or 1.0,
-                    it.so_luong9 or 0.0,
-                    None if is_wh else (it.gia_nt9 or 0.0),
-                    None if is_wh else (it.gia9 or 0.0),
-                    None if is_wh else (it.tien_nt9 or 0.0),
-                    None if is_wh else (it.tien9 or 0.0),
-                    it.so_luong or 0.0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None if is_wh else (it.gia_nt2 or 0.0),
-                    None if is_wh else (it.gia2 or 0.0),
-                    None if is_wh else (it.tien_nt2 or 0.0),
-                    None if is_wh else (it.tien2 or 0.0),
-                    it.tien_nt3,
-                    it.tien3,
-                    it.chiet_khau,
-                    it.tien_nt4,
-                    it.tien4,
-                    "C",
-                ])
+                ) VALUES """
+
+            for batch_start in range(0, len(data.items), _DETAIL_INSERT_BATCH_SIZE):
+                batch_items = data.items[batch_start:batch_start + _DETAIL_INSERT_BATCH_SIZE]
+                batch_stt0s = stt0_list[batch_start:batch_start + _DETAIL_INSERT_BATCH_SIZE]
+                batch_params: List[Any] = []
+                for it, stt0 in zip(batch_items, batch_stt0s):
+                    batch_params.extend([
+                        None if is_wh else (it.stt_px or None),
+                        stt0,
+                        stt,
+                        it.tk or ("6322" if is_wh else "632"),
+                        it.tk_du or ("155" if is_wh else "1561"),
+                        it.tk_du2 or ("5112" if is_wh else "5111"),
+                        it.tk_du4 or None,
+                        it.ma_kho or "",
+                        it.ma_vt,
+                        it.dvt or "",
+                        it.dvt_ban or None,
+                        it.so_tam or 0.0,
+                        it.he_so8 or 1.0,
+                        it.so_luong8 or 0.0,
+                        it.he_so9 or 1.0,
+                        it.so_luong9 or 0.0,
+                        None if is_wh else (it.gia_nt9 or 0.0),
+                        None if is_wh else (it.gia9 or 0.0),
+                        None if is_wh else (it.tien_nt9 or 0.0),
+                        None if is_wh else (it.tien9 or 0.0),
+                        it.so_luong or 0.0,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None if is_wh else (it.gia_nt2 or 0.0),
+                        None if is_wh else (it.gia2 or 0.0),
+                        None if is_wh else (it.tien_nt2 or 0.0),
+                        None if is_wh else (it.tien2 or 0.0),
+                        it.tien_nt3,
+                        it.tien3,
+                        it.chiet_khau,
+                        it.tien_nt4,
+                        it.tien4,
+                        "C",
+                    ])
+                values_sql = ",\n".join([row_placeholder] * len(batch_items))
+                cur.execute(insert_detail_prefix + values_sql, batch_params)
 
             # 2b. Chế độ Sửa 'S': xóa sổ cái cũ của chứng từ TRONG transaction trước khi post lại.
             if mode == "S":

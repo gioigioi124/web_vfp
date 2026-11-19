@@ -1,5 +1,7 @@
+import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
+from app.config import settings
 from app.services.voucher_service import voucher_service
 from app.services.calc_service import calc_service
 from app.schemas.calc import CalcRequest
@@ -9,9 +11,15 @@ from app.schemas.voucher import (
     CheckNumberRequest
 )
 
+logger = logging.getLogger("app.routers.vouchers")
 router = APIRouter(prefix="/api/vouchers", tags=["Vouchers"])
 
-@router.get("", response_model=dict)
+
+def _safe_error_message(exc: Exception, fallback: str) -> str:
+    return str(exc) if settings.DEBUG else fallback
+
+
+@router.get("")
 def list_vouchers(
     ma_ct: Optional[str] = Query("X1", description="Mã loại chứng từ (mặc định X1)"),
     ngay_ct1: Optional[str] = Query(None, description="Từ ngày (YYYY-MM-DD)"),
@@ -71,7 +79,7 @@ def list_vouchers(
         }
     }
 
-@router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 def create_voucher(
     req: VoucherCreateRequest,
     db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
@@ -91,12 +99,16 @@ def create_voucher(
             detail={"code": "VALIDATION_ERROR", "message": str(e)}
         )
     except Exception as e:
+        logger.exception("Unhandled error in create_voucher")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "INTERNAL_SERVER_ERROR", "message": str(e)}
+            detail={
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": _safe_error_message(e, "Lỗi máy chủ khi lưu chứng từ. Vui lòng thử lại."),
+            }
         )
 
-@router.get("/next-number", response_model=dict)
+@router.get("/next-number")
 def get_next_voucher_number(
     ma_dvcs: Optional[str] = Query("S1", description="Mã đơn vị cơ sở"),
     ma_ct: Optional[str] = Query("X1", description="Mã chứng từ"),
@@ -121,7 +133,7 @@ def get_next_voucher_number(
         }
     }
 
-@router.post("/check-number", response_model=dict)
+@router.post("/check-number")
 def check_voucher_number(
     req: CheckNumberRequest,
     db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
@@ -136,12 +148,16 @@ def check_voucher_number(
             "data": res.model_dump()
         }
     except Exception as e:
+        logger.exception("Unhandled error in check_voucher_number")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "CHECK_NUMBER_ERROR", "message": str(e)}
+            detail={
+                "code": "CHECK_NUMBER_ERROR",
+                "message": _safe_error_message(e, "Không thể kiểm tra số chứng từ lúc này."),
+            }
         )
 
-@router.post("/calc", response_model=dict)
+@router.post("/calc")
 def calculate_voucher(req: CalcRequest):
     """
     Mô phỏng tính toán nghiệp vụ (Calc_Loai2, chiết khấu dòng/tổng, thuế VAT).
@@ -153,7 +169,7 @@ def calculate_voucher(req: CalcRequest):
         "data": res.model_dump()
     }
 
-@router.get("/{stt}", response_model=dict)
+@router.get("/{stt}")
 def get_voucher_detail(
     stt: str,
     db_mode: Optional[str] = Query("sales", description="Chế độ CSDL: 'sales' (VP_2014) hoặc 'warehouse' (KH_2014)"),
@@ -172,7 +188,7 @@ def get_voucher_detail(
         "data": voucher.model_dump()
     }
 
-@router.put("/{stt}", response_model=dict)
+@router.put("/{stt}")
 def update_voucher(
     stt: str,
     req: VoucherUpdateRequest,
@@ -195,12 +211,16 @@ def update_voucher(
             detail={"code": "VALIDATION_ERROR", "message": str(e)}
         )
     except Exception as e:
+        logger.exception("Unhandled error in update_voucher")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "INTERNAL_SERVER_ERROR", "message": str(e)}
+            detail={
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": _safe_error_message(e, "Lỗi máy chủ khi cập nhật chứng từ. Vui lòng thử lại."),
+            }
         )
 
-@router.delete("/{stt}", response_model=dict)
+@router.delete("/{stt}")
 def delete_voucher(
     stt: str,
     user_name: Optional[str] = Query("KTCN3"),
@@ -223,7 +243,11 @@ def delete_voucher(
             detail={"code": "DELETE_VALIDATION_ERROR", "message": str(e)}
         )
     except Exception as e:
+        logger.exception("Unhandled error in delete_voucher")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "DELETE_ERROR", "message": str(e)}
+            detail={
+                "code": "DELETE_ERROR",
+                "message": _safe_error_message(e, "Lỗi máy chủ khi xóa chứng từ. Vui lòng thử lại."),
+            }
         )

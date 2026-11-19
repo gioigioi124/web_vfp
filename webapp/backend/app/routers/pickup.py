@@ -5,7 +5,7 @@ from app.schemas.pickup import PickupAcceptRequest
 
 router = APIRouter(prefix="/api/pickup", tags=["Pickup"])
 
-@router.get("/list", response_model=dict)
+@router.get("/list")
 def list_pickup_slips(
     ma_dt: Optional[str] = Query(None, description="Mã khách hàng cần lấy phiếu xuất"),
     ngay_ct1: Optional[str] = Query(None, description="Từ ngày"),
@@ -23,7 +23,7 @@ def list_pickup_slips(
         }
     }
 
-@router.get("/detail/{stt}", response_model=dict)
+@router.get("/detail/{stt}")
 def get_pickup_detail(stt: str):
     """
     Chi tiết các mặt hàng trên phiếu xuất kho từ CSDL KH_2014 (DetailViewToPickup).
@@ -40,7 +40,7 @@ def get_pickup_detail(stt: str):
         "data": detail.model_dump()
     }
 
-@router.post("/accept", response_model=dict)
+@router.post("/accept")
 def accept_pickup_slips(req: PickupAcceptRequest):
     """
     Nhận các phiếu xuất kho đã chọn và trả về danh sách dòng hàng đã ánh xạ

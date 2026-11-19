@@ -1,14 +1,18 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.database import get_db_cursor
+from app.utils.ttl_cache import TTLCache
 
 logger = logging.getLogger("app.repositories.price")
 
 # SQL Server allows at most 2100 parameters per statement; keep the IN (...) list
 # comfortably below that.
 _CHUNK_SIZE = 500
+_REGION_CACHE_TTL = 300.0
+_PRICE_CACHE_TTL = 30.0
+_PRICE_MISS = object()
 
 
 class PriceRepository:
@@ -31,26 +35,39 @@ class PriceRepository:
     def __init__(self):
         self.vp_db = settings.DB_VP
         self.sys_db = settings.DB_SYS
+        self._region_cache = TTLCache(max_size=2048, default_ttl=_REGION_CACHE_TTL)
+        self._price_cache = TTLCache(max_size=4096, default_ttl=_PRICE_CACHE_TTL)
+
+    def clear_cache(self) -> None:
+        self._region_cache.invalidate()
+        self._price_cache.invalidate()
 
     # ------------------------------------------------------------------ helpers
     def get_customer_region(self, ma_dt: str) -> str:
-        """Lấy `Ma_Vm` (khu vực) của khách hàng từ `VTSYS.dbo.DmDt`."""
-        if not ma_dt or not ma_dt.strip():
+        """Lấy `Ma_Vm` (khu vực) của khách hàng từ `VTSYS.dbo.DmDt` (cache 5 phút)."""
+        clean_dt = (ma_dt or "").strip().upper()
+        if not clean_dt:
             return ""
+        cached = self._region_cache.get(clean_dt)
+        if cached is not None:
+            return cached
+
         sql = f"""
             SELECT RTRIM(ISNULL(Ma_Vm, '')) AS Ma_Vm
             FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK)
-            WHERE RTRIM(Ma_Dt) = ?
+            WHERE Ma_Dt = ?
         """
+        region = ""
         try:
             with get_db_cursor(self.sys_db) as cur:
-                cur.execute(sql, [ma_dt.strip().upper()])
+                cur.execute(sql, [clean_dt])
                 r = cur.fetchone()
                 if r and r[0]:
-                    return str(r[0]).strip()
+                    region = str(r[0]).strip().upper()
+            self._region_cache.set(clean_dt, region)
         except Exception as e:
             logger.warning(f"Could not read DmDt.Ma_Vm for {ma_dt}: {e}")
-        return ""
+        return region
 
     @staticmethod
     def _pick_best(rows: List[tuple], ma_dt: str) -> Optional[dict]:
@@ -106,43 +123,67 @@ class PriceRepository:
         ma_dt: str,
         ma_vm: str,
         ngay_ct: str,
+        cur: Optional[Any] = None,
     ) -> List[tuple]:
-        """Một câu SELECT gom mọi dòng BG0 khớp danh sách mã vật tư."""
+        """Một câu SELECT SARGable có ROW_NUMBER() = 1 chọn đúng dòng giá tốt nhất mỗi Ma_Vt."""
         if not ma_vt_list:
             return []
 
+        clean_dt = (ma_dt or "").strip().upper()
+        clean_vm = (ma_vm or "").strip().upper()
         placeholders = ",".join(["?"] * len(ma_vt_list))
-        params: List[object] = [v.strip().upper() for v in ma_vt_list]
+        params: List[object] = []
+
+        # Biểu thức ưu tiên: khớp khách hàng = 2, khớp khu vực = 1
+        if clean_dt:
+            priority_expr = "CASE WHEN b.Ma_Dt = ? THEN 2 ELSE 1 END"
+            params.append(clean_dt)
+        else:
+            priority_expr = "1"
+
+        params.extend(v.strip().upper() for v in ma_vt_list)
         params.append(ngay_ct)
 
-        # Điều kiện đối tượng áp dụng: khớp khách hàng HOẶC khớp khu vực của khách.
-        if ma_dt:
-            obj_clause = (
-                "(RTRIM(ISNULL(b.Ma_Dt,'')) = ? "
-                " OR (RTRIM(ISNULL(b.Ma_Dt,'')) = '' AND RTRIM(ISNULL(b.Ma_Vm,'')) = ?))"
-            )
-            params.extend([ma_dt.strip().upper(), (ma_vm or "").strip().upper()])
-        elif ma_vm:
-            obj_clause = "(RTRIM(ISNULL(b.Ma_Dt,'')) = '' AND RTRIM(ISNULL(b.Ma_Vm,'')) = ?)"
-            params.append(ma_vm.strip().upper())
+        # Điều kiện đối tượng áp dụng SARGable (không bọc RTRIM/ISNULL quanh cột)
+        if clean_dt and clean_vm:
+            obj_clause = "(b.Ma_Dt = ? OR ((b.Ma_Dt IS NULL OR b.Ma_Dt = '') AND b.Ma_Vm = ?))"
+            params.extend([clean_dt, clean_vm])
+        elif clean_dt:
+            obj_clause = "b.Ma_Dt = ?"
+            params.append(clean_dt)
+        elif clean_vm:
+            obj_clause = "((b.Ma_Dt IS NULL OR b.Ma_Dt = '') AND b.Ma_Vm = ?)"
+            params.append(clean_vm)
         else:
             return []
 
         sql = f"""
-            SELECT
-                RTRIM(b0.Ma_Vt) AS Ma_Vt,
-                b0.Gia, b0.CK,
-                b.Ma_Dt, b.Ma_Vm,
-                b.Ngay_Ct, b.Ngay_Ct2, b.Stt
-            FROM {self.vp_db}.dbo.BG b WITH (NOLOCK)
-            JOIN {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK) ON b0.Stt = b.Stt
-            WHERE RTRIM(b0.Ma_Vt) IN ({placeholders})
-              AND b.Ngay_Ct <= ?
-              AND {obj_clause}
+            WITH Ranked AS (
+                SELECT
+                    RTRIM(b0.Ma_Vt) AS Ma_Vt,
+                    b0.Gia, b0.CK,
+                    b.Ma_Dt, b.Ma_Vm,
+                    b.Ngay_Ct, b.Ngay_Ct2, b.Stt,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY b0.Ma_Vt
+                        ORDER BY {priority_expr} DESC, b.Ngay_Ct DESC, b.Stt DESC
+                    ) AS rn
+                FROM {self.vp_db}.dbo.BG b WITH (NOLOCK)
+                JOIN {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK) ON b0.Stt = b.Stt
+                WHERE b0.Ma_Vt IN ({placeholders})
+                  AND b.Ngay_Ct <= ?
+                  AND {obj_clause}
+            )
+            SELECT Ma_Vt, Gia, CK, Ma_Dt, Ma_Vm, Ngay_Ct, Ngay_Ct2, Stt
+            FROM Ranked
+            WHERE rn = 1
         """
-        with get_db_cursor(self.vp_db) as cur:
+        if cur is not None:
             cur.execute(sql, params)
             return cur.fetchall()
+        with get_db_cursor(self.vp_db) as c:
+            c.execute(sql, params)
+            return c.fetchall()
 
     # ------------------------------------------------------------------- public
     def get_prices_batch(
@@ -152,7 +193,7 @@ class PriceRepository:
         ngay_ct: str,
     ) -> Dict[str, dict]:
         """
-        Tra giá cho nhiều mã vật tư trong MỘT lượt (gom theo mã).
+        Tra giá cho nhiều mã vật tư trong MỘT lượt (gom theo mã, tái sử dụng 1 kết nối + TTL cache 30s).
 
         Trả về dict {ma_vt (IN HOA): {gia, chiet_khau, expired, source, ngay_ct, ngay_ct2}}.
         Mã không có bảng giá sẽ KHÔNG xuất hiện trong dict.
@@ -168,25 +209,54 @@ class PriceRepository:
         if not clean_list or not ngay_ct:
             return result
 
-        ma_vm = self.get_customer_region(ma_dt)
+        clean_dt = (ma_dt or "").strip().upper()
+        clean_date = (ngay_ct or "").strip()[:10]
 
-        # Gom dòng theo mã vật tư (chunk để không vượt giới hạn tham số).
-        grouped: Dict[str, List[tuple]] = {}
-        for i in range(0, len(clean_list), _CHUNK_SIZE):
-            chunk = clean_list[i:i + _CHUNK_SIZE]
-            try:
-                rows = self._query_rows(chunk, ma_dt, ma_vm, ngay_ct)
-            except Exception as e:
-                logger.warning(f"Could not query BG/BG0: {e}")
+        missing: List[str] = []
+        for code in clean_list:
+            cache_key = f"{clean_dt}:{clean_date}:{code}"
+            cached = self._price_cache.get(cache_key)
+            if cached is _PRICE_MISS:
                 continue
-            for r in rows:
-                code = (r[0] or "").strip().upper()
-                grouped.setdefault(code, []).append(r)
+            if cached is not None:
+                result[code] = cached
+            else:
+                missing.append(code)
 
-        for code, rows in grouped.items():
-            picked = self._pick_best(rows, ma_dt)
+        if not missing:
+            return result
+
+        ma_vm = self.get_customer_region(clean_dt)
+
+        # Gom dòng theo mã vật tư trên CÙNG 1 kết nối DB
+        grouped: Dict[str, List[tuple]] = {}
+        queried_codes: List[str] = []
+        try:
+            with get_db_cursor(self.vp_db) as cur:
+                for i in range(0, len(missing), _CHUNK_SIZE):
+                    chunk = missing[i:i + _CHUNK_SIZE]
+                    try:
+                        rows = self._query_rows(chunk, clean_dt, ma_vm, clean_date, cur=cur)
+                        queried_codes.extend(chunk)
+                    except Exception as e:
+                        logger.warning(f"Could not query BG/BG0: {e}")
+                        continue
+                    for r in rows:
+                        code = (r[0] or "").strip().upper()
+                        grouped.setdefault(code, []).append(r)
+        except Exception as e:
+            logger.warning(f"Could not open connection for BG/BG0: {e}")
+            return result
+
+        for code in queried_codes:
+            rows = grouped.get(code)
+            picked = self._pick_best(rows, clean_dt) if rows else None
+            cache_key = f"{clean_dt}:{clean_date}:{code}"
             if picked is not None:
                 result[code] = picked
+                self._price_cache.set(cache_key, picked)
+            else:
+                self._price_cache.set(cache_key, _PRICE_MISS)
         return result
 
     def get_price(self, ma_dt: str, ma_vt: str, ngay_ct: str) -> Optional[dict]:

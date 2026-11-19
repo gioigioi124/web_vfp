@@ -7,11 +7,22 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 try:
-    from fastapi.responses import ORJSONResponse as _DefaultResponseClass
+    import orjson
+
+    class FastJSONResponse(Response):
+        media_type = "application/json"
+
+        def render(self, content) -> bytes:
+            return orjson.dumps(
+                content,
+                option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
+            )
+
+    _DefaultResponseClass = FastJSONResponse
 except Exception:  # pragma: no cover
     _DefaultResponseClass = JSONResponse
 
