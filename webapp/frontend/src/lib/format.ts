@@ -1,22 +1,28 @@
+const VND_FORMATTER = new Intl.NumberFormat("vi-VN", {
+  maximumFractionDigits: 0,
+});
+const FX_FORMATTER = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const QTY_FORMATTER = new Intl.NumberFormat("vi-VN", {
+  maximumFractionDigits: 2,
+});
+
 export function formatCurrency(
   amount?: number | null,
   currency: string = "VND",
 ): string {
   if (amount === null || amount === undefined || isNaN(amount)) return "0";
   if (currency === "VND") {
-    return Math.round(amount).toLocaleString("vi-VN");
+    return VND_FORMATTER.format(Math.round(amount));
   }
-  return Number(amount.toFixed(2)).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  return FX_FORMATTER.format(amount);
 }
 
 export function formatQuantity(qty?: number | null): string {
   if (qty === null || qty === undefined || isNaN(qty)) return "0";
-  return Number(qty.toFixed(2)).toLocaleString("vi-VN", {
-    maximumFractionDigits: 2,
-  });
+  return QTY_FORMATTER.format(Math.round(qty * 100) / 100);
 }
 
 /**
@@ -61,10 +67,29 @@ export function formatCompactNumber(n?: number | null): string {
   return `${neg ? "-" : ""}${dec ? `${grouped}.${dec}` : grouped}`;
 }
 
-/** Bỏ mọi ký tự phân nhóm (dấu cách, dấu phẩy) để parse số người dùng nhập. */
+/**
+ * Bỏ mọi ký tự phân nhóm để parse số người dùng nhập/dán.
+ * Hỗ trợ cả định dạng chuẩn Mỹ/VFP ("1 250 000.5", "1,250,000.5")
+ * và định dạng Việt Nam dùng dấu chấm phân nhóm nghìn ("1.250.000", "1.250.000,5").
+ */
 export function parseNumberInput(s: string): number {
   if (!s) return 0;
-  const cleaned = s.replace(/[\s,]/g, "").replace(/[^\d.\-]/g, "");
+  const trimmed = s.replace(/\s+/g, "").trim();
+  if (!trimmed) return 0;
+
+  let normalized: string;
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(trimmed)) {
+    // Dạng Việt Nam: "1.250.000" hoặc "1.250.000,5" hoặc "250.000"
+    normalized = trimmed.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d+,\d{1,2}$/.test(trimmed)) {
+    // Số thập phân dùng dấu phẩy đơn lẻ: "12,5" hoặc "0,75"
+    normalized = trimmed.replace(",", ".");
+  } else {
+    // Chuẩn VFP/US: dấu phẩy là phân nhóm nghìn, dấu chấm là thập phân
+    normalized = trimmed.replace(/,/g, "");
+  }
+
+  const cleaned = normalized.replace(/[^\d.\-]/g, "");
   const v = parseFloat(cleaned);
   return isNaN(v) ? 0 : v;
 }

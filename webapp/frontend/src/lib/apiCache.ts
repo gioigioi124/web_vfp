@@ -17,16 +17,62 @@ interface CacheEntry<T> {
   data?: T;
   ts: number;
   promise?: Promise<T>;
+  gen: number;
 }
 
+const MAX_CACHE_ENTRIES = 200;
 const store = new Map<string, CacheEntry<unknown>>();
+let nextGen = 1;
+
+function touchEntry<T>(key: string, entry: CacheEntry<T>): void {
+  if (store.has(key)) {
+    store.delete(key);
+  }
+  store.set(key, entry);
+  while (store.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = store.keys().next().value;
+    if (oldestKey === undefined) break;
+    store.delete(oldestKey);
+  }
+}
+
+function withCallerSignal<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(
+      new DOMException("The operation was aborted.", "AbortError"),
+    );
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (val) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(val);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
 
 /** TTL mặc định (ms): dữ liệu coi là "tươi" trong 5s, không gọi lại mạng. */
 export const DEFAULT_TTL = 5_000;
 
 /** Đọc dữ liệu đã cache (nếu có). Trả về undefined nếu chưa từng tải. */
 export function peek<T>(key: string): T | undefined {
-  return store.get(key)?.data as T | undefined;
+  const entry = store.get(key) as CacheEntry<T> | undefined;
+  if (!entry) return undefined;
+  touchEntry(key, entry);
+  return entry.data;
 }
 
 /** Kiểm tra cache còn "tươi" trong khoảng ttl hay không. */
@@ -41,25 +87,25 @@ export function invalidate(prefix?: string): void {
     store.clear();
     return;
   }
-  for (const key of store.keys()) {
+  for (const key of Array.from(store.keys())) {
     if (key.startsWith(prefix)) store.delete(key);
   }
 }
 
 export interface CachedFetchOptions {
-  /** Bỏ qua cache "tươi", buộc gọi mạng (vẫn dedupe request in-flight). */
+  /** Bỏ qua cache "tươi", buộc gọi mạng mới nhất. */
   force?: boolean;
   /** TTL riêng cho key này (ms). */
   ttl?: number;
-  /** Hủy request mạng. */
+  /** Hủy promise phía caller (không hủy request chia sẻ của caller khác). */
   signal?: AbortSignal;
 }
 
 /**
- * Fetch có cache theo key.
+ * Fetch có cache theo key (LRU <= 200 entries).
  * - Nếu cache tươi và !force → trả cache, không gọi mạng.
- * - Nếu đang có request in-flight cho cùng key → dùng chung promise (dedupe).
- * - Ngược lại → gọi mạng, lưu cache.
+ * - Nếu đang có request in-flight và !force → dùng chung promise (dedupe).
+ * - Nếu force → gửi request mới và đánh dấu generation để response cũ không ghi đè.
  */
 export async function cachedFetch<T = unknown>(
   key: string,
@@ -67,6 +113,9 @@ export async function cachedFetch<T = unknown>(
   opts: CachedFetchOptions = {},
 ): Promise<T> {
   const { force = false, ttl = DEFAULT_TTL, signal } = opts;
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
   const existing = store.get(key) as CacheEntry<T> | undefined;
 
   // 1) Cache tươi → trả luôn.
@@ -75,15 +124,19 @@ export async function cachedFetch<T = unknown>(
     existing?.data !== undefined &&
     Date.now() - existing.ts < ttl
   ) {
+    touchEntry(key, existing);
     return existing.data;
   }
 
-  // 2) Đang có request chạy cho cùng key → dùng chung (dedupe).
-  if (existing?.promise) return existing.promise;
+  // 2) Đang có request chạy cho cùng key (và không force) → dùng chung (dedupe).
+  if (!force && existing?.promise) {
+    return withCallerSignal(existing.promise, signal);
+  }
 
-  // 3) Gọi mạng.
+  // 3) Gọi mạng mới với generation counter để ngăn stale overwrite.
+  const reqGen = nextGen++;
   const promise = (async () => {
-    const res = await fetch(url, { signal });
+    const res = await fetch(url);
     if (!res.ok) {
       const err = new Error(`HTTP ${res.status} for ${url}`) as Error & {
         status?: number;
@@ -92,21 +145,34 @@ export async function cachedFetch<T = unknown>(
       throw err;
     }
     const json = (await res.json()) as T;
-    store.set(key, { data: json, ts: Date.now() });
+    const cur = store.get(key) as CacheEntry<T> | undefined;
+    // Chỉ ghi đè cache nếu không có request mới hơn đã bắt đầu hoặc hoàn tất
+    if (!cur || cur.gen <= reqGen) {
+      touchEntry(key, { data: json, ts: Date.now(), gen: reqGen });
+    }
     return json;
   })().catch((err) => {
-    // Thất bại: xóa promise để lần sau thử lại. Giữ data cũ CHỈ khi lỗi mạng
-    // (không giữ khi 404 — phiếu đã bị xóa, cache cũ không còn đúng).
     const status = (err as { status?: number })?.status;
     const cur = store.get(key) as CacheEntry<T> | undefined;
-    if (status === 404) store.delete(key);
-    else if (cur) store.set(key, { data: cur.data, ts: cur.ts });
-    else store.delete(key);
+    if (!cur || cur.gen <= reqGen) {
+      if (status === 404) {
+        store.delete(key);
+      } else if (cur && cur.data !== undefined) {
+        touchEntry(key, { data: cur.data, ts: cur.ts, gen: reqGen });
+      } else {
+        store.delete(key);
+      }
+    }
     throw err;
   });
 
-  store.set(key, { data: existing?.data, ts: existing?.ts ?? 0, promise });
-  return promise;
+  touchEntry(key, {
+    data: existing?.data,
+    ts: existing?.ts ?? 0,
+    promise,
+    gen: reqGen,
+  });
+  return withCallerSignal(promise, signal);
 }
 
 /**

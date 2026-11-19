@@ -1,10 +1,13 @@
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from app.config import settings
 from app.database import get_db_cursor
 from app.schemas.pickup import PickupSlipSchema, PickupItemSchema, PickupDetailResponse
 
 logger = logging.getLogger("app.repositories.pickup")
+
+_CHUNK_SIZE = 500
+
 
 class PickupRepository:
     def __init__(self):
@@ -18,7 +21,8 @@ class PickupRepository:
         self,
         ma_dt: Optional[str] = None,
         ngay_ct1: Optional[str] = None,
-        ngay_ct2: Optional[str] = None
+        ngay_ct2: Optional[str] = None,
+        limit: int = 500,
     ) -> List[PickupSlipSchema]:
         """
         List warehouse slips from KH_2014 not yet invoiced in VP_2014.
@@ -26,7 +30,7 @@ class PickupRepository:
         100% READ-ONLY (SELECT only).
         """
         where_clauses = ["h.Confirmed = 1", "h.Ma_Ct IN ('X1', 'N5')"]
-        params = []
+        params: List[Any] = []
 
         if ma_dt and ma_dt.strip():
             where_clauses.append("h.Ma_Dt = ?")
@@ -47,21 +51,36 @@ class PickupRepository:
         """)
 
         where_sql = " AND ".join(where_clauses)
+        safe_limit = max(1, min(int(limit or 500), 1000))
 
+        # Paginate/cap headers first, then aggregate CtBH0 via CROSS APPLY (avoids GROUP BY on wide nvarchar + UDFs)
         sql = f"""
+            WITH ReadyHeaders AS (
+                SELECT TOP ({safe_limit})
+                    h.Stt, h.So_Ct, h.Ngay_Ct, h.Ma_Dt, h.Dia_Chi, h.Ma_Xe
+                FROM {self.kh_db}.dbo.CtBH h WITH (NOLOCK)
+                WHERE {where_sql}
+                  AND EXISTS (SELECT 1 FROM {self.kh_db}.dbo.CtBH0 d0 WITH (NOLOCK) WHERE d0.Stt = h.Stt)
+                ORDER BY h.Ngay_Ct DESC, h.So_Ct DESC
+            )
             SELECT
                 h.Stt, h.So_Ct, h.Ngay_Ct, h.Ma_Dt,
                 {self.fn_uni}(h.Dia_Chi) AS Dia_Chi,
                 h.Ma_Xe,
                 {self.fn_uni}(c.Ten_Dt) AS Ten_Dt,
-                COUNT(d.Stt0) AS total_items,
-                ISNULL(SUM(d.So_Tam), 0) AS total_so_tam,
-                ISNULL(SUM(d.So_Luong9), 0) AS total_so_luong9
-            FROM {self.kh_db}.dbo.CtBH h WITH (NOLOCK)
+                agg.total_items,
+                agg.total_so_tam,
+                agg.total_so_luong9
+            FROM ReadyHeaders h
             LEFT JOIN {self.sys_db}.dbo.DmDt c WITH (NOLOCK) ON c.Ma_Dt = h.Ma_Dt
-            JOIN {self.kh_db}.dbo.CtBH0 d WITH (NOLOCK) ON d.Stt = h.Stt
-            WHERE {where_sql}
-            GROUP BY h.Stt, h.So_Ct, h.Ngay_Ct, h.Ma_Dt, h.Dia_Chi, h.Ma_Xe, c.Ten_Dt
+            CROSS APPLY (
+                SELECT
+                    COUNT(1) AS total_items,
+                    ISNULL(SUM(d.So_Tam), 0) AS total_so_tam,
+                    ISNULL(SUM(d.So_Luong9), 0) AS total_so_luong9
+                FROM {self.kh_db}.dbo.CtBH0 d WITH (NOLOCK)
+                WHERE d.Stt = h.Stt
+            ) agg
             ORDER BY h.Ngay_Ct DESC, h.So_Ct DESC
         """
 
@@ -87,6 +106,98 @@ class PickupRepository:
             logger.error(f"Error querying pickup slips from {self.kh_db}: {e}")
 
         return results
+
+    def get_pickup_slips_batch(
+        self, stts: List[str]
+    ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, List[PickupItemSchema]]]:
+        """
+        Batch fetch headers and detail items for multiple pickup slips on ONE connection.
+        Eliminates 2*M connection overhead in accept_pickup. 100% READ-ONLY.
+        """
+        clean_stts: List[str] = []
+        seen = set()
+        for s in stts or []:
+            cs = (s or "").strip()
+            if cs and cs not in seen:
+                seen.add(cs)
+                clean_stts.append(cs)
+
+        headers_by_stt: Dict[str, Dict[str, Any]] = {}
+        items_by_stt: Dict[str, List[PickupItemSchema]] = {s: [] for s in clean_stts}
+        if not clean_stts:
+            return headers_by_stt, items_by_stt
+
+        try:
+            with get_db_cursor(self.kh_db) as cur:
+                for i in range(0, len(clean_stts), _CHUNK_SIZE):
+                    chunk = clean_stts[i:i + _CHUNK_SIZE]
+                    ph = ",".join(["?"] * len(chunk))
+
+                    cur.execute(
+                        f"""
+                        SELECT h.Stt, h.Ma_Xe, h.Ma_Dt, h.Ngay_Ct
+                        FROM {self.kh_db}.dbo.CtBH h WITH (NOLOCK)
+                        WHERE h.Stt IN ({ph})
+                        """,
+                        chunk,
+                    )
+                    for r in cur.fetchall():
+                        stt_key = (r[0] or "").strip()
+                        headers_by_stt[stt_key] = {
+                            "stt": stt_key,
+                            "ma_xe": (r[1] or "").strip(),
+                            "ma_dt": (r[2] or "").strip(),
+                            "ngay_ct": r[3].strftime("%Y-%m-%d") if r[3] else "",
+                        }
+
+                    cur.execute(
+                        f"""
+                        SELECT
+                            d.Stt0, d.Stt, d.Ma_Vt,
+                            {self.fn_uni}(d.Dvt) AS Dvt,
+                            {self.fn_uni}(d.Dvt_Ban) AS Dvt_Ban,
+                            d.Ma_Kho,
+                            ISNULL(d.So_Tam, 0) AS So_Tam,
+                            ISNULL(d.He_So8, 1) AS He_So8,
+                            ISNULL(d.So_Luong8, 0) AS So_Luong8,
+                            ISNULL(d.So_Luong9, 0) AS So_Luong9,
+                            {self.fn_uni}(v.Ten_Vt) AS Ten_Vt,
+                            ISNULL(v.Loai_Vt, '1') AS Loai_Vt,
+                            ISNULL(v.Tk_Gv, '632') AS Tk_Gv,
+                            ISNULL(v.Tk_Vt, '1561') AS Tk_Vt,
+                            ISNULL(v.Tk_Dt, '5111') AS Tk_Dt,
+                            ISNULL(v.Tk_Ck, '521') AS Tk_Ck
+                        FROM {self.kh_db}.dbo.CtBH0 d WITH (NOLOCK)
+                        LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = d.Ma_Vt
+                        WHERE d.Stt IN ({ph})
+                        ORDER BY d.Stt, d.Stt0
+                        """,
+                        chunk,
+                    )
+                    for r in cur.fetchall():
+                        stt_key = (r[1] or "").strip()
+                        items_by_stt.setdefault(stt_key, []).append(PickupItemSchema(
+                            stt0=(r[0] or "").strip(),
+                            stt=stt_key,
+                            ma_vt=(r[2] or "").strip(),
+                            dvt=(r[3] or "").strip(),
+                            dvt_ban=(r[4] or "").strip(),
+                            ma_kho=(r[5] or "").strip(),
+                            so_tam=float(r[6] or 0.0),
+                            he_so8=float(r[7] or 1.0),
+                            so_luong8=float(r[8] or 0.0),
+                            so_luong9=float(r[9] or 0.0),
+                            ten_vt=(r[10] or "").strip(),
+                            loai_vt=(r[11] or "1").strip(),
+                            tk_gv=(r[12] or "632").strip(),
+                            tk_vt=(r[13] or "1561").strip(),
+                            tk_dt=(r[14] or "5111").strip(),
+                            tk_ck=(r[15] or "521").strip(),
+                        ))
+        except Exception as e:
+            logger.error(f"Error batch querying pickup slips from {self.kh_db}: {e}")
+
+        return headers_by_stt, items_by_stt
 
     def get_pickup_detail(self, stt: str) -> Optional[PickupDetailResponse]:
         """
@@ -170,12 +281,14 @@ class PickupRepository:
     def get_item_price(self, ma_dt: str, ma_vt: str, ngay_ct: str) -> float:
         """
         Look up unit selling price from VP_2014 via SO_Get_Price.
+        Includes SET NOCOUNT ON per memory.md §3.1.
         """
         if not ma_dt or not ma_vt:
             return 0.0
-        sql = """
+        sql = f"""
+            SET NOCOUNT ON;
             DECLARE @p_Gia numeric(18,4) = 0;
-            EXEC dbo.SO_Get_Price @p_Ngay_Ct=?, @p_Ma_Dt=?, @p_Ma_Vt=?, @p_Gia=@p_Gia OUTPUT;
+            EXEC {self.vp_db}.dbo.SO_Get_Price @p_Ngay_Ct=?, @p_Ma_Dt=?, @p_Ma_Vt=?, @p_Gia=@p_Gia OUTPUT;
             SELECT @p_Gia;
         """
         try:
@@ -191,12 +304,14 @@ class PickupRepository:
     def get_item_discount(self, ma_dt: str, ma_vt: str, ngay_ct: str) -> float:
         """
         Look up discount % from VP_2014 via SO_Get_Discount.
+        Includes SET NOCOUNT ON per memory.md §3.1.
         """
         if not ma_dt or not ma_vt:
             return 0.0
-        sql = """
+        sql = f"""
+            SET NOCOUNT ON;
             DECLARE @p_CK numeric(5,2) = 0;
-            EXEC dbo.SO_Get_Discount @p_Ngay_Ct=?, @p_Ma_Dt=?, @p_Ma_Vt=?, @p_CK=@p_CK OUTPUT;
+            EXEC {self.vp_db}.dbo.SO_Get_Discount @p_Ngay_Ct=?, @p_Ma_Dt=?, @p_Ma_Vt=?, @p_CK=@p_CK OUTPUT;
             SELECT @p_CK;
         """
         try:
@@ -208,5 +323,6 @@ class PickupRepository:
         except Exception as e:
             logger.warning(f"Error calling SO_Get_Discount for {ma_vt}: {e}")
         return 0.0
+
 
 pickup_repository = PickupRepository()

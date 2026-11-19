@@ -7,6 +7,7 @@ export interface HotkeyHandlers {
   onF3?: () => void;
   onCtrlF3?: () => void;
   onF4?: () => void;
+  onF5?: () => void;
   onF6?: () => void;
   onF7?: () => void;
   onPreview?: () => void; // Shift+F7 và Ctrl+F7 (VFP alias)
@@ -131,10 +132,12 @@ export function useHotkeys(
         h.onCtrlU?.();
         return;
       }
-      // 6. Ctrl+F — VFP dùng cho Danh_So_Ct (KHÔNG phải mở lọc)
+      // 6. Ctrl+F — chỉ chặn mặc định nếu có handler
       if (ctrl && key.toLowerCase() === "f") {
-        e.preventDefault();
-        h.onCtrlF?.();
+        if (h.onCtrlF) {
+          e.preventDefault();
+          h.onCtrlF();
+        }
         return;
       }
       // Ctrl+M — Tạo đơn mới (tương tự F2 trên danh sách)
@@ -171,7 +174,7 @@ export function useHotkeys(
         }
       }
 
-      // 7. Các phím chức năng đơn (luôn chặn hành vi mặc định của trình duyệt)
+      // 7. Các phím chức năng đơn (luôn chặn hành vi mặc định của trình duyệt khi có handler)
       switch (key) {
         case "F2":
           e.preventDefault();
@@ -182,24 +185,36 @@ export function useHotkeys(
           h.onF3?.();
           return;
         case "F4":
-          e.preventDefault();
-          h.onF4?.();
+          if (h.onF4) {
+            e.preventDefault();
+            h.onF4();
+          }
+          return;
+        case "F5":
+          if (h.onF5 && !ctrl && !e.shiftKey && !e.altKey) {
+            e.preventDefault();
+            h.onF5();
+          }
           return;
         case "F6":
           e.preventDefault();
           h.onF6?.();
           return;
         case "F7":
-          e.preventDefault();
-          h.onF7?.();
+          if (h.onF7) {
+            e.preventDefault();
+            h.onF7();
+          }
           return;
         case "F8":
           e.preventDefault();
           h.onF8?.();
           return;
         case "F9":
-          e.preventDefault();
-          h.onF9?.();
+          if (h.onF9) {
+            e.preventDefault();
+            h.onF9();
+          }
           return;
         case "Escape":
           h.onEscape?.();

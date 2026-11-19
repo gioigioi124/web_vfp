@@ -19,10 +19,7 @@ import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { Autocomplete } from "./components/ui/Autocomplete";
 import { Badge } from "./components/ui/Badge";
 import { formatDate } from "./lib/format";
-import {
-  invalidatePrintCache,
-  preloadPrintLogo,
-} from "./lib/printCache";
+import { invalidatePrintCache } from "./lib/printCache";
 import {
   VoucherFullDetail,
   VoucherDetail,
@@ -36,6 +33,7 @@ export function App() {
     setVoucherMode,
     vouchers,
     pagination,
+    summary,
     filters,
     loading,
     selectedStt,
@@ -72,6 +70,7 @@ export function App() {
   const [printPrice, setPrintPrice] = useState<"1" | "0">("1");
   // Đánh dấu dòng (Mark) giống ctbhh — Space / Ctrl+A / Ctrl+U tác động.
   const [marked, setMarked] = useState<Set<string>>(new Set());
+  const pendingClearMarkedRef = useRef<boolean>(false);
 
   // Ô tìm kiếm nhanh khách hàng & ngày chứng từ trên header (Enter để di chuyển và tìm kiếm)
   const [headerNgayCt1, setHeaderNgayCt1] = useState<string>(
@@ -92,11 +91,6 @@ export function App() {
   const ngayCt2InputRef = useRef<HTMLInputElement | null>(null);
   const customerSearchInputRef = useRef<HTMLInputElement | null>(null);
   const dienGiaiInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    void initCustomerIndex();
-    preloadPrintLogo();
-  }, []);
 
   useEffect(() => {
     setHeaderNgayCt1(filters?.ngay_ct1 || "");
@@ -196,7 +190,6 @@ export function App() {
   const isEditing = Boolean(sttParam && !isNew);
 
   const navToDetail = (stt: string) => {
-    handleOpenDetail(stt);
     navigate(`/sales-invoices/${encodeURIComponent(stt)}`);
   };
   const navToNew = () => navigate("/sales-invoices/new");
@@ -422,24 +415,22 @@ export function App() {
     copies?: number;
     mode?: "direct" | "preview";
   }) => {
-    const targets =
-      marked.size > 0
-        ? [
-            ...vouchers.filter((v) => marked.has(v.stt)).map((v) => v.stt),
-            ...Array.from(marked).filter(
-              (s) => !vouchers.some((v) => v.stt === s),
-            ),
-          ]
-        : activeVoucher
-          ? [activeVoucher.stt]
-          : selectedStt
-            ? [selectedStt]
-            : [];
+    const usedMarked = !sttParam && marked.size > 0;
+    const targets = usedMarked
+      ? [
+          ...vouchers.filter((v) => marked.has(v.stt)).map((v) => v.stt),
+          ...Array.from(marked).filter(
+            (s) => !vouchers.some((v) => v.stt === s),
+          ),
+        ]
+      : activeVoucher
+        ? [activeVoucher.stt]
+        : selectedStt
+          ? [selectedStt]
+          : [];
     if (targets.length > 0) {
+      pendingClearMarkedRef.current = usedMarked;
       handleOpenPrint(targets, options);
-      if (marked.size > 0) {
-        setMarked(new Set());
-      }
     } else {
       showToast("Chưa chọn chứng từ để in.");
     }
@@ -487,7 +478,10 @@ export function App() {
     }
   };
 
-  // Phím tắt riêng cho modal xác nhận xóa (Esc hủy, F8/Enter xác nhận) kể cả khi mở từ PickupDialog
+  const handleConfirmDeleteRef = useRef(handleConfirmDelete);
+  handleConfirmDeleteRef.current = handleConfirmDelete;
+
+  // Phím tắt riêng cho modal xác nhận xóa (Esc hủy, F8 xác nhận) kể cả khi mở từ PickupDialog
   useEffect(() => {
     if (!deleteTarget) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -498,12 +492,12 @@ export function App() {
       } else if (e.key === "F8" && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
-        if (!deleting) void handleConfirmDelete();
+        if (!deleting) void handleConfirmDeleteRef.current();
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  });
+  }, [deleteTarget, deleting]);
 
   // VFP Keyboard Shortcuts Handler (khớp ctbhh / ctbhd / ctbhch)
   useHotkeys(
@@ -519,14 +513,19 @@ export function App() {
       onCtrlF2: () => {
         if (!sttParam) handleActionCopy();
       },
-      // F3 = Sửa (ctbhh Command2)
+      // F3 / Enter = Sửa (ctbhh Command2)
       onF3: () => {
         if (!sttParam) handleActionEdit();
       },
+      onEnter: () => {
+        if (!sttParam) handleActionEdit();
+      },
+      // F5 trên danh sách = Làm mới dữ liệu từ SQL
+      onF5: !sttParam ? () => refresh() : undefined,
       onCtrlF3: () => showToast("Ctrl+F3 - Sửa mẫu in."),
       onF6: () => showToast("F6 - Nhập số IMEI."),
-      // F7 = In chứng từ trực tiếp (nếu đã Space đánh dấu nhiều phiếu -> in toàn bộ phiếu đã chọn và bỏ chọn)
-      onF7: () => handleActionPrint(),
+      // F7 = In chứng từ trực tiếp (chỉ trên danh sách; trong VoucherForm do VoucherForm xử lý)
+      onF7: !sttParam ? () => handleActionPrint() : undefined,
       // Alt+1..4 = In không giá (1..4 bản), Ctrl+1..4 = In có giá (1..4 bản) trên VoucherList
       onQuickPrint: (inGia, copies) => {
         if (!sttParam) handleActionPrint({ inGia, copies });
@@ -539,13 +538,8 @@ export function App() {
       onF8: () => {
         if (!sttParam) handleActionDelete();
       },
-      // F9 = Lọc chứng từ (ctbhh Command6)
-      onF9: () => setIsFilterOpen(true),
-      // F4 = Chọn tài khoản
-      onF4: () => {
-        if (activeVoucher || isNew)
-          showToast("F4 - Đang chọn tài khoản ngầm định.");
-      },
+      // F9 = Lọc chứng từ (chỉ trên danh sách; trong VoucherForm không mở FilterDialog)
+      onF9: !sttParam ? () => setIsFilterOpen(true) : undefined,
       // Space = đánh dấu / bỏ đánh dấu dòng (ctbhh KeyPress 32)
       onSpace: () => {
         if (!sttParam) toggleMark(selectedStt);
@@ -563,9 +557,6 @@ export function App() {
           setMarked(new Set());
           showToast("Đã bỏ chọn tất cả chứng từ.");
         }
-      },
-      onCtrlF: () => {
-        if (!sttParam) showToast("Ctrl+F - Đánh số chứng từ tự động.");
       },
       onCtrlShiftE: () => {
         if (!sttParam) {
@@ -587,8 +578,6 @@ export function App() {
           setIsPickupOpen(false);
         } else if (isFilterOpen) {
           setIsFilterOpen(false);
-        } else if (sttParam) {
-          navToList();
         }
       },
       onCtrlHome: () => {
@@ -990,6 +979,7 @@ export function App() {
           <VoucherList
             vouchers={vouchers}
             pagination={pagination}
+            summary={summary}
             filters={filters}
             loading={loading}
             selectedStt={selectedStt}
@@ -999,6 +989,7 @@ export function App() {
             debtAmount={debtAmount}
             voucherMode={voucherMode}
             onSelectStt={setSelectedStt}
+            onEditVoucher={(stt) => navToDetail(stt)}
             onToggleMark={toggleMark}
             onOpenFilter={() => setIsFilterOpen(true)}
             onOpenPrint={handleOpenPrint}
@@ -1223,8 +1214,15 @@ export function App() {
         isOpen={isPrintOpen}
         onClose={() => {
           setIsPrintOpen(false);
-          if (sttParam) navToList();
+          pendingClearMarkedRef.current = false;
         }}
+        onPrintComplete={() => {
+          if (pendingClearMarkedRef.current) {
+            pendingClearMarkedRef.current = false;
+            setMarked(new Set());
+          }
+        }}
+        onError={(msg) => showToast(msg)}
         stts={printStts}
         inGia={printInGia ?? printPrice}
         copies={printCopies}

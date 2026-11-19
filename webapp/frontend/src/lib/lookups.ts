@@ -13,11 +13,16 @@ import {
   PriceItem,
 } from "../types/lookup";
 import { ProductInfo } from "./productIndex";
+import { cachedFetch } from "./apiCache";
+import { isCatalogReady, searchKho } from "./catalogCache";
 
 /**
  * Client cho các endpoint danh mục `/api/lookups/*` (plan §6.4).
  * Mọi hàm chỉ ĐỌC dữ liệu (GET), dùng cho autocomplete & dropdown.
  */
+
+const LOOKUP_TTL_MS = 300_000;
+const PRICE_TTL_MS = 60_000;
 
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T[]> {
   const res = await fetch(url, { signal });
@@ -54,11 +59,19 @@ export async function fetchKhachHangOptions(
   }));
 }
 
-/** Mã/tên kho → gợi ý autocomplete. */
+/** Mã/tên kho → gợi ý autocomplete (ưu tiên RAM catalogCache, tránh gọi mạng lặp lại). */
 export async function fetchKhoOptions(
   query: string,
 ): Promise<AutocompleteOption[]> {
-  const items = await getJson<KhoItem>("/api/lookups/kho");
+  if (isCatalogReady()) {
+    return searchKho(query);
+  }
+  const body = await cachedFetch<{ data?: KhoItem[] }>(
+    "lookup:kho",
+    "/api/lookups/kho",
+    { ttl: LOOKUP_TTL_MS },
+  );
+  const items = body?.data ?? [];
   const q = query.trim().toLowerCase();
   return items
     .filter(
@@ -196,14 +209,15 @@ export async function fetchPrice(
 ): Promise<PriceItem | null> {
   const code = (maVt || "").trim().toUpperCase();
   if (!code || !ngayCt) return null;
+  const dt = (maDt || "").trim().toUpperCase();
   try {
-    const res = await fetch(
+    const body = await cachedFetch<{ data?: PriceItem | null }>(
+      `price:${dt}:${ngayCt}:${code}`,
       `/api/prices/${encodeURIComponent(code)}?ma_dt=${encodeURIComponent(
-        maDt || "",
+        dt,
       )}&ngay_ct=${encodeURIComponent(ngayCt)}`,
+      { ttl: PRICE_TTL_MS },
     );
-    if (!res.ok) return null;
-    const body = await res.json();
     return (body?.data ?? null) as PriceItem | null;
   } catch {
     return null;

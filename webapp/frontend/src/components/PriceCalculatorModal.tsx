@@ -186,7 +186,7 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
     setInputText(initText);
     setPendingValue(null);
     setPendingOp(null);
-    setAwaitingNext(false);
+    setAwaitingNext(initVal > 0);
     setHistoryLabel("");
     setSubmitError(null);
 
@@ -194,8 +194,12 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
       const el = inputRef.current;
       if (!el) return;
       el.focus();
-      const len = el.value.length;
-      el.setSelectionRange(len, len);
+      if (initVal > 0) {
+        el.select();
+      } else {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
     };
     const t1 = window.setTimeout(placeCaretAtEnd, 35);
     const t2 = window.setTimeout(placeCaretAtEnd, 60);
@@ -538,6 +542,45 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
               autoComplete="off"
               spellCheck={false}
               value={inputText}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData("text").trim();
+                if (!text) return;
+                const exprMatch = text.match(
+                  /^\s*(-?[\d.,\s]+)\s*([+\-*/×÷])\s*(-?[\d.,\s]+)\s*$/,
+                );
+                if (exprMatch) {
+                  e.preventDefault();
+                  const cleanSide = (s: string) => {
+                    const t = s.replace(/\s+/g, "");
+                    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) {
+                      return Number(t.replace(/\./g, "").replace(",", "."));
+                    }
+                    return Number(t.replace(/,/g, ""));
+                  };
+                  const left = cleanSide(exprMatch[1]);
+                  const rawOp = exprMatch[2];
+                  const op: BinaryOp =
+                    rawOp === "×" ? "*" : rawOp === "÷" ? "/" : (rawOp as BinaryOp);
+                  const right = cleanSide(exprMatch[3]);
+                  if (Number.isFinite(left) && Number.isFinite(right)) {
+                    const res = computeBinary(left, op, right);
+                    if (!res.ok) {
+                      setSubmitError(res.error);
+                    } else {
+                      const formatted = formatCalcNumber(res.value);
+                      setInputText(formatted);
+                      setPendingValue(null);
+                      setPendingOp(null);
+                      setAwaitingNext(true);
+                      setHistoryLabel(
+                        `${formatCalcNumber(left)} ${OP_SYMBOL[op]} ${formatCalcNumber(right)} =`,
+                      );
+                      setSubmitError(null);
+                      focusEnd(formatted.length);
+                    }
+                  }
+                }
+              }}
               onChange={(e) => {
                 const val = e.target.value;
                 const caret = e.target.selectionStart ?? val.length;

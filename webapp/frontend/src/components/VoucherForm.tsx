@@ -125,7 +125,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const isDifferentCreator =
     isEditable &&
     !isCreate &&
-    (!voucher || voucherCreator.toUpperCase() !== CURRENT_USER);
+    Boolean(voucher) &&
+    voucherCreator.toUpperCase() !== CURRENT_USER;
 
   // Refs for sequential focus & Enter navigation:
   // Ngày -> Số phiếu -> Mã đối tượng -> Diễn giải -> Mã xe -> Chọn phiếu xuất
@@ -219,6 +220,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Mã vùng/khu vực của khách hàng (DmDt.Ma_Vm) — hiển thị trên header.
   const [maVm, setMaVm] = useState<string>("");
   const [showAccountPicker, setShowAccountPicker] = useState<boolean>(false);
+  const [accountQuery, setAccountQuery] = useState<string>("");
 
   // Detail Items State
   const [items, setItems] = useState<VoucherDetail[]>(() => {
@@ -290,11 +292,32 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   } | null>(null);
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
+  const accountInputRef = useRef<HTMLInputElement | null>(null);
   const [showPriceCalc, setShowPriceCalc] = useState<boolean>(false);
   const [calcInitialPrice, setCalcInitialPrice] = useState<number>(0);
   const beforeCalcFocusRef = useRef<HTMLElement | null>(null);
   useModalLock(!!debtDialog, debtDialogRef);
   useModalLock(showAccountPicker, accountPickerRef);
+
+  useEffect(() => {
+    if (!showAccountPicker) return;
+    setAccountQuery("");
+    const timer = window.setTimeout(() => {
+      accountInputRef.current?.focus();
+    }, 30);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowAccountPicker(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [showAccountPicker]);
 
   // Đóng dialog cảnh báo và trả focus về trường phù hợp (Tên KH hoặc Mã KH).
   const closeDebtDialog = useCallback(() => {
@@ -2312,8 +2335,10 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 Tìm số hiệu hoặc tên tài khoản:
               </label>
               <Autocomplete
-                value=""
-                onChange={() => {}}
+                value={accountQuery}
+                onChange={setAccountQuery}
+                inputRef={accountInputRef}
+                autoFocus
                 onSelect={(opt) => {
                   if (activeRowIndex >= 0 && activeRowIndex < items.length) {
                     const row = items[activeRowIndex];
@@ -2337,7 +2362,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             <div className="bg-neutral-100 px-3 py-1.5 flex justify-end border-t border-neutral-200">
               <button
                 type="button"
-                data-autofocus
                 onClick={() => setShowAccountPicker(false)}
                 className="px-3 py-1 bg-white border border-neutral-300 rounded text-xs font-medium hover:bg-neutral-50 cursor-pointer"
               >

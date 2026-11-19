@@ -51,6 +51,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   const [activeDetailRow, setActiveDetailRow] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // Tăng mỗi lần nạp lại danh sách phiếu -> buộc nạp lại chi tiết kể cả khi
   // activeStt không đổi (dialog luôn mounted nên state cũ vẫn còn).
   const [detailVersion, setDetailVersion] = useState(0);
@@ -172,7 +173,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         const url = `/api/pickup/list?${q.toString()}`;
         const res = await fetch(url);
         const data = await res.json();
-        if (data.success && data.data?.items) {
+        if (res.ok && data.success && data.data?.items) {
+          setErrorMsg(null);
           const items: PickupSlip[] = data.data.items;
           setSlips(items);
           setActiveStt((prev) => {
@@ -194,12 +196,20 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             return next;
           });
         } else {
+          if (!res.ok) {
+            setErrorMsg(
+              data?.detail?.message ||
+                data?.message ||
+                `Không tải được danh sách phiếu xuất kho (HTTP ${res.status}).`,
+            );
+          }
           setSlips([]);
           setActiveStt(null);
           setSelectedStts(new Set());
         }
       } catch (e) {
         console.error("Error fetching pickup slips", e);
+        setErrorMsg("Lỗi kết nối khi tải danh sách phiếu xuất kho.");
       } finally {
         setLoading(false);
         // Luôn tăng để effect chi tiết & focus sau tải chạy lại (kể cả activeStt giữ nguyên).
@@ -282,12 +292,20 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
           `/api/pickup/detail/${encodeURIComponent(activeStt)}`,
         );
         const data = await res.json();
-        if (!cancelled && data.success && data.data?.items) {
+        if (!cancelled && res.ok && data.success && data.data?.items) {
           setActiveItems(data.data.items);
           setActiveDetailRow(0);
+        } else if (!cancelled && !res.ok) {
+          setErrorMsg(
+            data?.detail?.message ||
+              `Không tải được chi tiết phiếu kho (HTTP ${res.status}).`,
+          );
         }
       } catch (e) {
         console.error("Error fetching pickup detail", e);
+        if (!cancelled) {
+          setErrorMsg("Lỗi kết nối khi tải chi tiết phiếu kho.");
+        }
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
@@ -321,6 +339,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   const handleAccept = useCallback(async () => {
     if (selectedStts.size === 0) return;
     setLoading(true);
+    setErrorMsg(null);
     try {
       const res = await fetch("/api/pickup/accept", {
         method: "POST",
@@ -332,7 +351,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         }),
       });
       const json = await res.json();
-      if (json.success && json.data) {
+      if (res.ok && json.success && json.data) {
         const selected = slips.filter((s) => selectedStts.has(s.stt));
         const rows = json.data.rows || [];
         if (rows.length > 0) {
@@ -341,9 +360,16 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         }
         onAccept(selected, rows, json.data.ma_xe || "");
         onClose();
+      } else {
+        setErrorMsg(
+          json?.detail?.message ||
+            json?.message ||
+            "Không thể lấy dòng hàng từ phiếu xuất kho.",
+        );
       }
     } catch (err) {
       console.error("Error accepting pickup slips:", err);
+      setErrorMsg("Lỗi kết nối khi lấy dữ liệu phiếu xuất kho.");
     } finally {
       setLoading(false);
     }
@@ -687,6 +713,34 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
 
         {/* ===== Master / Detail Body ===== */}
         <main className="flex-1 flex flex-col overflow-hidden p-3 gap-3 bg-neutral-100/70">
+          {errorMsg && (
+            <div
+              role="alert"
+              className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 rounded bg-danger-50 border border-danger-300 text-danger-800 text-xs"
+            >
+              <span className="font-medium truncate">{errorMsg}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMsg(null);
+                    void loadSlips(activeStt);
+                  }}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-danger-100 border border-danger-300 text-danger-700 font-semibold text-[11px] cursor-pointer"
+                >
+                  Thử lại
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setErrorMsg(null)}
+                  className="p-0.5 text-danger-600 hover:text-danger-800 cursor-pointer"
+                  title="Đóng thông báo"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
           {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU XUẤT KHO */}
           <section className="shrink-0 max-h-[210px] flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden">
             <div

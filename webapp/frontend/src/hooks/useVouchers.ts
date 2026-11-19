@@ -167,86 +167,151 @@ export function useVouchers() {
     fetchVouchers();
   }, [fetchVouchers]);
 
-  // Ref giữ fetchVouchers để effect chi tiết KHÔNG phụ thuộc nó (tránh chạy lại
-  // khi filters đổi). Effect chỉ chạy khi selectedStt đổi (click grid).
+  // Ref giữ fetchVouchers và vouchers để effect chi tiết KHÔNG phụ thuộc chúng.
   const fetchVouchersRef = useRef(fetchVouchers);
   fetchVouchersRef.current = fetchVouchers;
+  const vouchersRef = useRef(vouchers);
+  vouchersRef.current = vouchers;
+  const lastHiddenAtRef = useRef<number>(0);
 
-  // ===== Nạp chi tiết dòng hàng của dòng đang chọn cho pane dưới (ctbhh Grid2) =====
-  // Chạy khi click vào grid (selectedStt đổi) hoặc khi quay về từ trang chi tiết.
-  // Đồng thời làm mới NGẦM danh sách để phiếu mới (do người khác tạo) xuất hiện.
+  // Tự động làm mới ngầm danh sách khi người dùng quay lại tab sau >= 30s
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        lastHiddenAtRef.current = Date.now();
+      } else if (
+        document.visibilityState === "visible" &&
+        lastHiddenAtRef.current > 0 &&
+        Date.now() - lastHiddenAtRef.current >= 30_000
+      ) {
+        lastHiddenAtRef.current = 0;
+        invalidate("list:");
+        void fetchVouchersRef.current({ force: true, silent: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
+  // ===== Nạp chi tiết dòng hàng + dư nợ của dòng đang chọn (SWR + song song + debounce 100ms) =====
   useEffect(() => {
     if (!selectedStt) {
       setListDetail([]);
       setDebtAmount(null);
+      setListDetailLoading(false);
       return;
     }
+
     let cancelled = false;
+    const controller = new AbortController();
+    const vKey = voucherKey(voucherMode, selectedStt);
 
-    // Làm mới ngầm danh sách (không nháy spinner) để bắt phiếu mới/thay đổi.
-    invalidate("list:");
-    fetchVouchersRef.current({ force: true, silent: true });
+    // 1) Đọc ma_dt tức thì từ danh sách header hiện có để gọi detail + debt SONG SONG
+    const headerRow = vouchersRef.current.find((v) => v.stt === selectedStt);
+    const knownMaDt = (headerRow?.ma_dt || "").trim();
 
-    // Nạp ngầm sẵn dữ liệu bản in & giải mã logo sau 60ms dừng chọn dòng để F7/Ctrl+F7 mở tức thì.
-    preloadPrintLogo();
-    const prefetchTimer = window.setTimeout(() => {
-      if (!cancelled) {
-        prefetchPrintPayload(voucherMode, selectedStt, true);
+    // 2) SWR: nếu đã có cache RAM, hiển thị tức thì (0ms) không chờ debounce/mạng
+    const cachedDetail = peek<any>(vKey);
+    const hasCachedDetail = Boolean(cachedDetail?.success && cachedDetail.data);
+    if (hasCachedDetail) {
+      setListDetail(cachedDetail.data.items || []);
+    }
+    const maDtForCache = knownMaDt || (cachedDetail?.data?.ma_dt || "").trim();
+    if (maDtForCache && voucherMode === "sales") {
+      const cachedDebt = peek<any>(debtKey(maDtForCache));
+      if (cachedDebt?.success && cachedDebt.data) {
+        setDebtAmount(cachedDebt.data.du_cuoi ?? null);
       }
-    }, 60);
+    } else if (voucherMode !== "sales") {
+      setDebtAmount(null);
+    }
 
-    (async () => {
-      setListDetailLoading(true);
-      try {
-        const data = await cachedFetch<any>(
-          voucherKey(voucherMode, selectedStt),
-          `/api/vouchers/${encodeURIComponent(selectedStt)}?db_mode=${encodeURIComponent(voucherMode)}`,
-          { force: true },
-        );
-        if (cancelled) return;
-        if (data.success && data.data) {
-          setListDetail(data.data.items || []);
-          const maDt = data.data.ma_dt;
-          if (maDt && voucherMode === "sales") {
-            try {
-              const ddata = await cachedFetch<any>(
-                debtKey(maDt),
-                `/api/debt/customer?ma_dt=${encodeURIComponent(maDt)}`,
-                { force: true },
-              );
-              if (!cancelled && ddata.success && ddata.data) {
-                setDebtAmount(ddata.data.du_cuoi ?? null);
-              }
-            } catch {
-              if (!cancelled) setDebtAmount(null);
-            }
-          } else {
-            setDebtAmount(null);
-          }
-        }
-      } catch (err: any) {
-        if (cancelled) return;
-        if (err?.status === 404) {
-          // Phiếu không còn tồn tại (bị người khác xóa/sửa Stt) → nạp lại danh sách.
-          console.warn(
-            `Voucher ${selectedStt} không tồn tại, tải lại danh sách.`,
+    // 3) Debounce 100ms khi lướt phím mũi tên nhanh qua nhiều dòng liên tiếp
+    const debounceMs = hasCachedDetail ? 0 : 100;
+    const fetchTimer = window.setTimeout(() => {
+      if (cancelled) return;
+
+      // Nạp ngầm bản in & logo sau khi người dùng dừng ở dòng này (dùng TTL 15s, không force)
+      preloadPrintLogo();
+      prefetchPrintPayload(voucherMode, selectedStt, false);
+
+      const loadDetail = async () => {
+        if (!hasCachedDetail) setListDetailLoading(true);
+        try {
+          const detailPromise = cachedFetch<any>(
+            vKey,
+            `/api/vouchers/${encodeURIComponent(selectedStt)}?db_mode=${encodeURIComponent(voucherMode)}`,
+            { ttl: 10_000, signal: controller.signal },
           );
-          setListDetail([]);
-          setDebtAmount(null);
-          invalidate("list:");
-          fetchVouchersRef.current({ force: true });
-        } else {
-          console.error(`Error fetching list detail for ${selectedStt}:`, err);
-          setListDetail([]);
-          setDebtAmount(null);
+
+          const debtPromise =
+            knownMaDt && voucherMode === "sales"
+              ? cachedFetch<any>(
+                  debtKey(knownMaDt),
+                  `/api/debt/customer?ma_dt=${encodeURIComponent(knownMaDt)}`,
+                  { ttl: 15_000, signal: controller.signal },
+                ).catch(() => null)
+              : Promise.resolve(null);
+
+          const [detailData, debtData] = await Promise.all([
+            detailPromise,
+            debtPromise,
+          ]);
+          if (cancelled) return;
+
+          if (detailData?.success && detailData.data) {
+            setListDetail(detailData.data.items || []);
+            const resolvedMaDt = (detailData.data.ma_dt || "").trim();
+            if (voucherMode !== "sales" || !resolvedMaDt) {
+              setDebtAmount(null);
+            } else if (debtData?.success && debtData.data) {
+              setDebtAmount(debtData.data.du_cuoi ?? null);
+            } else if (!knownMaDt && resolvedMaDt) {
+              // Fallback hiếm khi header chưa có ma_dt
+              try {
+                const ddata = await cachedFetch<any>(
+                  debtKey(resolvedMaDt),
+                  `/api/debt/customer?ma_dt=${encodeURIComponent(resolvedMaDt)}`,
+                  { ttl: 15_000, signal: controller.signal },
+                );
+                if (!cancelled && ddata?.success && ddata.data) {
+                  setDebtAmount(ddata.data.du_cuoi ?? null);
+                }
+              } catch {
+                if (!cancelled) setDebtAmount(null);
+              }
+            }
+          }
+        } catch (err: any) {
+          if (cancelled || err?.name === "AbortError") return;
+          if (err?.status === 404) {
+            console.warn(
+              `Voucher ${selectedStt} không tồn tại, tải lại danh sách.`,
+            );
+            setListDetail([]);
+            setDebtAmount(null);
+            invalidate("list:");
+            void fetchVouchersRef.current({ force: true });
+          } else {
+            console.error(`Error fetching list detail for ${selectedStt}:`, err);
+            if (!hasCachedDetail) {
+              setListDetail([]);
+              setDebtAmount(null);
+            }
+          }
+        } finally {
+          if (!cancelled) setListDetailLoading(false);
         }
-      } finally {
-        if (!cancelled) setListDetailLoading(false);
-      }
-    })();
+      };
+
+      void loadDetail();
+    }, debounceMs);
+
     return () => {
       cancelled = true;
-      window.clearTimeout(prefetchTimer);
+      window.clearTimeout(fetchTimer);
+      controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStt, voucherMode]);

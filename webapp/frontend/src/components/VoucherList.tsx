@@ -4,6 +4,7 @@ import {
   VoucherDetail,
   VoucherPagination,
   VoucherFilterParams,
+  VoucherSummaryTotals,
 } from "../types/voucher";
 import { Button } from "./ui/Button";
 import { DetailGrid } from "./DetailGrid";
@@ -49,6 +50,7 @@ function isEditableTarget(el: Element | null): boolean {
 interface VoucherListProps {
   vouchers: VoucherHeader[];
   pagination: VoucherPagination;
+  summary?: VoucherSummaryTotals;
   filters?: VoucherFilterParams;
   loading: boolean;
   selectedStt: string | null;
@@ -58,6 +60,7 @@ interface VoucherListProps {
   debtAmount?: number | null;
   voucherMode?: "sales" | "warehouse";
   onSelectStt: (stt: string) => void;
+  onEditVoucher?: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
   onOpenFilter: () => void;
   onOpenPrint: (stt: string | string[]) => void;
@@ -70,17 +73,21 @@ interface VoucherListProps {
 export const VoucherList: React.FC<VoucherListProps> = ({
   vouchers,
   pagination,
+  summary,
   filters,
   loading,
   selectedStt,
   markedStts,
   detailItems,
+  detailLoading = false,
   debtAmount,
   voucherMode = "sales",
   onSelectStt,
+  onEditVoucher,
   onToggleMark,
   onOpenFilter,
   onOpenPrint,
+  onOpenDebt,
   onRefresh,
   onChangePage,
 }) => {
@@ -490,6 +497,9 @@ export const VoucherList: React.FC<VoucherListProps> = ({
                         }
                         ensureRowVisible(v.stt, false);
                       }}
+                      onDoubleClick={() => {
+                        onEditVoucher?.(v.stt);
+                      }}
                       className={
                         isSelected
                           ? "xl-row-active"
@@ -641,12 +651,17 @@ export const VoucherList: React.FC<VoucherListProps> = ({
       </section>
 
       {/* ===== THANH SPLITTER & THÔNG TIN DƯ NỢ KHÁCH HÀNG ===== */}
-      <div className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 px-2.5 py-0.5 flex items-center justify-between border-y border-neutral-300 flex-shrink-0">
+      <div className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 px-2.5 py-0.5 flex items-center justify-between gap-2 border-y border-neutral-300 flex-shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <div className="flex items-center justify-center w-4 h-4 rounded-full bg-info-100 text-primary-700 shrink-0">
             <Info className="w-2.5 h-2.5" />
           </div>
           <span className="font-semibold text-xs text-neutral-800 truncate">
+            {activeVoucher?.so_ct ? (
+              <span className="font-mono text-neutral-600 mr-1.5">
+                [{activeVoucher.so_ct}]
+              </span>
+            ) : null}
             Khách hàng:{" "}
             <span className="text-primary-700 font-mono">
               {activeVoucher?.ma_dt || "—"}
@@ -659,45 +674,88 @@ export const VoucherList: React.FC<VoucherListProps> = ({
               <span className="text-xs text-neutral-600 shrink-0">
                 Dư nợ tài khoản:
               </span>
-              <span className="px-1.5 py-0 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs shrink-0">
-                {debtAmount != null
-                  ? `${formatCurrency(debtAmount, "VND")} ₫`
-                  : "—"}
-              </span>
+              {activeVoucher?.ma_dt && onOpenDebt ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenDebt(activeVoucher.ma_dt)}
+                  title="Xem sổ chi tiết công nợ khách hàng (Ctrl+Shift+E)"
+                  className="px-1.5 py-0 rounded bg-tertiary-100 hover:bg-tertiary-200 border border-tertiary-200 text-tertiary-700 font-mono font-bold text-xs tabular-nums shrink-0 cursor-pointer transition-colors"
+                >
+                  {debtAmount != null
+                    ? `${formatCurrency(debtAmount, "VND")} ₫`
+                    : "—"}
+                </button>
+              ) : (
+                <span className="px-1.5 py-0 rounded bg-tertiary-100 border border-tertiary-200 text-tertiary-600 font-mono font-bold text-xs tabular-nums shrink-0">
+                  {debtAmount != null
+                    ? `${formatCurrency(debtAmount, "VND")} ₫`
+                    : "—"}
+                </span>
+              )}
             </>
           )}
+          {markedStts && markedStts.size > 0 && (
+            <span className="px-1.5 py-0 rounded bg-amber-100 border border-amber-300 text-amber-800 font-semibold text-[11px] shrink-0">
+              Đã chọn: {markedStts.size}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <span className="text-neutral-500 text-[11px] font-mono mr-0.5">
-            Trang {pagination.page} / {pagination.total_pages || 1}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-5 px-1.5"
-            onClick={() => onChangePage(pagination.page - 1)}
-            disabled={pagination.page <= 1 || loading}
-          >
-            <ChevronLeft className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-5 px-1.5"
-            onClick={() => onChangePage(pagination.page + 1)}
-            disabled={!pagination.has_next || loading}
-          >
-            <ChevronRight className="w-3 h-3" />
-          </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isWarehouse && summary && pagination.total_records > 0 && (
+            <span
+              className="hidden lg:inline-flex items-center gap-1 text-[11px] text-neutral-700 bg-white/80 px-2 py-0 rounded border border-neutral-300"
+              title="Tổng cộng thanh toán theo bộ lọc hiện tại"
+            >
+              <span className="text-neutral-500">Tổng lọc:</span>
+              <span className="font-mono font-bold text-primary-800 tabular-nums">
+                {formatCurrency(summary.total_ttien0 || summary.total_ttien_nt0, "VND")} ₫
+              </span>
+            </span>
+          )}
+          <div className="flex items-center gap-1">
+            <span className="text-neutral-600 text-[11px] font-mono tabular-nums mr-0.5">
+              Trang {pagination.page} / {pagination.total_pages || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-5 px-1.5"
+              onClick={() => onChangePage(pagination.page - 1)}
+              disabled={pagination.page <= 1 || loading}
+            >
+              <ChevronLeft className="w-3 h-3" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-5 px-1.5"
+              onClick={() => onChangePage(pagination.page + 1)}
+              disabled={!pagination.has_next || loading}
+            >
+              <ChevronRight className="w-3 h-3" />
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* ===== KHU VỰC 2: DETAIL — CHI TIẾT VẬT TƯ / HÀNG HÓA ===== */}
       <section
         ref={detailSectionRef}
-        className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden"
+        className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden relative"
       >
-        <div className="flex-1 overflow-auto table-sticky-header">
+        {detailLoading && (
+          <div
+            className="absolute top-0 inset-x-0 z-20 h-0.5 bg-primary-200 overflow-hidden pointer-events-none"
+            aria-label="Đang tải chi tiết chứng từ"
+          >
+            <div className="h-full w-1/3 bg-primary-600 animate-pulse" />
+          </div>
+        )}
+        <div
+          className={`flex-1 overflow-auto table-sticky-header transition-opacity duration-100 ${
+            detailLoading ? "opacity-60" : "opacity-100"
+          }`}
+        >
           <DetailGrid
             items={detailItems}
             currency={detailCurrency}

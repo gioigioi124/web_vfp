@@ -9,8 +9,9 @@ export function printCacheKey(
   dbMode: PrintDbMode,
   stt: string,
   inNoCk: "C" | "K" = "K",
+  inGia: "1" | "0" = "1",
 ): string {
-  return `print:${dbMode}:${stt}:${inNoCk}`;
+  return `print:${dbMode}:${stt}:${inNoCk}:${inGia}`;
 }
 
 export function printApiUrl(
@@ -26,9 +27,10 @@ export function peekPrintPayload(
   dbMode: PrintDbMode,
   stt: string,
   inNoCk: "C" | "K" = "K",
+  inGia: "1" | "0" = "1",
 ): any | undefined {
   const res = peek<{ success?: boolean; data?: any }>(
-    printCacheKey(dbMode, stt, inNoCk),
+    printCacheKey(dbMode, stt, inNoCk, inGia),
   );
   return res?.success && res.data ? res.data : undefined;
 }
@@ -37,8 +39,9 @@ export function isPrintPayloadFresh(
   dbMode: PrintDbMode,
   stt: string,
   inNoCk: "C" | "K" = "K",
+  inGia: "1" | "0" = "1",
 ): boolean {
-  return isFresh(printCacheKey(dbMode, stt, inNoCk), PRINT_CACHE_TTL);
+  return isFresh(printCacheKey(dbMode, stt, inNoCk, inGia), PRINT_CACHE_TTL);
 }
 
 export async function fetchPrintPayload(
@@ -49,7 +52,7 @@ export async function fetchPrintPayload(
   force = false,
 ): Promise<any | null> {
   const json = await cachedFetch<{ success?: boolean; data?: any }>(
-    printCacheKey(dbMode, stt, inNoCk),
+    printCacheKey(dbMode, stt, inNoCk, inGia),
     printApiUrl(dbMode, stt, inNoCk, inGia),
     { force, ttl: PRINT_CACHE_TTL },
   );
@@ -60,9 +63,13 @@ export function prefetchPrintPayload(
   dbMode: PrintDbMode,
   stt: string,
   force = false,
+  inGia: "1" | "0" = "1",
 ): void {
   if (!stt) return;
-  void fetchPrintPayload(dbMode, stt, "K", "1", force).catch(() => {});
+  const effectiveInGia = dbMode === "warehouse" ? "0" : inGia;
+  void fetchPrintPayload(dbMode, stt, "K", effectiveInGia, force).catch(
+    () => {},
+  );
 }
 
 export function invalidatePrintCache(stt?: string): void {

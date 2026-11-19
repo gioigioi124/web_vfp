@@ -21,12 +21,17 @@ class Settings(BaseSettings):
     DB_VP: str = "VP_2014"
     DB_KH: str = "KH_2014"
     DB_SYS: str = "VTSYS"
+    DB_QLDH: str = "QLDH"
+    DB_POOL_SIZE: int = 16
+    DB_QUERY_TIMEOUT: int = 30
+    DB_POOL_IDLE_TTL: int = 300
+    PRODUCT_INDEX_REFRESH_INTERVAL: int = 60
 
     APP_NAME: str = "1S Sales Voucher Web App"
     APP_ENV: str = "development"
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     CORS_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",

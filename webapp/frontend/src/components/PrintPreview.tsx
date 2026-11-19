@@ -12,6 +12,8 @@ import {
 interface PrintPreviewProps {
   isOpen: boolean;
   onClose: () => void;
+  onPrintComplete?: () => void;
+  onError?: (msg: string) => void;
   stt?: string;
   stts?: string[];
   /** "1" = In giá bán, "0" = Không in giá (lấy từ thanh đáy VoucherList hoặc phím tắt in nhanh) */
@@ -73,6 +75,8 @@ function formatQtyNum(value?: number | null): string {
 export const PrintPreview: React.FC<PrintPreviewProps> = ({
   isOpen,
   onClose,
+  onPrintComplete,
+  onError,
   stt,
   stts,
   inGia = "1",
@@ -93,6 +97,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const wasOpenRef = useRef<boolean>(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onPrintCompleteRef = useRef(onPrintComplete);
+  onPrintCompleteRef.current = onPrintComplete;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useModalLock(isOpen && isPreviewMode && !printingFromPreview, dialogRef);
 
@@ -137,15 +145,15 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     let cancelled = false;
     const targetKey = `${joinedStts}|${dbMode}|${effectiveInGia}|${effectiveInNoCk}|${safeCopies}`;
 
-    // Kiểm tra cache trước:
+    // Kiểm tra cache trước (khớp đúng cả effectiveInGia để không dính cache lệch giá):
     // - Nếu tất cả phiếu đều còn tươi -> nạp ngay lập tức (0ms chờ mạng).
     // - Nếu chế độ Preview có cache cũ -> hiển thị ngay cache cũ trong lúc làm mới ngầm.
     const cachedDocs = targetStts.map((s) =>
-      peekPrintPayload(dbMode, s, effectiveInNoCk),
+      peekPrintPayload(dbMode, s, effectiveInNoCk, effectiveInGia),
     );
     const allHaveCache = cachedDocs.every(Boolean);
     const allFresh = targetStts.every((s) =>
-      isPrintPayloadFresh(dbMode, s, effectiveInNoCk),
+      isPrintPayloadFresh(dbMode, s, effectiveInNoCk, effectiveInGia),
     );
 
     if (allHaveCache && allFresh) {
@@ -179,11 +187,15 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
           setPrintDocs(validDocs);
           setLoadedKey(targetKey);
         } else if (!cancelled && !isPreviewMode) {
+          onErrorRef.current?.("Không tải được dữ liệu phiếu để in.");
           onCloseRef.current();
         }
       } catch (e) {
         console.error("Error fetching print payloads", e);
-        if (!cancelled && !isPreviewMode) onCloseRef.current();
+        if (!cancelled && !isPreviewMode) {
+          onErrorRef.current?.("Lỗi kết nối khi chuẩn bị bản in.");
+          onCloseRef.current();
+        }
       } finally {
         if (!cancelled) setIsFetching(false);
       }
@@ -223,6 +235,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     const handleAfterPrint = () => {
       window.removeEventListener("afterprint", handleAfterPrint);
       if (!cancelled) {
+        onPrintCompleteRef.current?.();
         onCloseRef.current();
       }
     };
@@ -284,6 +297,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
     setPrintingFromPreview(true);
     const handleAfterPrint = () => {
       window.removeEventListener("afterprint", handleAfterPrint);
+      onPrintCompleteRef.current?.();
       onCloseRef.current();
     };
     window.addEventListener("afterprint", handleAfterPrint, { once: true });
@@ -328,6 +342,18 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   }
 
   if (!isPreviewMode && (printDocs.length === 0 || loadedKey !== requestKey)) {
+    if (isFetching) {
+      return (
+        <div
+          className="no-print fixed bottom-10 right-4 z-[80] bg-neutral-900/95 text-white px-3 py-2 rounded shadow-xl border border-neutral-700 text-xs flex items-center gap-2"
+          role="status"
+          aria-live="polite"
+        >
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary-300" />
+          <span>Đang chuẩn bị bản in...</span>
+        </div>
+      );
+    }
     return null;
   }
 
@@ -969,17 +995,19 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
                 <span>In nợ cũ</span>
               </label>
 
-              <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/25 cursor-pointer select-none text-xs font-medium">
-                <input
-                  type="checkbox"
-                  checked={previewInGia === "1"}
-                  onChange={(e) =>
-                    setPreviewInGia(e.target.checked ? "1" : "0")
-                  }
-                  className="h-3.5 w-3.5 accent-primary-300 cursor-pointer"
-                />
-                <span>In giá bán</span>
-              </label>
+              {dbMode !== "warehouse" && (
+                <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/10 hover:bg-white/20 border border-white/25 cursor-pointer select-none text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={previewInGia === "1"}
+                    onChange={(e) =>
+                      setPreviewInGia(e.target.checked ? "1" : "0")
+                    }
+                    className="h-3.5 w-3.5 accent-primary-300 cursor-pointer"
+                  />
+                  <span>In giá bán</span>
+                </label>
+              )}
 
               <div className="h-4 w-px bg-white/25 mx-0.5" />
 

@@ -48,45 +48,53 @@ def test_tc01_calc_loai2_mut_xop():
 
 def test_tc02_pickup_accept_calculation():
     """
-    TC-02: Lấy đơn kho qua pickup, số lượng giữ nguyên 30, Tien_Nt9 = 3M.
+    TC-02: Lấy đơn kho qua pickup (batch 1 lượt header/detail + 1 lượt giá),
+    số lượng giữ nguyên 30, Tien_Nt9 = 3M.
     """
-    with patch.object(pickup_service.repo, 'get_slip_header', return_value={"stt": "S1000001", "ma_xe": "29C-12345"}):
-        with patch.object(pickup_service.repo, 'get_pickup_detail') as mock_detail:
-            mock_item = MagicMock()
-            mock_item.stt0 = "S10000010001"
-            mock_item.ma_vt = "MUT_D25"
-            mock_item.ten_vt = "Mút xốp D25"
-            mock_item.dvt = "Tam"
-            mock_item.dvt_ban = "Tam"
-            mock_item.ma_kho = "KHO01"
-            mock_item.so_tam = 15.0
-            mock_item.he_so8 = 2.0
-            mock_item.so_luong8 = 30.0
-            mock_item.so_luong9 = 30.0
-            mock_item.loai_vt = "2"
-            mock_item.tk_gv = "632"
-            mock_item.tk_vt = "1561"
-            mock_item.tk_dt = "5111"
-            mock_item.tk_ck = "521"
-            mock_detail.return_value = MagicMock(items=[mock_item])
+    mock_item = MagicMock()
+    mock_item.stt0 = "S10000010001"
+    mock_item.ma_vt = "MUT_D25"
+    mock_item.ten_vt = "Mút xốp D25"
+    mock_item.dvt = "Tam"
+    mock_item.dvt_ban = "Tam"
+    mock_item.ma_kho = "KHO01"
+    mock_item.so_tam = 15.0
+    mock_item.he_so8 = 2.0
+    mock_item.so_luong8 = 30.0
+    mock_item.so_luong9 = 30.0
+    mock_item.loai_vt = "2"
+    mock_item.tk_gv = "632"
+    mock_item.tk_vt = "1561"
+    mock_item.tk_dt = "5111"
+    mock_item.tk_ck = "521"
 
-            with patch.object(pickup_service.repo, 'get_item_price', return_value=100000.0):
-                with patch.object(pickup_service.repo, 'get_item_discount', return_value=0.0):
-                    res = pickup_service.accept_pickup(
-                        stts=["S1000001"],
-                        ma_dt="KH001",
-                        ngay_ct="2026-10-23",
-                        ty_gia=1.0,
-                        ma_tte="VND"
-                    )
-                    assert res.total_rows == 1
-                    row = res.rows[0]
-                    assert row.stt_px == "S1000001"
-                    assert row.so_luong8 == 30.0
-                    assert row.so_luong9 == 30.0
-                    assert row.gia_nt9 == 100000.0
-                    assert row.tien_nt9 == 3000000.0
-                    assert res.ma_xe == "29C-12345"
+    headers_map = {"S1000001": {"stt": "S1000001", "ma_xe": "29C-12345"}}
+    items_map = {"S1000001": [mock_item]}
+    prices_map = {"MUT_D25": {"gia": 100000.0, "chiet_khau": 0.0, "expired": False}}
+
+    with patch.object(
+        pickup_service.repo, "get_pickup_slips_batch", return_value=(headers_map, items_map)
+    ) as mock_batch:
+        with patch.object(
+            pickup_service.price_repo, "get_prices_batch", return_value=prices_map
+        ) as mock_prices:
+            res = pickup_service.accept_pickup(
+                stts=["S1000001"],
+                ma_dt="KH001",
+                ngay_ct="2026-10-23",
+                ty_gia=1.0,
+                ma_tte="VND"
+            )
+            assert mock_batch.call_count == 1
+            assert mock_prices.call_count == 1
+            assert res.total_rows == 1
+            row = res.rows[0]
+            assert row.stt_px == "S1000001"
+            assert row.so_luong8 == 30.0
+            assert row.so_luong9 == 30.0
+            assert row.gia_nt9 == 100000.0
+            assert row.tien_nt9 == 3000000.0
+            assert res.ma_xe == "29C-12345"
 
 def test_tc03_reverse_calculation_from_amount():
     """
