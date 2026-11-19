@@ -4,19 +4,16 @@ import React, {
   useCallback,
   useMemo,
   useRef,
-  lazy,
-  Suspense,
 } from "react";
 import { VoucherFullDetail, VoucherDetail } from "../types/voucher";
 import { DetailGrid, DetailGridHandle } from "./DetailGrid";
 import {
   formatCurrency,
-  formatDate,
   formatCompactNumber,
   parseNumberInput,
   getTodayDate,
 } from "../lib/format";
-import { Autocomplete, AutocompleteOption } from "./ui/Autocomplete";
+import { AutocompleteOption } from "./ui/Autocomplete";
 import { fetchPrice } from "../lib/lookups";
 import { cachedFetch, peek } from "../lib/apiCache";
 import {
@@ -36,134 +33,25 @@ import {
 import { calcLoai2Item, calcVoucherTotals } from "../lib/calc";
 import { isModalOpen, useModalLock } from "../lib/modalLock";
 import { PromotionCounter } from "./PromotionCounter";
-
-const PriceCalculatorModal = lazy(() =>
-  import("./PriceCalculatorModal").then((m) => ({
-    default: m.PriceCalculatorModal,
-  })),
-);
+import { CopyPlus, Redo2, Table, Undo2 } from "lucide-react";
 import {
-  Printer,
-  CreditCard,
-  X,
-  FileText,
-  SlidersHorizontal,
-  Table,
-  Check,
-  Ban,
-  AlertTriangle,
-  RefreshCw,
-  Calculator,
-  Undo2,
-  Redo2,
-  CopyPlus,
-  History,
-  Save,
-} from "lucide-react";
-
-interface VoucherFormProps {
-  stt?: string;
-  voucher?: VoucherFullDetail | null;
-  mode?: "M" | "S" | "VIEW";
-  voucherMode?: "sales" | "warehouse";
-  isSuspended?: boolean;
-  initialInherited?: Partial<VoucherFullDetail>;
-  /** Gợi ý số chứng từ tức thì (0ms) tính từ danh sách đang mở khi tạo phiếu mới */
-  suggestedSoCt?: string;
-  onBack: () => void;
-  onPrint?: () => void;
-  onViewDebt?: (maDt: string) => void;
-  onOpenPickup?: (maDt?: string, ngayCt?: string) => void;
-  onSaveSuccess?: (stt: string, savedVoucher?: VoucherFullDetail) => void;
-  pickupPayload?: { items: VoucherDetail[]; ma_xe?: string } | null;
-  onClearPickupPayload?: () => void;
-}
-
-const emptyDetailRow = (): VoucherDetail => ({
-  stt0: Math.random().toString(36).substring(2, 9),
-  ma_vt: "",
-  ten_vt: "",
-  dvt: "",
-  dvt_ban: "",
-  loai_vt: "1",
-  so_tam: 1,
-  he_so8: 1,
-  so_luong8: 1,
-  he_so9: 1,
-  so_luong9: 1,
-  gia_nt9: 0,
-  gia9: 0,
-  tien_nt9: 0,
-  tien9: 0,
-  so_luong: 1,
-  gia_nt: 0,
-  gia: 0,
-  tien_nt: 0,
-  tien: 0,
-  chiet_khau: 0,
-  tien_nt4: 0,
-  tien4: 0,
-  tien_nt2: 0,
-  tien2: 0,
-  tien_nt3: 0,
-  tien3: 0,
-  tk: "632",
-  tk_du: "1561",
-  tk_du2: "5111",
-  tk_du4: "521",
-  ma_kho: "K0101",
-  gia_tb_tt: "C",
-});
-
-const CURRENT_USER = "KTCN3";
-const MAX_UNDO_STEPS = 20;
-const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-interface VoucherDraftPayload {
-  savedAt: number;
-  ngayCt: string;
-  soCt: string;
-  maDt: string;
-  tenDt: string;
-  dienGiai0: string;
-  maXe: string;
-  items: VoucherDetail[];
-}
-
-const buildVoucherSnapshot = (params: {
-  ngayCt: string;
-  effectiveSoCt: string;
-  maDt: string;
-  tenDt: string;
-  includeTenDt: boolean;
-  dienGiai0: string;
-  maXe: string;
-  items: VoucherDetail[];
-}): string =>
-  JSON.stringify({
-    ngayCt: (params.ngayCt || "").trim(),
-    soCt: (params.effectiveSoCt || "").trim().toUpperCase(),
-    maDt: (params.maDt || "").trim().toUpperCase(),
-    tenDt: params.includeTenDt ? (params.tenDt || "").trim() : "",
-    dienGiai0: (params.dienGiai0 || "").trim(),
-    maXe: (params.maXe || "").trim().toUpperCase(),
-    items: params.items
-      .filter((it) => Boolean(it.ma_vt?.trim()))
-      .map((it) => [
-        (it.ma_vt || "").trim().toUpperCase(),
-        (it.ma_kho || "").trim().toUpperCase(),
-        Number(it.so_tam ?? 0),
-        Number(it.he_so8 ?? 1),
-        Number(it.so_luong9 ?? 0),
-        Number(it.gia_nt9 ?? 0),
-        Number(it.chiet_khau ?? 0),
-        Number(it.tien_nt2 ?? 0),
-        (it.tk_du2 || "").trim(),
-      ]),
-  });
-
-const clampField = (val: string | null | undefined, max: number): string =>
-  (val || "").normalize("NFC").slice(0, max);
+  buildVoucherSnapshot,
+  clampField,
+  CURRENT_USER,
+  DebtDialogState,
+  DebtInfoSummary,
+  emptyDetailRow,
+  InvalidVoucherField,
+  PendingPickupPrompt,
+  VoucherFormProps,
+} from "./voucher-form/types";
+import { useVoucherHistory } from "./voucher-form/useVoucherHistory";
+import { useVoucherDraft } from "./voucher-form/useVoucherDraft";
+import { useVoucherShortcuts } from "./voucher-form/useVoucherShortcuts";
+import { VoucherFormHeaderBar } from "./voucher-form/VoucherFormHeaderBar";
+import { VoucherMasterSection } from "./voucher-form/VoucherMasterSection";
+import { VoucherFormFooter } from "./voucher-form/VoucherFormFooter";
+import { VoucherFormModals } from "./voucher-form/VoucherFormModals";
 
 export const VoucherForm: React.FC<VoucherFormProps> = ({
   stt: sttProp,
@@ -206,7 +94,9 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const pickupBtnRef = useRef<HTMLButtonElement | null>(null);
   const firstMaVtRef = useRef<HTMLInputElement | null>(null);
   const detailGridRef = useRef<DetailGridHandle | null>(null);
-  const initialSuggested = isCreate ? (suggestedSoCt || "").trim().toUpperCase() : "";
+  const initialSuggested = isCreate
+    ? (suggestedSoCt || "").trim().toUpperCase()
+    : "";
   const autoSuggestedSoCtRef = useRef<string>(initialSuggested);
   const userEditedSoCtRef = useRef<boolean>(false);
 
@@ -340,127 +230,49 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // Status & Validation States
   const [saving, setSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [invalidField, setInvalidField] = useState<
-    "maDt" | "ngayCt" | "maNx" | "items" | null
-  >(null);
+  const [invalidField, setInvalidField] = useState<InvalidVoucherField>(null);
 
-  // Undo/Redo history stacks (tối đa 20 bước cho lưới chi tiết hàng hóa)
-  const undoStackRef = useRef<VoucherDetail[][]>([]);
-  const redoStackRef = useRef<VoucherDetail[][]>([]);
-  const [historyCounts, setHistoryCounts] = useState<{
-    undo: number;
-    redo: number;
-  }>({ undo: 0, redo: 0 });
+  // Ref giữ danh sách `items` mới nhất đồng bộ
+  const itemsLatestRef = useRef<VoucherDetail[]>(items);
+  itemsLatestRef.current = items;
+  const activeRowIndexRef = useRef<number>(activeRowIndex);
+  activeRowIndexRef.current = activeRowIndex;
+
+  // Undo/Redo history stacks (tối đa 20 bước)
+  const {
+    historyCounts,
+    pushUndoSnapshot,
+    resetHistory,
+    handleUndo,
+    handleRedo,
+  } = useVoucherHistory({
+    itemsLatestRef,
+    setItems,
+    setActiveRowIndex,
+  });
 
   // Bảo vệ mất dữ liệu (Dirty tracking + bản nháp localStorage + xác nhận khi thoát)
   const tenDtEditedRef = useRef<boolean>(false);
-  const draftStorageKey = `draft:${voucherMode}:${isCreate ? "new" : voucherStt || "edit"}`;
   const [showDiscardDialog, setShowDiscardDialog] = useState<boolean>(false);
-  const [pendingDraft, setPendingDraft] = useState<VoucherDraftPayload | null>(
-    null,
-  );
-  const [pendingPickupPrompt, setPendingPickupPrompt] = useState<{
-    items: VoucherDetail[];
-    ma_xe?: string;
-  } | null>(null);
+  const [pendingPickupPrompt, setPendingPickupPrompt] =
+    useState<PendingPickupPrompt | null>(null);
   const discardDialogRef = useRef<HTMLDivElement | null>(null);
   const pickupPromptRef = useRef<HTMLDivElement | null>(null);
 
-  const effectiveSoCtForDirty =
-    isCreate && !userEditedSoCtRef.current ? "" : soCt;
-  const currentSnapshot = useMemo(
-    () =>
-      buildVoucherSnapshot({
-        ngayCt,
-        effectiveSoCt: effectiveSoCtForDirty,
-        maDt,
-        tenDt,
-        includeTenDt: tenDtEditedRef.current,
-        dienGiai0,
-        maXe,
-        items,
-      }),
-    [ngayCt, effectiveSoCtForDirty, maDt, tenDt, dienGiai0, maXe, items],
-  );
-  const savedSnapshotRef = useRef<string>(currentSnapshot);
-  const isDirty = isEditable && currentSnapshot !== savedSnapshotRef.current;
-  const isDirtyRef = useRef<boolean>(false);
-  isDirtyRef.current = isDirty;
-
-  const clearDraft = useCallback(() => {
-    try {
-      window.localStorage.removeItem(draftStorageKey);
-    } catch {
-      // Ignore storage errors
-    }
-  }, [draftStorageKey]);
-
-  // Kiểm tra bản nháp cũ trong localStorage khi mở form (còn hạn < 24h)
-  const draftCheckedKeyRef = useRef<string>("");
-  useEffect(() => {
-    if (!isEditable) return;
-    if (draftCheckedKeyRef.current === draftStorageKey) return;
-    draftCheckedKeyRef.current = draftStorageKey;
-    try {
-      const raw = window.localStorage.getItem(draftStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as VoucherDraftPayload;
-      if (
-        !parsed ||
-        typeof parsed.savedAt !== "number" ||
-        Date.now() - parsed.savedAt > DRAFT_MAX_AGE_MS ||
-        !Array.isArray(parsed.items)
-      ) {
-        window.localStorage.removeItem(draftStorageKey);
-        return;
-      }
-      const draftSnap = buildVoucherSnapshot({
-        ngayCt: parsed.ngayCt || "",
-        effectiveSoCt: isCreate ? "" : parsed.soCt || "",
-        maDt: parsed.maDt || "",
-        tenDt: parsed.tenDt || "",
-        includeTenDt: false,
-        dienGiai0: parsed.dienGiai0 || "",
-        maXe: parsed.maXe || "",
-        items: parsed.items,
-      });
-      if (draftSnap !== savedSnapshotRef.current) {
-        setPendingDraft(parsed);
-      }
-    } catch {
-      // Ignore corrupt draft
-    }
-  }, [isEditable, draftStorageKey, isCreate]);
-
-  // Tự động lưu nháp (debounce 2s) khi có thay đổi chưa lưu
-  useEffect(() => {
-    if (!isEditable || !isDirty || saving) return;
-    const timer = window.setTimeout(() => {
-      try {
-        const draftPayload: VoucherDraftPayload = {
-          savedAt: Date.now(),
-          ngayCt,
-          soCt,
-          maDt,
-          tenDt,
-          dienGiai0,
-          maXe,
-          items,
-        };
-        window.localStorage.setItem(
-          draftStorageKey,
-          JSON.stringify(draftPayload),
-        );
-      } catch {
-        // Ignore quota/storage errors
-      }
-    }, 2000);
-    return () => window.clearTimeout(timer);
-  }, [
-    isEditable,
+  const {
+    pendingDraft,
+    setPendingDraft,
+    clearDraft,
+    currentSnapshot,
+    savedSnapshotRef,
     isDirty,
+    isDirtyRef,
+  } = useVoucherDraft({
+    voucherMode,
+    isCreate,
+    isEditable,
+    voucherStt,
     saving,
-    draftStorageKey,
     ngayCt,
     soCt,
     maDt,
@@ -468,38 +280,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     dienGiai0,
     maXe,
     items,
-  ]);
-
-  // Cảnh báo trình duyệt nếu đóng tab/tải lại trang khi còn dữ liệu chưa lưu
-  useEffect(() => {
-    if (!isEditable || !isDirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [isEditable, isDirty]);
+    userEditedSoCtRef,
+    tenDtEditedRef,
+  });
 
   // Debt Info State (khớp CustomerDebtSummary từ /api/debt/customer)
-  const [debtInfo, setDebtInfo] = useState<{
-    du_no: number;
-    du_co: number;
-    du_cuoi: number;
-    du_cuoi_kiem_tra?: number;
-    gioi_han: number;
-    toi_han: number;
-    is_over_limit: boolean;
-    is_near_limit: boolean;
-    status_message: string;
-  } | null>(null);
-  // Dialog cảnh báo (công nợ, khác người lập, hoặc mã khách hàng không hợp lệ — không làm xô lệch form).
-  const [debtDialog, setDebtDialog] = useState<{
-    title: string;
-    message: string;
-    tone: "danger" | "warning";
-    focusTarget?: "tenDt" | "maDt" | "none";
-  } | null>(null);
+  const [debtInfo, setDebtInfo] = useState<DebtInfoSummary | null>(null);
+  const [debtDialog, setDebtDialog] = useState<DebtDialogState | null>(null);
   const debtDialogRef = useRef<HTMLDivElement | null>(null);
   const accountPickerRef = useRef<HTMLDivElement | null>(null);
   const accountInputRef = useRef<HTMLInputElement | null>(null);
@@ -596,30 +383,25 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [debtDialog, closeDebtDialog]);
 
-  // 0a. Nạp danh mục khách hàng (RAM) + index vật tư (Web Worker) + danh mục nhỏ
-  //     (kho/xe/bộ phận/tài khoản) một lần khi mở form.
+  // 0a. Nạp danh mục khách hàng (RAM) + index vật tư (Web Worker) + danh mục nhỏ một lần khi mở form.
   useEffect(() => {
     initCustomerIndex();
     initProductIndex();
     initCatalogCache();
   }, []);
 
-  // Ref giữ mã khách mới nhất để effect enrich async không ghi đè khi người dùng đã đổi mã.
   const maDtRef = useRef<string>(maDt);
   maDtRef.current = maDt;
-
-  // Ref giữ giá trị ô Mã KH mới nhất, cập nhật ĐỒNG BỘ trong onChange/onSelect.
-  // Tránh việc onKeyDown/onBlur dùng giá trị cũ (stale closure) ghi đè mã vừa chọn.
   const maDtValueRef = useRef<string>(maDt);
-  // Ref ghi nhận mã KH đã được CHỌN/XÁC NHẬN (Enter / chọn từ danh sách / blur).
-  // Khi đang gõ dở ký tự trong ô Đối tượng, ref này được xóa về "" để không cảnh báo sớm.
   const committedMaDtRef = useRef<string>(
     isCreate ? "" : (voucher?.ma_dt || "").trim().toUpperCase(),
   );
-  // Đồng bộ khi maDt đổi từ bên ngoài (nạp phiếu cũ) — không ảnh hưởng luồng gõ/chọn.
   useEffect(() => {
     maDtValueRef.current = maDt;
   }, [maDt]);
+
+  const [maDtError, setMaDtError] = useState<string | null>(null);
+  const lastWarnedMaDtRef = useRef<string>("");
 
   // Đồng bộ toàn bộ dữ liệu phiếu khi mở chế độ Sửa (mode="S") và prop `voucher` tải xong từ API/cache.
   const syncedVoucherKeyRef = useRef<string>(
@@ -629,7 +411,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     if (isCreate || !voucher?.stt) return;
     const nextKey = `${voucher.stt}:${voucher.items?.length ?? 0}`;
     if (syncedVoucherKeyRef.current === nextKey) return;
-    // Nếu người dùng đã bắt đầu gõ sửa cùng 1 phiếu (trong khi API revalidate ngầm về sau) → KHÔNG ghi đè thao tác đang gõ
     if (
       isDirtyRef.current &&
       syncedVoucherKeyRef.current.startsWith(`${voucher.stt}:`)
@@ -686,7 +467,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setActiveRowIndex(0);
     }
 
-    // Re-baseline dirty snapshot & reset Undo/Redo stacks after voucher finishes loading
     savedSnapshotRef.current = buildVoucherSnapshot({
       ngayCt: nextNgayCt,
       effectiveSoCt: nextSoCt,
@@ -697,11 +477,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       maXe: nextMaXe,
       items: syncedItems,
     });
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setHistoryCounts({ undo: 0, redo: 0 });
+    resetHistory();
 
-    // Nếu ô Mã ĐT đang được focus trước khi dữ liệu API đổ về, bôi đen lại mã vừa nạp.
     if (document.activeElement === maDtInputRef.current) {
       requestAnimationFrame(() => {
         if (document.activeElement === maDtInputRef.current) {
@@ -709,18 +486,10 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         }
       });
     }
-  }, [isCreate, voucher]);
+  }, [isCreate, voucher, isDirtyRef, savedSnapshotRef, resetHistory]);
 
-  const pushUndoSnapshot = useCallback((prevItems: VoucherDetail[]) => {
-    const cloned = prevItems.map((row) => ({ ...row }));
-    const nextUndo = [...undoStackRef.current, cloned];
-    if (nextUndo.length > MAX_UNDO_STEPS) {
-      nextUndo.splice(0, nextUndo.length - MAX_UNDO_STEPS);
-    }
-    undoStackRef.current = nextUndo;
-    redoStackRef.current = [];
-    setHistoryCounts({ undo: nextUndo.length, redo: 0 });
-  }, []);
+  const initialFocusedKeyRef = useRef<string>("");
+  const pendingFocusLastRowAfterPickupRef = useRef<boolean>(false);
 
   const applyPickupItems = useCallback(
     (
@@ -732,7 +501,10 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         pushUndoSnapshot(prev);
         const nextItems =
           strategy === "append"
-            ? [...prev.filter((it) => Boolean(it.ma_vt?.trim())), ...calculatedItems]
+            ? [
+                ...prev.filter((it) => Boolean(it.ma_vt?.trim())),
+                ...calculatedItems,
+              ]
             : calculatedItems;
         const safeNext = nextItems.length > 0 ? nextItems : [emptyDetailRow()];
         setActiveRowIndex(safeNext.length - 1);
@@ -782,22 +554,35 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setActiveRowIndex(0);
     }
     setPendingDraft(null);
-  }, [pendingDraft, pushUndoSnapshot, items, isCreate, tyGia, maTte]);
+  }, [
+    pendingDraft,
+    pushUndoSnapshot,
+    items,
+    isCreate,
+    tyGia,
+    maTte,
+    setPendingDraft,
+  ]);
 
-  // 0. Khi mở form Thêm mới (F2), Sao chép (Ctrl+F2) hoặc Sửa (F3 / Enter), tự động focus vào ô Mã đối tượng và bôi đen nội dung
-  const initialFocusedKeyRef = useRef<string>("");
-  const pendingFocusLastRowAfterPickupRef = useRef<boolean>(false);
+  // 0. Khi mở form Thêm mới (F2), Sao chép (Ctrl+F2) hoặc Sửa (F3 / Enter), tự động focus vào ô Mã đối tượng
   useEffect(() => {
     if (!isEditable || isSuspended) return;
-    if (pendingFocusLastRowAfterPickupRef.current || (pickupPayload && pickupPayload.items.length > 0)) {
+    if (
+      pendingFocusLastRowAfterPickupRef.current ||
+      (pickupPayload && pickupPayload.items.length > 0)
+    ) {
       return;
     }
     const focusKey = isCreate ? "NEW" : voucherStt;
     if (!focusKey || initialFocusedKeyRef.current === focusKey) return;
     const rafId = window.requestAnimationFrame(() => {
-      if (isSuspended || isModalOpen() || pendingFocusLastRowAfterPickupRef.current) return;
+      if (
+        isSuspended ||
+        isModalOpen() ||
+        pendingFocusLastRowAfterPickupRef.current
+      )
+        return;
       if (maDtInputRef.current) {
-        // Chỉ đánh dấu đã focus sau khi thực sự chạy xong frame (tránh lỗi cleanup của React.StrictMode làm kẹt ref).
         initialFocusedKeyRef.current = focusKey;
         maDtInputRef.current.focus();
         maDtInputRef.current.select();
@@ -829,7 +614,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             autoSuggestedSoCtRef.current = cleanSuggested;
             setSoCt((prev) => {
               const p = prev.trim().toUpperCase();
-              // Cập nhật nếu ô đang trống hoặc vẫn đang giữ số gợi ý lạc quan chưa bị người dùng sửa tay
               if (!userEditedSoCtRef.current && (!p || p === prevAuto)) {
                 return suggested;
               }
@@ -881,8 +665,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     return () => window.clearTimeout(timer);
   }, [items]);
 
-  // 3. Tự động lookup thông tin Ông/Bà, Địa chỉ, Mã bộ phận, Tên bộ phận, Ma_Vm từ DmDt khi có maDt ban đầu.
-  //    Ở chế độ Sửa (S): giữ nguyên các trường đã lưu trên phiếu, chỉ điền Ma_Vm và các trường đang trống.
+  // 3. Tự động lookup thông tin Ông/Bà, Địa chỉ, Bộ phận, Ma_Vm từ DmDt khi có maDt ban đầu.
   useEffect(() => {
     const cleanDt = (voucher?.ma_dt || maDt || "").trim().toUpperCase();
     if (!cleanDt) {
@@ -932,7 +715,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
     if (tenBp && tenBp.trim()) return;
     let cancelled = false;
-    // RAM-only: chờ lần nạp danh mục đầu tiên rồi tra trong RAM.
     initCatalogCache().then(() => {
       if (cancelled) return;
       const bp = getBoPhan(maBp);
@@ -951,7 +733,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
     if (tenXe && tenXe.trim()) return;
     let cancelled = false;
-    // RAM-only: chờ lần nạp danh mục đầu tiên rồi tra trong RAM.
     initCatalogCache().then(() => {
       if (cancelled) return;
       const xe = getXe(maXe);
@@ -962,8 +743,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     };
   }, [maXe, tenXe]);
 
-  // Nạp thông tin công nợ của khách hàng (đến NGÀY HIỆN TẠI) với SWR (hiển thị tức thì 0ms nếu đã có cache).
-  // Chỉ bật dialog cảnh báo khi `showWarningDialog = true` (sau khi người dùng đã chọn/xác nhận xong khách hàng).
+  // Nạp thông tin công nợ của khách hàng với SWR (0ms nếu đã có cache).
   const loadDebtInfo = useCallback(
     async (dt: string, showWarningDialog: boolean = false) => {
       if (isWarehouse) {
@@ -980,7 +760,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         ? `debt:${cleanDt}:${excludeStt}`
         : `debt:${cleanDt}`;
 
-      const parseDebt = (d: any) => ({
+      const parseDebt = (d: any): DebtInfoSummary => ({
         du_no: d.du_no ?? 0,
         du_co: d.du_co ?? 0,
         du_cuoi: d.du_cuoi ?? 0,
@@ -992,7 +772,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         status_message: d.status_message ?? "",
       });
 
-      // SWR: hiển thị ngay công nợ từ RAM cache (nếu đã nạp từ màn danh sách hoặc trước đó)
       const cached = peek<any>(cacheKey) || peek<any>(`debt:${cleanDt}`);
       if (cached?.success && cached.data) {
         setDebtInfo(parseDebt(cached.data));
@@ -1008,7 +787,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           { ttl: 15_000 },
         );
         if (data?.success && data.data) {
-          // Nếu người dùng đã gõ sang mã khác trong lúc đang tải -> bỏ qua
           if (maDtValueRef.current.trim().toUpperCase() !== cleanDt) return;
           const nextDebt = parseDebt(data.data);
           setDebtInfo(nextDebt);
@@ -1052,7 +830,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [isWarehouse, isCreate, voucherStt],
   );
 
-  // Nạp số liệu hạn mức / dư nợ ban đầu khi mở form (không bật popup cảnh báo tự động khi chưa chọn khách)
+  // Nạp số liệu hạn mức / dư nợ ban đầu khi mở form
   useEffect(() => {
     const cleanDt = (voucher?.ma_dt || maDt || "").trim();
     if (cleanDt) {
@@ -1063,9 +841,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voucher?.stt, voucherStt, isCreate, isWarehouse]);
 
-  // Handle Customer Selection -> tự động điền Tên KH, Ông/Bà (từ Doi_Tac hoặc Ten_Dt), Địa chỉ, Mã bộ phận, Tên bộ phận
-  const [maDtError, setMaDtError] = useState<string | null>(null);
-  const lastWarnedMaDtRef = useRef<string>("");
   const handleSelectCustomer = async (selectedCode: string) => {
     const raw = selectedCode.trim().toUpperCase();
     if (!raw) {
@@ -1075,20 +850,15 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       lastWarnedMaDtRef.current = "";
       return;
     }
-    // Tránh chạy lặp khi onSelect + Enter + onBlur kích hoạt liên tiếp cho cùng 1 mã vừa chọn
     if (committedMaDtRef.current === raw) {
       return;
     }
     committedMaDtRef.current = raw;
 
-    // RAM-only: chờ lần nạp danh mục đầu tiên (đã khởi động từ app) rồi tra trong RAM.
     await initCustomerIndex();
     const cust = getCustomer(raw);
-    // Nếu người dùng đã đổi sang mã khác trong lúc chờ -> bỏ kết quả cũ.
     if (maDtValueRef.current.trim().toUpperCase() !== raw) return;
     if (cust && cust.ma_dt) {
-      // LUÔN lấy MÃ thật từ danh mục DmDt, không dùng chuỗi người dùng đã gõ.
-      // Tránh trường hợp người dùng gõ TÊN khách -> Ma_Dt bị ghi thành tên (ghi rác).
       const realCode = cust.ma_dt.trim().toUpperCase();
       committedMaDtRef.current = realCode;
       lastWarnedMaDtRef.current = "";
@@ -1107,11 +877,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       }
       setMaDtGtGt(cust.ms_thue || "");
       setMaVm(cust.ma_vm || "");
-      // Chỉ kiểm tra và cảnh báo quá hạn nợ SAU khi đã chọn xong khách hàng hợp lệ
       loadDebtInfo(realCode, true);
     } else {
-      // Không tìm thấy mã khách trong DmDt -> giữ nguyên chuỗi để người dùng sửa,
-      // hiện dialog cảnh báo (không xô lệch form) và chặn Lưu (khớp hành vi VFP).
       committedMaDtRef.current = "";
       setMaDt(raw);
       setDebtInfo(null);
@@ -1129,9 +896,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
   };
 
-  // Handle Xe Selection -> tự động điền Mã xe và Biển số (Ten_Xe).
-  // - Để trống: KHÔNG tự chọn (xóa cả mã lẫn tên).
-  // - Có gõ mã: lấy mã khớp chính xác; nếu không, lấy mã ĐẦU TIÊN tìm thấy; nếu vẫn không có -> null.
   const handleSelectXe = async (selectedMaXe: string, hintTenXe?: string) => {
     const cleanXe = (selectedMaXe || "").trim().toUpperCase();
     if (!cleanXe) {
@@ -1151,19 +915,16 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setTenXe(cached.ten_xe || "");
       return;
     }
-    // Không khớp chính xác -> lấy mã đầu tiên tìm thấy.
     const first = searchXe(cleanXe)[0];
     if (first) {
       setMaXe(first.value);
       setTenXe(first.hint || "");
       return;
     }
-    // Không tìm thấy -> fallback null.
     setMaXe("");
     setTenXe("");
   };
 
-  // Fetcher cho ô Mã xe: RAM-only (chờ lần nạp đầu tiên rồi tra RAM).
   const fetchXeOptionsLocal = useCallback(
     async (query: string): Promise<AutocompleteOption[]> => {
       await initCatalogCache();
@@ -1172,7 +933,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [],
   );
 
-  // Fetcher cho ô Tài khoản (F4): RAM-only.
   const fetchTaiKhoanOptionsLocal = useCallback(
     async (query: string): Promise<AutocompleteOption[]> => {
       await initCatalogCache();
@@ -1181,8 +941,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [],
   );
 
-  // Fetcher cho ô Mã khách hàng: RAM-only (chờ lần nạp đầu tiên rồi tra RAM).
-  // Memo hóa để không tạo tham chiếu mới mỗi render (tránh Autocomplete fetch lặp).
   const fetchKhachHangOptionsLocal = useCallback(
     async (query: string): Promise<AutocompleteOption[]> => {
       await initCustomerIndex();
@@ -1191,7 +949,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [],
   );
 
-  // Tra đơn giá bán & chiết khấu từ bảng giá VP_2014 (BG/BG0) cho một mã vật tư.
   const handleLookupPrice = useCallback(
     async (maVt: string) => {
       const price = await fetchPrice(maVt, maDt, ngayCt);
@@ -1205,15 +962,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [maDt, ngayCt],
   );
 
-  // Ref giữ danh sách `items` mới nhất một cách đồng bộ để khi `handleItemChange` và
-  // `handleAddItem` chạy nối tiếp trong cùng 1 sự kiện Enter, dòng mới không ghi đè mất
-  // giá trị Số tấm / Hệ số vừa commit.
-  const itemsLatestRef = useRef<VoucherDetail[]>(items);
-  itemsLatestRef.current = items;
-  const activeRowIndexRef = useRef<number>(activeRowIndex);
-  activeRowIndexRef.current = activeRowIndex;
-
-  // Detail Item changes & recalculations
   const handleItemChange = useCallback(
     (idx: number, updatedItem: VoucherDetail, fieldName?: string) => {
       const curr = itemsLatestRef.current;
@@ -1254,7 +1002,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     const curr = itemsLatestRef.current;
     const currActive = activeRowIndexRef.current;
 
-    // Tìm dòng trống (chưa có mã hàng hóa / mã vật tư)
     let emptyIdx = -1;
     if (
       currActive >= 0 &&
@@ -1267,13 +1014,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
 
     if (emptyIdx >= 0) {
-      // Dòng trống: focus ngay vào mã hàng hóa của dòng đó, không thông báo nữa
       setActiveRowIndex(emptyIdx);
       detailGridRef.current?.focusMaVt(emptyIdx);
       return;
     }
 
-    // Nếu tất cả các dòng đều đã có mã hàng hóa: thêm dòng mới trên nền `itemsLatestRef` mới nhất
     pushUndoSnapshot(curr);
     const next = [...curr, emptyDetailRow()];
     itemsLatestRef.current = next;
@@ -1313,52 +1058,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     [pushUndoSnapshot],
   );
 
-  const handleUndo = useCallback(() => {
-    const stack = undoStackRef.current;
-    if (stack.length === 0) return;
-    const previous = stack[stack.length - 1];
-    const nextUndo = stack.slice(0, -1);
-    const currentClone = itemsLatestRef.current.map((row) => ({ ...row }));
-    const nextRedo = [...redoStackRef.current, currentClone].slice(
-      -MAX_UNDO_STEPS,
-    );
-    undoStackRef.current = nextUndo;
-    redoStackRef.current = nextRedo;
-    setHistoryCounts({ undo: nextUndo.length, redo: nextRedo.length });
-    itemsLatestRef.current = previous;
-    setItems(previous);
-    setActiveRowIndex((prevIdx) =>
-      Math.max(0, Math.min(prevIdx, Math.max(0, previous.length - 1))),
-    );
-  }, []);
-
-  const handleRedo = useCallback(() => {
-    const stack = redoStackRef.current;
-    if (stack.length === 0) return;
-    const nextState = stack[stack.length - 1];
-    const nextRedo = stack.slice(0, -1);
-    const currentClone = itemsLatestRef.current.map((row) => ({ ...row }));
-    const nextUndo = [...undoStackRef.current, currentClone].slice(
-      -MAX_UNDO_STEPS,
-    );
-    undoStackRef.current = nextUndo;
-    redoStackRef.current = nextRedo;
-    setHistoryCounts({ undo: nextUndo.length, redo: nextRedo.length });
-    itemsLatestRef.current = nextState;
-    setItems(nextState);
-    setActiveRowIndex((prevIdx) =>
-      Math.max(0, Math.min(prevIdx, Math.max(0, nextState.length - 1))),
-    );
-  }, []);
-
-  // Calculate voucher totals (memoized, single-pass)
   const totals = useMemo(
     () => calcVoucherTotals(items, tyGia, thueGtgt, loaiCk),
     [items, tyGia, thueGtgt, loaiCk],
   );
   const totalQty = totals.totalQty;
 
-  // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
+  // Save handler (POST / PUT)
   const handleSave = async (bypassChecks: boolean = false) => {
     if (saving) return;
     if (isDifferentCreator && !bypassChecks) {
@@ -1411,7 +1117,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setErrorMessage("Vui lòng nhập Mã nhập xuất.");
       return;
     }
-    // Tự động loại bỏ các dòng trống (chưa có Mã vật tư) khi lưu xuống SQL, bỏ qua thanh thông báo lỗi dòng trống.
+
     const latestItems = itemsLatestRef.current;
     const validItems = latestItems.filter((it) => Boolean(it.ma_vt?.trim()));
     if (validItems.length === 0) {
@@ -1424,7 +1130,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       return;
     }
 
-    // Kiểm tra các dòng hàng hợp lệ trong Grid trước khi lưu
     for (let i = 0; i < validItems.length; i++) {
       const it = validItems[i];
       const origIdx = latestItems.indexOf(it);
@@ -1466,9 +1171,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
               currentSoCt !== autoSuggestedSoCtRef.current)
           : currentSoCt !== origSoCt);
 
-      // Không gọi thêm /next-number hay /check-number trước khi POST/PUT:
-      // backend save_voucher đã cấp số lớn nhất + 1 / kiểm tra trùng ST_Check_Number
-      // bên trong cùng 1 ACID transaction có sp_getapplock → cắt bỏ 1 vòng HTTP + SQL thừa trên mỗi lần Lưu.
       const normalizedItems: VoucherDetail[] = validItems.map((it) => ({
         ...it,
         ma_vt: (it.ma_vt || "").trim().toUpperCase(),
@@ -1533,7 +1235,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       if (!res.ok || !data.success) {
         const msg =
           data?.detail?.message || data?.message || "Lỗi khi lưu chứng từ.";
-        // Cảnh báo hạn mức nợ hiện qua dialog thay vì thẻ span.
         if (/hạn mức nợ|gioi han no|vượt quá hạn mức/i.test(msg)) {
           setDebtDialog({
             title: "Vượt quá hạn mức nợ",
@@ -1624,174 +1325,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     })();
   }, [maDt, maDtError, onViewDebt, tenDt]);
 
-  const handleSaveRef = useRef(handleSave);
-  handleSaveRef.current = handleSave;
-
-  const keydownCtxRef = useRef({
-    isEditable,
-    isSuspended,
-    isWarehouse,
-    saving,
-    activeRowIndex,
-    onViewDebt,
-    openDebtLedger,
-    requestClose,
-    handleDeleteItem,
-    handleAddItem,
-    handleDuplicateRow,
-    handleUndo,
-    handleRedo,
-  });
-  keydownCtxRef.current = {
-    isEditable,
-    isSuspended,
-    isWarehouse,
-    saving,
-    activeRowIndex,
-    onViewDebt,
-    openDebtLedger,
-    requestClose,
-    handleDeleteItem,
-    handleAddItem,
-    handleDuplicateRow,
-    handleUndo,
-    handleRedo,
-  };
-
-  // Keyboard shortcut listener for Ctrl+Enter / Esc / F8 / F4 / Undo / Redo / Duplicate (attached once)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const ctx = keydownCtxRef.current;
-      // Khi có dialog đang mở (PickupDialog / DebtPanel / ...) hoặc form đang bị tạm dừng -> khóa cứng,
-      // không cho ESC/Ctrl+Enter/F8/F4 thoát ra ngoài form.
-      if (ctx.isSuspended || isModalOpen()) return;
-      if (
-        ctx.isEditable &&
-        !ctx.saving &&
-        e.key === "Enter" &&
-        e.ctrlKey &&
-        !e.shiftKey &&
-        !e.altKey
-      ) {
-        e.preventDefault();
-        handleSaveRef.current(false);
-      } else if (
-        ctx.isEditable &&
-        !ctx.saving &&
-        e.key === "Enter" &&
-        e.shiftKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey
-      ) {
-        e.preventDefault();
-        handleSaveRef.current(true);
-      } else if (
-        (e.ctrlKey || e.metaKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key.toLowerCase() === "e" || e.code === "KeyE")
-      ) {
-        if (!ctx.onViewDebt) return;
-        e.preventDefault();
-        e.stopPropagation();
-        ctx.openDebtLedger();
-      } else if (
-        ctx.isEditable &&
-        (e.ctrlKey || e.metaKey) &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.key.toLowerCase() === "d" || e.code === "KeyD")
-      ) {
-        // Ctrl+Shift+D = Nhân đôi dòng đang chọn
-        e.preventDefault();
-        e.stopPropagation();
-        ctx.handleDuplicateRow(ctx.activeRowIndex);
-      } else if (
-        ctx.isEditable &&
-        (e.ctrlKey || e.metaKey) &&
-        !e.altKey &&
-        ((!e.shiftKey && (e.key.toLowerCase() === "y" || e.code === "KeyY")) ||
-          (e.shiftKey && (e.key.toLowerCase() === "z" || e.code === "KeyZ")))
-      ) {
-        // Ctrl+Y hoặc Ctrl+Shift+Z = Làm lại (Redo) trên lưới hàng hóa
-        const activeEl = document.activeElement;
-        const inHeaderTextInput =
-          activeEl instanceof HTMLInputElement &&
-          !activeEl.readOnly &&
-          Boolean(activeEl.closest('[data-purpose="master-form"]'));
-        if (!inHeaderTextInput) {
-          e.preventDefault();
-          e.stopPropagation();
-          ctx.handleRedo();
-        }
-      } else if (
-        ctx.isEditable &&
-        (e.ctrlKey || e.metaKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        (e.key.toLowerCase() === "z" || e.code === "KeyZ")
-      ) {
-        // Ctrl+Z = Hoàn tác (Undo) trên lưới hàng hóa (giữ undo gốc của trình duyệt cho các ô text header)
-        const activeEl = document.activeElement;
-        const inHeaderTextInput =
-          activeEl instanceof HTMLInputElement &&
-          !activeEl.readOnly &&
-          Boolean(activeEl.closest('[data-purpose="master-form"]'));
-        if (!inHeaderTextInput) {
-          e.preventDefault();
-          e.stopPropagation();
-          ctx.handleUndo();
-        }
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        ctx.requestClose();
-      } else if (e.key === "F8" && ctx.isEditable) {
-        e.preventDefault();
-        ctx.handleDeleteItem(ctx.activeRowIndex);
-      } else if (e.key === "F4" && ctx.isEditable && !ctx.isWarehouse) {
-        e.preventDefault();
-        setShowAccountPicker(true);
-      } else if (
-        ctx.isEditable &&
-        (e.ctrlKey || e.metaKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        (e.key.toLowerCase() === "q" || e.code === "KeyQ")
-      ) {
-        // Ctrl+Q = focus và bôi đen ô Mã đối tượng
-        e.preventDefault();
-        e.stopPropagation();
-        if (maDtInputRef.current) {
-          maDtInputRef.current.focus();
-          maDtInputRef.current.select();
-        }
-      } else if (
-        ctx.isEditable &&
-        e.ctrlKey &&
-        (e.code === "NumpadAdd" ||
-          e.key === "+" ||
-          e.key === "=" ||
-          e.code === "Equal")
-      ) {
-        // Ctrl + (numpad hoặc phím +/=) = thêm dòng
-        e.preventDefault();
-        ctx.handleAddItem();
-      } else if (
-        ctx.isEditable &&
-        e.ctrlKey &&
-        (e.code === "NumpadSubtract" || e.key === "-")
-      ) {
-        // Ctrl - (numpad) = xóa dòng đang chọn
-        e.preventDefault();
-        ctx.handleDeleteItem(ctx.activeRowIndex);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  // Khóa hẳn phím F5 tải lại trang trong VoucherForm; khi đang thêm/sửa sẽ mở Máy tính đơn giá cho dòng đang chọn.
   const handleOpenPriceCalc = useCallback(() => {
     if (isWarehouse || isSuspended || !isEditable || items.length === 0) return;
     if (showPriceCalc || isModalOpen()) return;
@@ -1799,11 +1332,12 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     beforeCalcFocusRef.current = activeEl;
 
     const latestItems = itemsLatestRef.current;
-    const safeIdx = Math.max(0, Math.min(activeRowIndex, latestItems.length - 1));
+    const safeIdx = Math.max(
+      0,
+      Math.min(activeRowIndex, latestItems.length - 1),
+    );
     let nextInit = Number(latestItems[safeIdx]?.gia_nt9 ?? 0);
 
-    // Nếu đang nhập dở trong ô của grid (đặc biệt ô Đơn giá), lấy ngay số đang gõ
-    // đưa vào máy tính và blur để ô tự commit/tính lại thành tiền trên dòng.
     if (
       activeEl instanceof HTMLInputElement &&
       activeEl.closest('[data-purpose="ledger-table-container"]')
@@ -1816,27 +1350,34 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
     setCalcInitialPrice(nextInit);
     setShowPriceCalc(true);
-  }, [isWarehouse, isSuspended, isEditable, items.length, activeRowIndex, showPriceCalc]);
+  }, [
+    isWarehouse,
+    isSuspended,
+    isEditable,
+    items.length,
+    activeRowIndex,
+    showPriceCalc,
+  ]);
 
-  useEffect(() => {
-    const handleF5Capture = (e: KeyboardEvent) => {
-      if (isSuspended) return;
-      if (
-        e.key !== "F5" ||
-        e.ctrlKey ||
-        e.metaKey ||
-        e.altKey ||
-        e.shiftKey
-      ) {
-        return;
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      handleOpenPriceCalc();
-    };
-    window.addEventListener("keydown", handleF5Capture, true);
-    return () => window.removeEventListener("keydown", handleF5Capture, true);
-  }, [isSuspended, handleOpenPriceCalc]);
+  useVoucherShortcuts({
+    isEditable,
+    isSuspended,
+    isWarehouse,
+    saving,
+    activeRowIndex,
+    onViewDebt,
+    openDebtLedger,
+    requestClose,
+    handleSave,
+    handleDeleteItem,
+    handleAddItem,
+    handleDuplicateRow,
+    handleUndo,
+    handleRedo,
+    handleOpenPriceCalc,
+    onOpenAccountPicker: () => setShowAccountPicker(true),
+    maDtInputRef,
+  });
 
   const handleClosePriceCalc = useCallback(() => {
     setShowPriceCalc(false);
@@ -1862,12 +1403,6 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       );
     }
   };
-
-  const readonlyField =
-    "erp-input w-full font-mono text-neutral-800 bg-neutral-100 border-neutral-200 cursor-text select-text";
-  const isOverDebtLimit = !!debtInfo?.is_over_limit;
-  const disabledLookupField =
-    "erp-input w-full text-xs py-0.5 bg-neutral-100 text-neutral-700 border-neutral-200 cursor-text select-text";
 
   // Điều hướng các ô trên Header bằng phím mũi tên ↑ / ↓ / ← / → (tương tự Excel / VFP)
   const headerOrderedRefs = [
@@ -1932,765 +1467,88 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   return (
     <div className="flex flex-col h-full w-full bg-white overflow-hidden">
-      {/* ===== Window Header (navy / emerald for warehouse) ===== */}
-      <header
-        className={`${
-          isWarehouse
-            ? "bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-900 border-emerald-950"
-            : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900"
-        } text-white px-4 py-2 flex items-center justify-between shadow-md shrink-0 border-b`}
-      >
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-7 h-7 rounded bg-white/15 text-primary-100 border border-white/20">
-            <FileText className="w-4 h-4" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-sm tracking-wide uppercase text-white">
-              {isWarehouse
-                ? isCreate
-                  ? "Thêm Mới Phiếu Xuất Kho"
-                  : isEdit
-                    ? "Sửa Phiếu Xuất Kho"
-                    : "Xem Phiếu Xuất Kho"
-                : isCreate
-                  ? "Thêm Mới Chứng Từ"
-                  : isEdit
-                    ? "Sửa Chứng Từ"
-                    : "Xem Chứng Từ"}
-            </span>
-            <span className="text-primary-200 text-xs font-normal">
-              {isWarehouse ? "/ Phiếu xuất kho" : "/ Bán hàng công nợ"}
-            </span>
-            <span
-              className={`ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                isCreate
-                  ? "bg-success-600/30 text-success-200 border-success-400/40"
-                  : isEdit
-                    ? "bg-amber-500/30 text-amber-200 border-amber-400/40"
-                    : "bg-white/10 text-white border-white/20"
-              }`}
-            >
-              {isCreate
-                ? "MODE: THÊM MỚI (M)"
-                : isEdit
-                  ? "MODE: SỬA (S)"
-                  : "MODE: XEM"}
-            </span>
-            {isDirty && (
-              <span
-                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 border border-amber-300/40"
-                title="Có thay đổi chưa lưu — bản nháp được tự động lưu tạm sau 2 giây"
-              >
-                ● Chưa lưu
-              </span>
-            )}
-          </div>
-        </div>
+      <VoucherFormHeaderBar
+        isWarehouse={isWarehouse}
+        isCreate={isCreate}
+        isEdit={isEdit}
+        isDirty={isDirty}
+        isDifferentCreator={isDifferentCreator}
+        hasVoucher={Boolean(voucher)}
+        voucherCreator={voucherCreator}
+        voucherStt={voucher?.stt}
+        maDt={maDt}
+        pendingDraft={pendingDraft}
+        errorMessage={errorMessage}
+        onPrint={onPrint}
+        onViewDebt={onViewDebt}
+        onRequestClose={requestClose}
+        onRestoreDraft={handleRestoreDraft}
+        onDismissDraft={() => {
+          clearDraft();
+          setPendingDraft(null);
+        }}
+        onClearError={() => {
+          setErrorMessage(null);
+          setInvalidField(null);
+        }}
+      />
 
-        <div className="flex items-center gap-4 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-primary-200">Người lập:</span>
-            <span
-              className={`font-semibold px-2 py-0.5 rounded border ${
-                isDifferentCreator && voucher
-                  ? "text-amber-200 bg-amber-950/60 border-amber-400/50"
-                  : "text-white bg-black/25 border-white/20"
-              }`}
-              title={
-                isDifferentCreator && voucher
-                  ? `Phiếu do ${voucherCreator || "(trống)"} lập — nút Lưu bị khóa (dùng Shift+Enter để lưu bỏ qua kiểm tra)`
-                  : undefined
-              }
-            >
-              {isCreate ? CURRENT_USER : voucher ? voucherCreator || "—" : "..."}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 pl-2 border-l border-white/20">
-            {!isWarehouse && voucher?.stt && onPrint && (
-              <button
-                className="p-1 px-2 text-primary-200 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
-                title="In phiếu (F7)"
-                onClick={onPrint}
-                type="button"
-              >
-                <Printer className="w-3.5 h-3.5" />
-              </button>
-            )}
-            {!isWarehouse && maDt && onViewDebt && (
-              <button
-                className="p-1 px-2 text-primary-200 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
-                title="Chi tiết công nợ"
-                onClick={() => onViewDebt(maDt)}
-                type="button"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              className="p-1 px-2 text-rose-200 hover:text-white hover:bg-danger-600 rounded transition-colors ml-1 cursor-pointer"
-              title="Đóng (Esc)"
-              onClick={requestClose}
-              type="button"
-              aria-label="Đóng biểu mẫu"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* ===== Draft Recovery Banner ===== */}
-      {pendingDraft && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center justify-between gap-3 text-xs text-amber-900 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <History className="w-4 h-4 text-amber-600 shrink-0" />
-            <span className="truncate">
-              Tìm thấy bản nháp chưa lưu lúc{" "}
-              <b className="font-mono">
-                {new Date(pendingDraft.savedAt).toLocaleTimeString("vi-VN", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </b>{" "}
-              (
-              {pendingDraft.items.filter((it) => Boolean(it.ma_vt?.trim())).length}{" "}
-              dòng hàng).
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleRestoreDraft}
-              className="px-2.5 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold text-[11px] cursor-pointer transition-colors"
-            >
-              Khôi phục bản nháp
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                clearDraft();
-                setPendingDraft(null);
-              }}
-              className="px-2 py-0.5 bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 rounded font-medium text-[11px] cursor-pointer transition-colors"
-            >
-              Bỏ qua
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ===== Toast Notifications / Alerts ===== */}
-      {errorMessage && (
-        <div className="bg-danger-50 border-b border-danger-200 px-4 py-2 flex items-center justify-between text-xs text-danger-800">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-danger-600 shrink-0" />
-            <span className="font-semibold">{errorMessage}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setErrorMessage(null);
-              setInvalidField(null);
-            }}
-            className="text-danger-500 hover:text-danger-800 cursor-pointer"
-            aria-label="Đóng thông báo lỗi"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* ===== Master Information Form ===== */}
-      <section
-        className="bg-neutral-50/90 border-b border-neutral-200 px-3 py-1.5 shrink-0"
-        data-purpose="master-form"
-      >
-        <div className="flex flex-col xl:flex-row items-start gap-2.5 max-w-[1920px] mx-auto">
-          {/* Left & Center: Transaction & Customer */}
-          <div className="w-full xl:flex-1 min-w-0 grid grid-cols-12 gap-x-2 gap-y-1.5">
-            {/* Row 1: Dates, Voucher No & Credit Guard */}
-            <div className="col-span-12 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <div className="flex items-center gap-2">
-                <label className="erp-label w-[72px] shrink-0 inline-block text-neutral-700 font-bold">
-                  Ngày:
-                </label>
-                <div className="w-40 shrink-0">
-                  {isEditable ? (
-                    <input
-                      ref={ngayCtInputRef}
-                      type="date"
-                      className={`erp-input w-full text-xs py-0.5 font-mono font-semibold ${
-                        invalidField === "ngayCt" ? "erp-input-danger" : ""
-                      }`}
-                      value={ngayCt}
-                      onChange={(e) => {
-                        setNgayCt(e.target.value);
-                        if (invalidField === "ngayCt") setInvalidField(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === "Enter" &&
-                          !e.ctrlKey &&
-                          !e.shiftKey &&
-                          !e.metaKey &&
-                          !e.altKey
-                        ) {
-                          e.preventDefault();
-                          soCtInputRef.current?.focus();
-                          soCtInputRef.current?.select();
-                          return;
-                        }
-                        handleHeaderArrowNav(e, 0);
-                      }}
-                    />
-                  ) : (
-                    <input
-                      className={readonlyField + " text-xs py-0.5"}
-                      value={formatDate(ngayCt)}
-                      onFocus={(e) => e.currentTarget.select()}
-                      readOnly
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <label className="erp-label text-neutral-700 font-bold">
-                  Số phiếu:
-                </label>
-                {isEditable ? (
-                  <input
-                    ref={soCtInputRef}
-                    className="erp-input w-28 font-mono font-bold text-primary-700 bg-white border-primary-300 uppercase tracking-wide text-xs py-0.5"
-                    value={soCt}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSoCt(val);
-                      const clean = val.trim().toUpperCase();
-                      userEditedSoCtRef.current =
-                        Boolean(clean) && clean !== autoSuggestedSoCtRef.current;
-                    }}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.ctrlKey &&
-                        !e.shiftKey &&
-                        !e.metaKey &&
-                        !e.altKey
-                      ) {
-                        e.preventDefault();
-                        maDtInputRef.current?.focus();
-                        maDtInputRef.current?.select();
-                        return;
-                      }
-                      handleHeaderArrowNav(e, 1);
-                    }}
-                    placeholder="Tự động cấp số"
-                  />
-                ) : (
-                  <input
-                    className="erp-input w-24 font-mono font-bold text-primary-700 bg-white border-primary-300 text-center uppercase tracking-wide text-xs py-0.5 cursor-text select-text"
-                    value={soCt || "—"}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                  />
-                )}
-              </div>
-
-              {/* Khu vực + Giới hạn nợ + Dư nợ (hiển thị dạng label thông thường cạnh Số phiếu) */}
-              <div className="flex items-center gap-1.5 ml-2">
-                <label className="erp-label text-neutral-600 font-semibold">
-                  Khu vực:
-                </label>
-                <span className="font-mono font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-md text-xs">
-                  {maVm || "—"}
-                </span>
-              </div>
-
-              {!isWarehouse && (
-                <>
-                  <span className="text-neutral-300">|</span>
-
-                  <div className="flex items-center gap-1.5">
-                    <label className="erp-label text-neutral-600 font-semibold">
-                      Giới hạn nợ:
-                    </label>
-                    <span className="font-mono font-bold text-neutral-800 px-2 py-0.5 rounded-md text-xs">
-                      {debtInfo ? formatCurrency(debtInfo.gioi_han) : "—"}
-                    </span>
-                  </div>
-
-                  {debtInfo && (
-                    <>
-                      <span className="text-neutral-300">|</span>
-                      {onViewDebt ? (
-                        <button
-                          type="button"
-                          onClick={openDebtLedger}
-                          className={`inline-flex items-center gap-1 text-xs cursor-pointer hover:underline ${
-                            debtInfo.is_over_limit
-                              ? "text-danger-700 font-bold"
-                              : debtInfo.is_near_limit
-                                ? "text-amber-700 font-semibold"
-                                : "text-neutral-700 font-medium"
-                          }`}
-                          title="Mở sổ chi tiết công nợ [Ctrl+Shift+E]"
-                        >
-                          <CreditCard className="w-3.5 h-3.5 opacity-70" />
-                          <span>
-                            Dư nợ:{" "}
-                            <span className="font-mono font-bold">
-                              {formatCurrency(debtInfo.du_cuoi)}
-                            </span>
-                          </span>
-                          {debtInfo.is_over_limit && (
-                            <span className="text-danger-600 ml-0.5 font-bold">
-                              (Vượt HM!)
-                            </span>
-                          )}
-                        </button>
-                      ) : (
-                        <div
-                          className={`inline-flex items-center gap-1 text-xs ${
-                            debtInfo.is_over_limit
-                              ? "text-danger-700 font-bold"
-                              : debtInfo.is_near_limit
-                                ? "text-amber-700 font-semibold"
-                                : "text-neutral-700 font-medium"
-                          }`}
-                        >
-                          <CreditCard className="w-3.5 h-3.5 opacity-70" />
-                          <span>
-                            Dư nợ:{" "}
-                            <span className="font-mono font-bold">
-                              {formatCurrency(debtInfo.du_cuoi)}
-                            </span>
-                          </span>
-                          {debtInfo.is_over_limit && (
-                            <span className="text-danger-600 ml-0.5 font-bold">
-                              (Vượt HM!)
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Row 2: Đối tượng (Mã + Tên), Địa chỉ (readonly) cân đối cùng 1 dòng */}
-            <div className="col-span-12 flex items-center gap-2 min-w-0">
-              <label className="erp-label w-[72px] shrink-0 inline-block">
-                Đối tượng:
-              </label>
-              {isEditable ? (
-                <div className="w-40 shrink-0">
-                  <Autocomplete
-                    inputRef={maDtInputRef}
-                    selectOnFocus
-                    value={maDt}
-                    onChange={(val) => {
-                      maDtValueRef.current = val;
-                      committedMaDtRef.current = "";
-                      lastWarnedMaDtRef.current = "";
-                      setMaDt(val);
-                      if (maDtError) setMaDtError(null);
-                      if (invalidField === "maDt") setInvalidField(null);
-                    }}
-                    onSelect={(opt) => {
-                      maDtValueRef.current = opt.value;
-                      lastWarnedMaDtRef.current = "";
-                      if (invalidField === "maDt") setInvalidField(null);
-                      handleSelectCustomer(opt.value);
-                      tenDtInputRef.current?.focus();
-                      tenDtInputRef.current?.select();
-                    }}
-                    onBlur={() => {
-                      const v = maDtValueRef.current.trim();
-                      const upper = v.toUpperCase();
-                      if (
-                        v &&
-                        upper !== committedMaDtRef.current &&
-                        upper !== lastWarnedMaDtRef.current
-                      ) {
-                        handleSelectCustomer(v);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.ctrlKey &&
-                        !e.shiftKey &&
-                        !e.metaKey &&
-                        !e.altKey
-                      ) {
-                        e.preventDefault();
-                        const v = maDtValueRef.current.trim();
-                        lastWarnedMaDtRef.current = "";
-                        if (v) {
-                          handleSelectCustomer(v);
-                        }
-                        tenDtInputRef.current?.focus();
-                        tenDtInputRef.current?.select();
-                        return;
-                      }
-                      handleHeaderArrowNav(e, 2);
-                    }}
-                    fetcher={fetchKhachHangOptionsLocal}
-                    placeholder="Mã KH..."
-                    openOnTypeOnly
-                    debounceMs={30}
-                    maxResults={30}
-                    dropdownMinWidth={680}
-                    className={`font-mono font-bold uppercase ${
-                      maDtError || isOverDebtLimit || invalidField === "maDt"
-                        ? "erp-input-danger"
-                        : "text-primary-800"
-                    }`}
-                  />
-                </div>
-              ) : (
-                <div className="w-40 shrink-0">
-                  <input
-                    className={`${disabledLookupField} font-mono font-bold ${
-                      isOverDebtLimit ? "erp-input-danger" : ""
-                    }`}
-                    value={maDt}
-                    onFocus={(e) => e.currentTarget.select()}
-                    title={isOverDebtLimit ? debtInfo?.status_message : maDt}
-                    readOnly
-                  />
-                </div>
-              )}
-              <div className="flex-1 min-w-[200px] max-w-[384px]">
-                {isEditable ? (
-                  <input
-                    ref={tenDtInputRef}
-                    className={`erp-input w-full font-semibold text-neutral-800 text-xs py-0.5 bg-white border-neutral-300 ${
-                      isOverDebtLimit ? "erp-input-danger" : ""
-                    }`}
-                    value={tenDt || ""}
-                    onChange={(e) => {
-                      tenDtEditedRef.current = true;
-                      setTenDt(e.target.value);
-                    }}
-                    onFocus={(e) => e.currentTarget.select()}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.ctrlKey &&
-                        !e.shiftKey &&
-                        !e.metaKey &&
-                        !e.altKey
-                      ) {
-                        e.preventDefault();
-                        dienGiaiInputRef.current?.focus();
-                        dienGiaiInputRef.current?.select();
-                        return;
-                      }
-                      handleHeaderArrowNav(e, 3);
-                    }}
-                    title={
-                      isOverDebtLimit ? debtInfo?.status_message : tenDt || ""
-                    }
-                    placeholder="Tên khách hàng"
-                  />
-                ) : (
-                  <input
-                    className={`${disabledLookupField} font-semibold text-neutral-800 ${
-                      isOverDebtLimit ? "erp-input-danger" : ""
-                    }`}
-                    value={tenDt || ""}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                    title={
-                      isOverDebtLimit ? debtInfo?.status_message : tenDt || ""
-                    }
-                    placeholder="Tên khách hàng"
-                  />
-                )}
-              </div>
-
-              <label className="erp-label shrink-0 ml-1">Địa chỉ:</label>
-              <div className="flex-1 min-w-[140px]">
-                <input
-                  maxLength={64}
-                  className={disabledLookupField}
-                  value={diaChi || ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly
-                  title={diaChi || ""}
-                />
-              </div>
-            </div>
-
-            {/* Row 3: Ông/Bà (readonly) và Bộ phận (readonly) cùng 1 dòng ngay dưới Đối tượng */}
-            <div className="col-span-12 flex items-center gap-2 min-w-0">
-              <label className="erp-label w-[72px] shrink-0 inline-block">
-                Ông/Bà:
-              </label>
-              <div className="flex-1 min-w-[180px] max-w-[350px]">
-                <input
-                  maxLength={64}
-                  className={disabledLookupField + " font-medium"}
-                  value={ongBa || ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly
-                  title={ongBa || ""}
-                />
-              </div>
-
-              <div className="flex items-center gap-2 ml-1 w-36 shrink-0">
-                <label className="erp-label shrink-0 text-neutral-500">
-                  Bộ phận:
-                </label>
-                <div className="flex-1 min-w-0">
-                  <input
-                    className={
-                      disabledLookupField +
-                      " font-mono font-semibold text-center"
-                    }
-                    value={maBp || ""}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                  />
-                </div>
-              </div>
-              <div className="flex-1 min-w-[160px] max-w-[384px]">
-                <input
-                  className={disabledLookupField}
-                  value={tenBp || ""}
-                  onFocus={(e) => e.currentTarget.select()}
-                  readOnly
-                  title={tenBp || ""}
-                />
-              </div>
-            </div>
-
-            {/* Row 4: Diễn giải, Mã xe + Biển số, và nút Chọn phiếu xuất cùng 1 dòng */}
-            <div className="col-span-12 flex items-center gap-2 min-w-0">
-              <label className="erp-label w-[72px] shrink-0 inline-block">
-                Diễn giải:
-              </label>
-              <div className="flex-1 min-w-[180px] max-w-[350px]">
-                <input
-                  ref={dienGiaiInputRef}
-                  maxLength={128}
-                  className={`erp-input w-full font-medium text-neutral-800 text-xs py-0.5 ${
-                    isEditable
-                      ? "bg-white border-neutral-300"
-                      : "bg-neutral-100 cursor-text select-text"
-                  }`}
-                  value={dienGiai0 || ""}
-                  onChange={(e) => setDienGiai0(clampField(e.target.value, 128))}
-                  onFocus={(e) => {
-                    const target = e.currentTarget;
-                    target.select();
-                    setTimeout(() => {
-                      if (document.activeElement === target) {
-                        target.select();
-                      }
-                    }, 0);
-                  }}
-                  onKeyDown={(e) => {
-                    if (
-                      isEditable &&
-                      (e.ctrlKey || e.metaKey) &&
-                      !e.shiftKey &&
-                      !e.altKey &&
-                      (e.key.toLowerCase() === "d" || e.code === "KeyD")
-                    ) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const input = e.currentTarget;
-                      const source =
-                        input.value ||
-                        dienGiai0 ||
-                        voucher?.dien_giai0 ||
-                        initialInherited?.dien_giai0 ||
-                        "";
-                      const nextVal = source.slice(0, 10);
-                      setDienGiai0(nextVal);
-                      setTimeout(() => {
-                        if (document.activeElement === input) {
-                          input.setSelectionRange(
-                            nextVal.length,
-                            nextVal.length,
-                          );
-                        }
-                      }, 0);
-                      return;
-                    }
-                    if (
-                      e.key === "Enter" &&
-                      !e.ctrlKey &&
-                      !e.shiftKey &&
-                      !e.metaKey &&
-                      !e.altKey
-                    ) {
-                      e.preventDefault();
-                      maXeInputRef.current?.focus();
-                      maXeInputRef.current?.select();
-                      return;
-                    }
-                    handleHeaderArrowNav(e, 4);
-                  }}
-                  title={
-                    isEditable
-                      ? "Diễn giải (Ctrl+D: cắt giữ 10 ký tự đầu)"
-                      : undefined
-                  }
-                  readOnly={!isEditable}
-                />
-              </div>
-
-              <div className="flex items-center gap-2 ml-1 w-36 shrink-0">
-                <label className="erp-label shrink-0">Xe:</label>
-                {isEditable ? (
-                  <div className="flex-1 min-w-0">
-                    <Autocomplete
-                      inputRef={maXeInputRef}
-                      selectOnFocus
-                      value={maXe || ""}
-                      onChange={(val) => setMaXe(val)}
-                      onSelect={(opt) => handleSelectXe(opt.value, opt.hint)}
-                      onBlur={() => handleSelectXe(maXe)}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === "Enter" &&
-                          !e.ctrlKey &&
-                          !e.shiftKey &&
-                          !e.metaKey &&
-                          !e.altKey
-                        ) {
-                          e.preventDefault();
-                          if (maXe.trim()) {
-                            handleSelectXe(maXe);
-                          }
-                          if (!isWarehouse && pickupBtnRef.current) {
-                            pickupBtnRef.current.focus();
-                          } else if (firstMaVtRef.current) {
-                            firstMaVtRef.current.focus();
-                            firstMaVtRef.current.select();
-                          }
-                          return;
-                        }
-                        handleHeaderArrowNav(e, 5);
-                      }}
-                      fetcher={fetchXeOptionsLocal}
-                      openOnTypeOnly
-                      debounceMs={30}
-                      maxResults={30}
-                      dropdownMinWidth={360}
-                      placeholder="Mã xe..."
-                      className="font-mono font-semibold text-neutral-800 uppercase"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex-1 min-w-0">
-                    <input
-                      className={
-                        disabledLookupField + " font-mono text-center"
-                      }
-                      value={maXe || ""}
-                      onFocus={(e) => e.currentTarget.select()}
-                      readOnly
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="flex-1 min-w-[220px] max-w-[420px] flex items-center gap-2">
-                <div className="flex-1 min-w-0">
-                  <input
-                    className={disabledLookupField}
-                    value={tenXe || ""}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                    title={tenXe || ""}
-                  />
-                </div>
-
-                {!isWarehouse && isEditable && onOpenPickup && (
-                  <button
-                    ref={pickupBtnRef}
-                    type="button"
-                    onClick={() => onOpenPickup(maDt, ngayCt)}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.ctrlKey &&
-                        !e.shiftKey &&
-                        !e.metaKey &&
-                        !e.altKey
-                      ) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onOpenPickup(maDt, ngayCt);
-                      } else if (
-                        (e.key === "Tab" && !e.shiftKey) ||
-                        e.key === "ArrowDown" ||
-                        e.key === "ArrowRight"
-                      ) {
-                        if (firstMaVtRef.current) {
-                          e.preventDefault();
-                          firstMaVtRef.current.focus();
-                          firstMaVtRef.current.select();
-                        }
-                      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-                        e.preventDefault();
-                        focusHeaderControl(maXeInputRef.current);
-                      }
-                    }}
-                    className="inline-flex items-center px-2.5 py-0.5 rounded bg-secondary-50 hover:bg-secondary-100 focus:ring-2 focus:ring-primary-600 focus:outline-none text-secondary-700 border border-secondary-300 shadow-sm font-semibold text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
-                    title="Chọn phiếu xuất từ kho"
-                  >
-                    <FileText className="w-3.5 h-3.5 mr-1.5 text-secondary-600" />
-                    Chọn phiếu xuất
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Accounting Posting Parameters (chỉ hiển thị ở chế độ bán hàng) */}
-          {!isWarehouse && (
-            <div className="w-auto shrink-0 bg-white px-2.5 py-1.5 rounded border border-neutral-200 shadow-sm flex flex-col gap-1 self-start">
-              <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider pb-0.5 border-b border-neutral-100 flex items-center justify-between gap-2">
-                <span>Định khoản</span>
-                <SlidersHorizontal className="w-3 h-3 text-neutral-400" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="erp-label shrink-0 text-neutral-600">
-                    Mã NX:
-                  </label>
-                  <input
-                    className="erp-input !w-16 shrink-0 text-center font-mono font-bold text-xs py-0.5 bg-neutral-100 border-neutral-200 text-neutral-800 cursor-text select-text"
-                    value={maNx}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <label className="erp-label shrink-0 text-neutral-600">
-                    TK Nợ:
-                  </label>
-                  <input
-                    className="erp-input !w-16 shrink-0 text-center font-mono font-bold text-xs py-0.5 bg-neutral-100 border-neutral-200 text-primary-900 cursor-text select-text"
-                    value={tk2}
-                    onFocus={(e) => e.currentTarget.select()}
-                    readOnly
-                    title="Tài khoản Nợ cố định (1311)"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
+      <VoucherMasterSection
+        isWarehouse={isWarehouse}
+        isEditable={isEditable}
+        invalidField={invalidField}
+        setInvalidField={setInvalidField}
+        ngayCt={ngayCt}
+        setNgayCt={setNgayCt}
+        soCt={soCt}
+        setSoCt={setSoCt}
+        maVm={maVm}
+        debtInfo={debtInfo}
+        isOverDebtLimit={!!debtInfo?.is_over_limit}
+        maDt={maDt}
+        setMaDt={setMaDt}
+        maDtError={maDtError}
+        setMaDtError={setMaDtError}
+        tenDt={tenDt}
+        setTenDt={setTenDt}
+        diaChi={diaChi}
+        ongBa={ongBa}
+        maBp={maBp}
+        tenBp={tenBp}
+        dienGiai0={dienGiai0}
+        setDienGiai0={setDienGiai0}
+        fallbackDienGiai={
+          voucher?.dien_giai0 || initialInherited?.dien_giai0 || ""
+        }
+        maXe={maXe}
+        setMaXe={setMaXe}
+        tenXe={tenXe}
+        maNx={maNx}
+        tk2={tk2}
+        ngayCtInputRef={ngayCtInputRef}
+        soCtInputRef={soCtInputRef}
+        maDtInputRef={maDtInputRef}
+        tenDtInputRef={tenDtInputRef}
+        dienGiaiInputRef={dienGiaiInputRef}
+        maXeInputRef={maXeInputRef}
+        pickupBtnRef={pickupBtnRef}
+        firstMaVtRef={firstMaVtRef}
+        autoSuggestedSoCtRef={autoSuggestedSoCtRef}
+        userEditedSoCtRef={userEditedSoCtRef}
+        maDtValueRef={maDtValueRef}
+        committedMaDtRef={committedMaDtRef}
+        lastWarnedMaDtRef={lastWarnedMaDtRef}
+        tenDtEditedRef={tenDtEditedRef}
+        onViewDebt={onViewDebt}
+        openDebtLedger={openDebtLedger}
+        onOpenPickup={onOpenPickup}
+        handleSelectCustomer={handleSelectCustomer}
+        handleSelectXe={handleSelectXe}
+        fetchKhachHangOptionsLocal={fetchKhachHangOptionsLocal}
+        fetchXeOptionsLocal={fetchXeOptionsLocal}
+        focusHeaderControl={focusHeaderControl}
+        handleHeaderArrowNav={handleHeaderArrowNav}
+      />
 
       {/* ===== Grid Toolbar ===== */}
       <div
@@ -2798,411 +1656,66 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         />
       </div>
 
-      {/* ===== Action Footer Bar ===== */}
-      <footer
-        className="bg-white border-t border-neutral-300 px-3 py-1 flex flex-wrap items-center justify-between gap-1.5 shrink-0 text-xs"
-        data-purpose="footer-controls"
-      >
-        <div className="flex items-center gap-1.5">
-          {isEditable ? (
-            <button
-              className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded shadow-sm transition-all ${
-                isDifferentCreator
-                  ? "bg-neutral-200 text-neutral-500 cursor-not-allowed opacity-70"
-                  : "bg-primary-700 hover:bg-primary-800 text-white disabled:opacity-50 cursor-pointer"
-              }`}
-              type="button"
-              onClick={() => handleSave(false)}
-              disabled={saving || isDifferentCreator}
-              title={
-                isDifferentCreator
-                  ? `Phiếu do "${voucherCreator || "(trống)"}" lập — nút Lưu bị khóa (dùng Shift + Enter để lưu bỏ qua công nợ và người lập)`
-                  : "Chấp nhận lưu chứng từ (Ctrl + Enter; Shift + Enter để lưu và bỏ qua công nợ)"
-              }
-            >
-              {saving ? (
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5 mr-1.5" />
-              )}
-              {saving ? "Đang lưu..." : "Chấp nhận"}
-              <kbd
-                className={`ml-1.5 text-[10px] ${
-                  isDifferentCreator
-                    ? "bg-neutral-300 text-neutral-500 border-neutral-400"
-                    : "bg-primary-900/40 text-primary-100 border-primary-600"
-                }`}
-              >
-                Ctrl + Enter
-              </kbd>
-            </button>
-          ) : (
-            <button
-              className="inline-flex items-center px-2.5 py-1 bg-neutral-200 text-neutral-500 text-xs font-semibold rounded shadow-sm cursor-not-allowed"
-              type="button"
-              disabled
-            >
-              <Check className="w-3.5 h-3.5 mr-1.5" />
-              Chấp nhận
-            </button>
-          )}
+      <VoucherFormFooter
+        isEditable={isEditable}
+        isWarehouse={isWarehouse}
+        isDifferentCreator={isDifferentCreator}
+        voucherCreator={voucherCreator}
+        saving={saving}
+        maTte={maTte}
+        totals={totals}
+        onSave={handleSave}
+        onRequestClose={requestClose}
+        onOpenPriceCalc={handleOpenPriceCalc}
+      />
 
-          <button
-            className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-medium rounded border border-neutral-300 transition-all cursor-pointer"
-            type="button"
-            onClick={requestClose}
-          >
-            <Ban className="w-3.5 h-3.5 text-neutral-500 mr-1.5" />
-            Hủy bỏ
-            <kbd className="ml-1.5 text-[10px]">Esc</kbd>
-          </button>
-
-          {!isWarehouse && isEditable && (
-            <button
-              className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-primary-50 text-neutral-700 hover:text-primary-800 text-xs font-medium rounded border border-neutral-300 hover:border-primary-300 transition-all cursor-pointer"
-              type="button"
-              onClick={handleOpenPriceCalc}
-              title="Mở máy tính tính đơn giá cho dòng đang chọn (F5)"
-            >
-              <Calculator className="w-3.5 h-3.5 text-primary-700 mr-1.5" />
-              Tính giá
-              <kbd className="ml-1.5 text-[10px]">F5</kbd>
-            </button>
-          )}
-        </div>
-
-        {!isWarehouse && (
-          <div className="flex items-center gap-2 text-neutral-600">
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
-                  Tiền hàng:
-                </span>
-                <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
-                  <span className="font-mono font-bold text-neutral-900 text-xs">
-                    {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9) từ calcVoucherTotals */}
-                    {formatCurrency(totals.ttien_nt, maTte)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
-                  Tiền CK:
-                </span>
-                <div className="flex items-center bg-white border border-primary-200 rounded px-2 py-0.5 shadow-sm">
-                  <span className="font-mono font-bold text-primary-900 text-xs">
-                    {formatCurrency(totals.ttien_nt4, maTte)}
-                  </span>
-                </div>
-              </div>
-              <div className="h-4 w-px bg-neutral-300"></div>
-              <div className="flex items-center gap-1">
-                <span className="text-xs uppercase font-bold text-neutral-600 tracking-tight">
-                  Tổng thanh toán:
-                </span>
-                <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-2 py-0.5 shadow-sm">
-                  <span className="font-mono font-bold text-primary-900 tracking-tight text-xs">
-                    {formatCurrency(totals.ttien_nt0, maTte)}
-                  </span>
-                  <span className="text-xs font-bold text-primary-700">₫</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </footer>
-
-      {/* Discard Unsaved Changes Confirmation Modal */}
-      {showDiscardDialog && (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div
-            ref={discardDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Xác nhận thoát khi chưa lưu"
-            className="bg-white rounded shadow-2xl border border-neutral-300 w-[440px] overflow-hidden animate-in fade-in zoom-in-95"
-          >
-            <div className="bg-amber-600 text-white px-4 py-2.5 flex items-center justify-between">
-              <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Có thay đổi chưa lưu
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowDiscardDialog(false)}
-                className="text-white/80 hover:text-white cursor-pointer"
-                aria-label="Đóng"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 text-xs text-neutral-700 space-y-2 leading-relaxed">
-              <p>
-                Chứng từ đang có thay đổi chưa được lưu. Bạn muốn lưu lại trước
-                khi thoát hay bỏ các thay đổi này?
-              </p>
-            </div>
-            <div className="bg-neutral-100 px-3.5 py-2 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200">
-              <button
-                type="button"
-                data-autofocus
-                onClick={() => setShowDiscardDialog(false)}
-                className="px-3 py-1 bg-white border border-neutral-300 hover:bg-neutral-50 rounded text-neutral-700 font-medium text-xs cursor-pointer"
-              >
-                Tiếp tục sửa (Esc)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  clearDraft();
-                  setShowDiscardDialog(false);
-                  onBack();
-                }}
-                className="px-3 py-1 bg-danger-50 hover:bg-danger-100 border border-danger-300 text-danger-700 font-semibold rounded text-xs cursor-pointer"
-              >
-                Bỏ thay đổi
-              </button>
-              <button
-                type="button"
-                disabled={saving || isDifferentCreator}
-                onClick={() => {
-                  setShowDiscardDialog(false);
-                  void handleSave(false);
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1 bg-primary-700 hover:bg-primary-800 text-white font-semibold rounded text-xs cursor-pointer disabled:opacity-50"
-              >
-                <Save className="w-3.5 h-3.5" />
-                Lưu (Ctrl+Enter)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pickup Merge vs. Replace Prompt Modal */}
-      {pendingPickupPrompt && (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div
-            ref={pickupPromptRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Chọn cách nạp dòng hàng từ kho"
-            className="bg-white rounded shadow-2xl border border-neutral-300 w-[450px] overflow-hidden animate-in fade-in zoom-in-95"
-          >
-            <div className="bg-primary-800 text-white px-4 py-2.5 flex items-center justify-between">
-              <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Nạp {pendingPickupPrompt.items.length} dòng hàng từ kho
-              </span>
-              <button
-                type="button"
-                onClick={() => setPendingPickupPrompt(null)}
-                className="text-white/80 hover:text-white cursor-pointer"
-                aria-label="Đóng"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 text-xs text-neutral-700 space-y-2 leading-relaxed">
-              <p>
-                Bảng chi tiết hiện đang có{" "}
-                <b>
-                  {items.filter((it) => Boolean(it.ma_vt?.trim())).length} dòng
-                  hàng
-                </b>
-                . Bạn muốn <b>nối thêm</b> hay <b>thay thế</b> toàn bộ các dòng
-                hiện tại bằng{" "}
-                <b>{pendingPickupPrompt.items.length} dòng mới</b> vừa chọn từ
-                kho?
-              </p>
-            </div>
-            <div className="bg-neutral-100 px-3.5 py-2 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200">
-              <button
-                type="button"
-                onClick={() => setPendingPickupPrompt(null)}
-                className="px-3 py-1 bg-white border border-neutral-300 hover:bg-neutral-50 rounded text-neutral-700 font-medium text-xs cursor-pointer"
-              >
-                Hủy (Esc)
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  applyPickupItems(
-                    pendingPickupPrompt.items,
-                    pendingPickupPrompt.ma_xe,
-                    "replace",
-                  )
-                }
-                className="px-3 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 font-semibold rounded text-xs cursor-pointer"
-              >
-                Thay thế toàn bộ
-              </button>
-              <button
-                type="button"
-                data-autofocus
-                onClick={() =>
-                  applyPickupItems(
-                    pendingPickupPrompt.items,
-                    pendingPickupPrompt.ma_xe,
-                    "append",
-                  )
-                }
-                className="px-3.5 py-1 bg-primary-700 hover:bg-primary-800 text-white font-semibold rounded text-xs cursor-pointer"
-              >
-                Nối thêm vào cuối bảng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Debt Warning Dialog */}
-      {debtDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div
-            ref={debtDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={debtDialog.title}
-            className="bg-white rounded shadow-2xl border border-neutral-300 w-[420px] overflow-hidden animate-in fade-in zoom-in-95"
-          >
-            <div
-              className={`px-3.5 py-2 flex items-center justify-between text-white ${
-                debtDialog.tone === "danger" ? "bg-danger-700" : "bg-amber-600"
-              }`}
-            >
-              <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-2">
-                {debtDialog.tone === "danger" ? (
-                  <AlertTriangle className="w-4 h-4" />
-                ) : (
-                  <CreditCard className="w-4 h-4" />
-                )}
-                {debtDialog.title}
-              </span>
-              <button
-                type="button"
-                onClick={closeDebtDialog}
-                className="text-white/80 hover:text-white cursor-pointer"
-                aria-label="Đóng"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 text-xs text-neutral-700 whitespace-pre-line leading-relaxed">
-              {debtDialog.message}
-            </div>
-            <div className="bg-neutral-100 px-3 py-2 flex justify-end border-t border-neutral-200">
-              <button
-                type="button"
-                data-autofocus
-                onClick={closeDebtDialog}
-                className="px-4 py-1.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-xs font-semibold cursor-pointer"
-              >
-                Đã hiểu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Account Picker Modal (F4) */}
-      {showAccountPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
-          <div
-            ref={accountPickerRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Chọn tài khoản"
-            className="bg-white rounded shadow-2xl border border-neutral-300 w-96 overflow-hidden animate-in fade-in zoom-in-95"
-          >
-            <div className="bg-primary-800 text-white px-3.5 py-2 flex items-center justify-between">
-              <span className="font-bold text-xs uppercase tracking-wide">
-                F4: Chọn tài khoản
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowAccountPicker(false)}
-                className="text-white/80 hover:text-white cursor-pointer"
-                aria-label="Đóng"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-3 space-y-2">
-              <label className="text-xs text-neutral-600 font-medium block">
-                Tìm số hiệu hoặc tên tài khoản:
-              </label>
-              <Autocomplete
-                value={accountQuery}
-                onChange={setAccountQuery}
-                inputRef={accountInputRef}
-                autoFocus
-                onSelect={(opt) => {
-                  if (activeRowIndex >= 0 && activeRowIndex < items.length) {
-                    const row = items[activeRowIndex];
-                    handleItemChange(
-                      activeRowIndex,
-                      { ...row, tk_du2: opt.value, tk_du: opt.value },
-                      "TK_DU2",
-                    );
-                  }
-                  setShowAccountPicker(false);
-                }}
-                fetcher={fetchTaiKhoanOptionsLocal}
-                placeholder="Ví dụ: 5111, 131, 33311..."
-                className="w-full text-xs"
-              />
-              <p className="text-[11px] text-neutral-500 italic">
-                Tài khoản chọn sẽ được áp dụng cho dòng {activeRowIndex + 1}{" "}
-                đang đứng.
-              </p>
-            </div>
-            <div className="bg-neutral-100 px-3 py-1.5 flex justify-end border-t border-neutral-200">
-              <button
-                type="button"
-                onClick={() => setShowAccountPicker(false)}
-                className="px-3 py-1 bg-white border border-neutral-300 rounded text-xs font-medium hover:bg-neutral-50 cursor-pointer"
-              >
-                Đóng (Esc)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Price Calculator Modal (F5) */}
-      {showPriceCalc && (
-        <Suspense fallback={null}>
-          <PriceCalculatorModal
-            isOpen={showPriceCalc}
-            rowNumber={
-              Math.max(
-                0,
-                Math.min(activeRowIndex, Math.max(0, items.length - 1)),
-              ) + 1
-            }
-            itemCode={
-              items[
-                Math.max(
-                  0,
-                  Math.min(activeRowIndex, Math.max(0, items.length - 1)),
-                )
-              ]?.ma_vt
-            }
-            itemName={
-              items[
-                Math.max(
-                  0,
-                  Math.min(activeRowIndex, Math.max(0, items.length - 1)),
-                )
-              ]?.ten_vt
-            }
-            initialValue={calcInitialPrice}
-            onApply={handleApplyCalculatedPrice}
-            onClose={handleClosePriceCalc}
-          />
-        </Suspense>
-      )}
+      <VoucherFormModals
+        items={items}
+        activeRowIndex={activeRowIndex}
+        saving={saving}
+        isDifferentCreator={isDifferentCreator}
+        showDiscardDialog={showDiscardDialog}
+        discardDialogRef={discardDialogRef}
+        onCancelDiscard={() => setShowDiscardDialog(false)}
+        onConfirmDiscard={() => {
+          clearDraft();
+          setShowDiscardDialog(false);
+          onBack();
+        }}
+        onSaveAndClose={() => {
+          setShowDiscardDialog(false);
+          void handleSave(false);
+        }}
+        pendingPickupPrompt={pendingPickupPrompt}
+        pickupPromptRef={pickupPromptRef}
+        onCancelPickupPrompt={() => setPendingPickupPrompt(null)}
+        onApplyPickupItems={applyPickupItems}
+        debtDialog={debtDialog}
+        debtDialogRef={debtDialogRef}
+        onCloseDebtDialog={closeDebtDialog}
+        showAccountPicker={showAccountPicker}
+        accountPickerRef={accountPickerRef}
+        accountInputRef={accountInputRef}
+        accountQuery={accountQuery}
+        setAccountQuery={setAccountQuery}
+        fetchTaiKhoanOptionsLocal={fetchTaiKhoanOptionsLocal}
+        onSelectAccount={(code) => {
+          if (activeRowIndex >= 0 && activeRowIndex < items.length) {
+            const row = items[activeRowIndex];
+            handleItemChange(
+              activeRowIndex,
+              { ...row, tk_du2: code, tk_du: code },
+              "TK_DU2",
+            );
+          }
+          setShowAccountPicker(false);
+        }}
+        onCloseAccountPicker={() => setShowAccountPicker(false)}
+        showPriceCalc={showPriceCalc}
+        calcInitialPrice={calcInitialPrice}
+        onApplyCalculatedPrice={handleApplyCalculatedPrice}
+        onClosePriceCalc={handleClosePriceCalc}
+      />
     </div>
   );
 };

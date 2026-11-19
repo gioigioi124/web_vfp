@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Button } from "./ui/Button";
 import { PickupSlip, PickupItem } from "../types/pickup";
-import { formatQuantity, formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
 import { cachedFetch, peek, prime, invalidate } from "../lib/apiCache";
-import {
-  arrowDir,
-  handleExcelMouseDown,
-  selectAllLater,
-} from "./ui/excelCell";
-import { Check, X, Minimize2, Square, RefreshCw, Plus, Edit3, Trash2, Search } from "lucide-react";
+import { arrowDir } from "./ui/excelCell";
+import { X, Minimize2, Square, RefreshCw, Search } from "lucide-react";
+import { PickupMasterTable } from "./pickup/PickupMasterTable";
+import { PickupDetailTable } from "./pickup/PickupDetailTable";
+import { PickupFooter } from "./pickup/PickupFooter";
 
 interface PickupDialogProps {
   isOpen: boolean;
@@ -881,586 +878,58 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             </div>
           )}
           {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU XUẤT KHO */}
-          <section className="shrink-0 max-h-[210px] flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden">
-            <div
-              ref={masterScrollRef}
-              className="flex-1 overflow-auto table-sticky-header"
-            >
-              <table className="w-full min-w-[960px] table-fixed text-left dense-table border-collapse text-[12px] xl-grid">
-                <thead
-                  ref={masterHeadRef}
-                  className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 uppercase text-[11px] font-semibold tracking-wide select-none border-b border-neutral-300"
-                >
-                  <tr>
-                    <th className="w-10 text-center" scope="col">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={(e) =>
-                          e.target.checked ? selectAll() : deselectAll()
-                        }
-                        className="rounded border-neutral-300 text-primary-800 focus:ring-primary-700 w-3.5 h-3.5 cursor-pointer align-middle"
-                        title="Chọn tất cả (Ctrl+A)"
-                      />
-                    </th>
-                    <th className="w-[115px] text-center" scope="col">
-                      Ngày
-                    </th>
-                    <th className="w-[130px]" scope="col">
-                      Số phiếu
-                    </th>
-                    <th className="w-[150px]" scope="col">
-                      Mã KH
-                    </th>
-                    <th className="w-[290px]" scope="col">
-                      Tên KH
-                    </th>
-                    <th scope="col">Địa chỉ</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
-                  {filteredSlips.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="px-4 py-6 text-center text-neutral-400 italic font-normal"
-                      >
-                        {loading
-                          ? "Đang tải dữ liệu từ CSDL Kho..."
-                          : searchQuery.trim()
-                            ? `Không tìm thấy phiếu xuất phù hợp "${searchQuery.trim()}"`
-                            : "Không có phiếu xuất nào sẵn sàng"}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredSlips.map((s, rowIdx) => {
-                      const isChecked = selectedStts.has(s.stt);
-                      const isActive = activeStt === s.stt;
-                      return (
-                        <tr
-                          key={s.stt}
-                          ref={(el) => {
-                            if (el) masterRowRefs.current[s.stt] = el;
-                            else delete masterRowRefs.current[s.stt];
-                          }}
-                          onClick={() => setActiveStt(s.stt)}
-                          className={
-                            isActive
-                              ? "xl-row-active"
-                              : isChecked
-                                ? "xl-row-marked"
-                                : undefined
-                          }
-                        >
-                          <td
-                            className="xl-cell text-center cursor-pointer"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveStt(s.stt);
-                              toggleSelect(s.stt);
-                            }}
-                            title="Nhấn để đánh dấu (Space)"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {}}
-                              tabIndex={-1}
-                              className="rounded border-neutral-400 text-primary-800 focus:ring-0 w-3.5 h-3.5 cursor-pointer align-middle pointer-events-none"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={formatDate(s.ngay_ct)}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                masterActiveColRef.current = 1;
-                                setActiveStt(s.stt);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleMasterCellKeyDown(e, rowIdx, 1)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-center font-mono font-semibold text-neutral-900 tabular-nums grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={s.so_ct || s.stt}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                masterActiveColRef.current = 2;
-                                setActiveStt(s.stt);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleMasterCellKeyDown(e, rowIdx, 2)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={s.ma_dt || ""}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                masterActiveColRef.current = 3;
-                                setActiveStt(s.stt);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleMasterCellKeyDown(e, rowIdx, 3)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input font-mono font-semibold text-neutral-900 grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={s.ten_dt || ""}
-                              placeholder="—"
-                              title={s.ten_dt || ""}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                masterActiveColRef.current = 4;
-                                setActiveStt(s.stt);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleMasterCellKeyDown(e, rowIdx, 4)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={s.dia_chi || ""}
-                              placeholder="—"
-                              title={s.dia_chi || ""}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                masterActiveColRef.current = 5;
-                                setActiveStt(s.stt);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleMasterCellKeyDown(e, rowIdx, 5)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                  {/* Dòng trống bổ sung — giữ chiều cao bảng như mẫu Pickup.html */}
-                  {Array.from({
-                    length: Math.max(0, 6 - slips.length),
-                  }).map((_, i) => (
-                    <tr key={`filler-${i}`} className="h-[24px] bg-white">
-                      <td colSpan={6} />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <PickupMasterTable
+            filteredSlips={filteredSlips}
+            totalSlipsCount={slips.length}
+            selectedStts={selectedStts}
+            activeStt={activeStt}
+            allSelected={allSelected}
+            loading={loading}
+            searchQuery={searchQuery}
+            masterScrollRef={masterScrollRef}
+            masterHeadRef={masterHeadRef}
+            masterRowRefs={masterRowRefs}
+            masterActiveColRef={masterActiveColRef}
+            onSelectAll={selectAll}
+            onDeselectAll={deselectAll}
+            onSetActiveStt={setActiveStt}
+            onToggleSelect={toggleSelect}
+            onCellKeyDown={handleMasterCellKeyDown}
+            onCellCopy={handleCellCopy}
+          />
 
           {/* TẦNG 2: BẢNG DETAIL — CHI TIẾT HÀNG HÓA VẬT TƯ */}
-          <section
-            ref={detailSectionRef}
-            className="flex-1 flex flex-col bg-white rounded border border-neutral-300 shadow-sm overflow-hidden h-full"
-          >
-            <div
-              ref={detailScrollRef}
-              className="flex-1 overflow-auto table-sticky-header"
-            >
-              <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
-                <thead
-                  ref={detailHeadRef}
-                  className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-700 uppercase text-[11px] font-semibold tracking-wide select-none border-b border-neutral-300"
-                >
-                  <tr>
-                    <th className="w-40 text-center" scope="col">
-                      Vật tư (Mã VT)
-                    </th>
-                    <th className="min-w-[240px] text-left" scope="col">
-                      Tên vật tư hàng hóa
-                    </th>
-                    <th className="w-24 text-center" scope="col">
-                      Mã kho
-                    </th>
-                    <th className="w-20 text-center" scope="col">
-                      ĐVT
-                    </th>
-                    <th className="w-24 text-right" scope="col">
-                      Số tấm
-                    </th>
-                    <th className="w-24 text-right" scope="col">
-                      Hệ số
-                    </th>
-                    <th className="w-24 text-right" scope="col">
-                      SL bán
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-200 font-sans text-neutral-900 font-semibold">
-                  {activeItems.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="px-4 py-6 text-center text-neutral-400 italic font-normal"
-                      >
-                        {loadingDetail
-                          ? "Đang nạp chi tiết..."
-                          : "Chọn một phiếu ở trên để xem chi tiết"}
-                      </td>
-                    </tr>
-                  ) : (
-                    activeItems.map((item, idx) => {
-                      const isActive = idx === activeDetailRow;
-                      return (
-                        <tr
-                          key={item.stt0 || idx}
-                          ref={(el) => {
-                            if (el) detailRowRefs.current[idx] = el;
-                            else delete detailRowRefs.current[idx];
-                          }}
-                          onClick={() => setActiveDetailRow(idx)}
-                          className={isActive ? "xl-row-active" : undefined}
-                        >
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={item.ma_vt || ""}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 0)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-center font-mono font-semibold text-neutral-900 grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell min-w-[240px]">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={item.ten_vt || ""}
-                              placeholder="—"
-                              title={item.ten_vt || ""}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 1)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input font-sans font-semibold text-neutral-900 truncate grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={item.ma_kho || ""}
-                              placeholder="—"
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 2)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-center font-mono font-semibold text-neutral-900 grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={item.dvt || ""}
-                              placeholder="—"
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 3)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-center font-sans font-semibold text-neutral-900 grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell xl-amber">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={formatQuantity(item.so_tam)}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 4)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-right font-mono font-bold text-neutral-900 tabular-nums grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell xl-amber">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={formatQuantity(item.he_so8)}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 5)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-right font-mono font-bold text-neutral-900 tabular-nums grid-cell-input"
-                            />
-                          </td>
-                          <td className="xl-cell xl-amber">
-                            <input
-                              type="text"
-                              readOnly
-                              data-mode="select"
-                              value={formatQuantity(item.so_luong9)}
-                              onMouseDown={(e) =>
-                                handleExcelMouseDown(e, "select")
-                              }
-                              onFocus={(e) => {
-                                setActiveDetailRow(idx);
-                                e.currentTarget.select();
-                                selectAllLater(e.currentTarget);
-                              }}
-                              onKeyDown={(e) =>
-                                handleDetailCellKeyDown(e, idx, 6)
-                              }
-                              onCopy={handleCellCopy}
-                              className="xl-input text-right font-mono font-semibold text-neutral-900 tabular-nums grid-cell-input"
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                  {/* Dòng trống bổ sung — giữ chiều cao bảng như mẫu Pickup.html */}
-                  {Array.from({
-                    length: Math.max(0, 8 - activeItems.length),
-                  }).map((_, i) => (
-                    <tr
-                      key={`detail-filler-${i}`}
-                      className="h-[24px] bg-white"
-                    >
-                      <td colSpan={7} />
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <PickupDetailTable
+            activeItems={activeItems}
+            activeDetailRow={activeDetailRow}
+            loadingDetail={loadingDetail}
+            detailSectionRef={detailSectionRef}
+            detailScrollRef={detailScrollRef}
+            detailHeadRef={detailHeadRef}
+            detailRowRefs={detailRowRefs}
+            onSetActiveDetailRow={setActiveDetailRow}
+            onCellKeyDown={handleDetailCellKeyDown}
+            onCellCopy={handleCellCopy}
+          />
         </main>
 
         {/* ===== Modal Footer ===== */}
-        <footer className="px-3 py-2 bg-neutral-100 border-t border-neutral-300 flex items-center justify-between gap-2 shrink-0">
-          {/* Bộ đếm phiếu đã chọn + tóm tắt phiếu đang xem */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="flex items-center bg-white px-2.5 py-1 rounded border border-neutral-300 shadow-sm shrink-0">
-              <label className="text-xs font-semibold text-neutral-700 mr-2 whitespace-nowrap">
-                Số phiếu đã chọn
-              </label>
-              <div className="flex items-center font-mono font-bold text-xs">
-                <input
-                  readOnly
-                  value={selectedStts.size}
-                  className="w-8 h-5 text-center font-bold text-primary-900 bg-primary-50 border border-primary-400 rounded p-0 text-xs focus:outline-none select-all"
-                />
-                <span className="mx-1.5 text-neutral-400">/</span>
-                <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 bg-neutral-200 text-neutral-700 rounded text-xs">
-                  {filteredSlips.length}
-                </span>
-              </div>
-            </div>
-            {activeItems.length > 0 && (
-              <div className="hidden md:flex items-center gap-1.5 text-[11px] text-neutral-600 bg-white/80 px-2 py-1 rounded border border-neutral-200 truncate">
-                <span>
-                  Phiếu đang xem:{" "}
-                  <b className="font-mono text-neutral-800">{activeItems.length}</b> dòng
-                </span>
-                {activeSlipTotalSheets > 0 && (
-                  <>
-                    <span className="text-neutral-300">·</span>
-                    <span>
-                      Tổng tấm:{" "}
-                      <b className="font-mono text-amber-800">
-                        {formatQuantity(activeSlipTotalSheets)}
-                      </b>
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Nhóm nút thao tác nhỏ gọn */}
-          <div className="flex items-center justify-end gap-1.5 shrink-0">
-            {onCreateWarehouseSlip && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onCreateWarehouseSlip}
-                type="button"
-                className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
-                title="Thêm mới phiếu xuất kho (F2)"
-              >
-                <Plus className="w-3.5 h-3.5 text-emerald-700" />
-                Thêm phiếu kho
-              </Button>
-            )}
-
-            {onEditWarehouseSlip && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (!activeStt) return;
-                  const activeSlip = slips.find((s) => s.stt === activeStt);
-                  onEditWarehouseSlip(activeStt, {
-                    slip: activeSlip,
-                    items: activeItems,
-                  });
-                }}
-                disabled={!activeStt}
-                type="button"
-                className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"
-                title="Sửa phiếu xuất kho đang chọn (F3)"
-              >
-                <Edit3 className="w-3.5 h-3.5 text-amber-700" />
-                Sửa phiếu kho
-              </Button>
-            )}
-
-            {onDeleteWarehouseSlip && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const activeSlip = slips.find((s) => s.stt === activeStt);
-                  if (activeSlip) onDeleteWarehouseSlip(activeSlip);
-                }}
-                disabled={!activeStt}
-                type="button"
-                className="border-danger-300 bg-danger-50 hover:bg-danger-100 text-danger-800 disabled:opacity-50"
-                title="Xóa phiếu xuất kho đang chọn (F8)"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-danger-600" />
-                Xóa phiếu kho
-              </Button>
-            )}
-
-            {(onCreateWarehouseSlip ||
-              onEditWarehouseSlip ||
-              onDeleteWarehouseSlip) && (
-              <div className="h-4 w-px bg-neutral-300 mx-0.5" />
-            )}
-
-            <Button
-              ref={cancelBtnRef}
-              data-autofocus={slips.length === 0 ? true : undefined}
-              variant="outline"
-              size="sm"
-              onClick={onClose}
-              type="button"
-            >
-              <X className="w-3.5 h-3.5 text-neutral-500" />
-              Hủy bỏ
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleAccept}
-              disabled={selectedStts.size === 0}
-              type="button"
-            >
-              <Check className="w-3.5 h-3.5 text-success-300" />
-              Chấp nhận
-            </Button>
-          </div>
-        </footer>
+        <PickupFooter
+          selectedCount={selectedStts.size}
+          filteredCount={filteredSlips.length}
+          totalSlipsCount={slips.length}
+          activeItemsCount={activeItems.length}
+          activeSlipTotalSheets={activeSlipTotalSheets}
+          activeStt={activeStt}
+          slips={slips}
+          activeItems={activeItems}
+          cancelBtnRef={cancelBtnRef}
+          onCreateWarehouseSlip={onCreateWarehouseSlip}
+          onEditWarehouseSlip={onEditWarehouseSlip}
+          onDeleteWarehouseSlip={onDeleteWarehouseSlip}
+          onClose={onClose}
+          onAccept={handleAccept}
+        />
       </div>
     </div>
   );

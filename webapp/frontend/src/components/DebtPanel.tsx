@@ -2,15 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { DebtLedgerData, DebtLedgerEntry } from "../types/debt";
 import { VoucherFullDetail } from "../types/voucher";
 import { VoucherForm } from "./VoucherForm";
-import { formatDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
 import { Button } from "./ui/Button";
-import { Autocomplete, AutocompleteOption } from "./ui/Autocomplete";
-import {
-  arrowDir,
-  handleExcelMouseDown,
-  selectAllLater,
-} from "./ui/excelCell";
+import { AutocompleteOption } from "./ui/Autocomplete";
+import { arrowDir } from "./ui/excelCell";
 import {
   initCustomerIndex,
   searchCustomers,
@@ -20,63 +15,26 @@ import {
   Square,
   Minimize2,
   X,
-  Search,
   FileSpreadsheet,
   RefreshCw,
   Eye,
 } from "lucide-react";
+import {
+  SESSION_FROM_KEY,
+  SESSION_TO_KEY,
+  SESSION_MAX_KEY,
+  getInitialDateBounds,
+  formatSpaceNumber,
+  exportDebtLedgerCsv,
+} from "./debt/debtUtils";
+import { DebtFilterToolbar } from "./debt/DebtFilterToolbar";
+import { DebtLedgerTable } from "./debt/DebtLedgerTable";
 
 interface DebtPanelProps {
   isOpen: boolean;
   onClose: () => void;
   maDt: string;
   onVoucherSaved?: (stt?: string, savedVoucher?: VoucherFullDetail) => void;
-}
-
-const SESSION_FROM_KEY = "debtPanel.fromDate";
-const SESSION_TO_KEY = "debtPanel.toDate";
-const SESSION_MAX_KEY = "debtPanel.isMaximized";
-
-function getCurrentMonthBounds(): { start: string; end: string } {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const lastDay = new Date(y, m + 1, 0).getDate();
-  const mm = String(m + 1).padStart(2, "0");
-  return {
-    start: `${y}-${mm}-01`,
-    end: `${y}-${mm}-${String(lastDay).padStart(2, "0")}`,
-  };
-}
-
-function getInitialDateBounds(): { start: string; end: string } {
-  const defaults = getCurrentMonthBounds();
-  try {
-    const savedFrom = window.sessionStorage.getItem(SESSION_FROM_KEY);
-    const savedTo = window.sessionStorage.getItem(SESSION_TO_KEY);
-    return {
-      start: savedFrom && /^\d{4}-\d{2}-\d{2}$/.test(savedFrom) ? savedFrom : defaults.start,
-      end: savedTo && /^\d{4}-\d{2}-\d{2}$/.test(savedTo) ? savedTo : defaults.end,
-    };
-  } catch {
-    return defaults;
-  }
-}
-
-function formatSpaceNumber(val: number | undefined | null): string {
-  const num = Math.round(Number(val) || 0);
-  const absStr = Math.abs(num)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return num < 0 ? `-${absStr}` : absStr;
-}
-
-function escapeCsvCell(val: string | number | null | undefined): string {
-  const str = val === null || val === undefined ? "" : String(val);
-  if (/[",\r\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
 }
 
 export const DebtPanel: React.FC<DebtPanelProps> = ({
@@ -262,69 +220,36 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     [applyLocalCustomerMeta, fetchLedger, fromDate, toDate],
   );
 
+  const handleMaDtChange = useCallback(
+    (val: string) => {
+      const clean = val.toUpperCase();
+      setInputMaDt(clean);
+      maDtLatestRef.current = clean;
+      applyLocalCustomerMeta(clean.trim());
+    },
+    [applyLocalCustomerMeta],
+  );
+
+  const handleMaDtEnter = useCallback(() => {
+    const clean = maDtLatestRef.current.trim().toUpperCase();
+    const hit = applyLocalCustomerMeta(clean);
+    if (hit) {
+      setInputMaDt(hit.ma_dt);
+      maDtLatestRef.current = hit.ma_dt;
+      void fetchLedger(hit.ma_dt, fromDate, toDate);
+    } else {
+      void fetchLedger(clean, fromDate, toDate);
+    }
+  }, [applyLocalCustomerMeta, fetchLedger, fromDate, toDate]);
+
   const handleExportExcel = useCallback(() => {
-    const code = (ledger?.ma_dt || maDtLatestRef.current || "ALL").trim();
-    const customerName = tenDt || ledger?.ten_dt || "";
-    const entries: DebtLedgerEntry[] = ledger?.entries || [];
-
-    const csvRows: (string | number)[][] = [
-      [`SỔ CHI TIẾT CÔNG NỢ PHẢI THU (TK ${ledger?.tk || "131"})`],
-      [
-        `Đối tượng: ${code}${customerName ? ` - ${customerName}` : ""}`,
-        `Từ ngày: ${formatDate(fromDate)}`,
-        `Đến ngày: ${formatDate(toDate)}`,
-      ],
-      [],
-      ["Mã CT", "Ngày", "Số phiếu", "Diễn giải", "Ps tăng", "Ps giảm"],
-      [
-        "",
-        "",
-        "",
-        "Dư đầu kỳ",
-        ledger && ledger.du_dau_tang > 0 ? Math.round(ledger.du_dau_tang) : "",
-        ledger && ledger.du_dau_giam > 0 ? Math.round(ledger.du_dau_giam) : "",
-      ],
-      ...entries.map((en) => [
-        en.ma_ct || "",
-        formatDate(en.ngay_ct),
-        en.so_ct || "",
-        en.dien_giai || "",
-        en.ps_tang !== 0 ? Math.round(en.ps_tang) : "",
-        en.ps_giam !== 0 ? Math.round(en.ps_giam) : "",
-      ]),
-      [
-        "",
-        "",
-        "",
-        "Phát sinh trong kỳ",
-        Math.round(ledger?.tong_ps_tang || 0),
-        Math.round(ledger?.tong_ps_giam || 0),
-      ],
-      [
-        "",
-        "",
-        "",
-        "Dư cuối kỳ",
-        Math.round(ledger?.du_cuoi_tang || 0),
-        Math.round(ledger?.du_cuoi_giam || 0),
-      ],
-    ];
-
-    const csvContent = csvRows
-      .map((row) => row.map(escapeCsvCell).join(","))
-      .join("\r\n");
-
-    const blob = new Blob(["\uFEFF", csvContent], {
-      type: "text/csv;charset=utf-8;",
+    exportDebtLedgerCsv({
+      ledger,
+      fallbackCode: maDtLatestRef.current,
+      tenDt,
+      fromDate,
+      toDate,
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `SoChiTietCongNo_${code}_${fromDate}_${toDate}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }, [fromDate, ledger, tenDt, toDate]);
 
   const entries = ledger?.entries || [];
@@ -538,126 +463,6 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     [ensureRowElementVisible, focusRowCol, handleOpenEntryVoucher],
   );
 
-  interface GridRowData {
-    key: string;
-    rowHead: string;
-    maCt: string;
-    ngay: string;
-    soCt: string;
-    dienGiai: string;
-    psTang: string;
-    psGiam: string;
-    entry?: DebtLedgerEntry;
-    isMarked?: boolean;
-    isSummary?: boolean;
-    maCtClassName?: string;
-    soCtClassName?: string;
-    dienGiaiClassName?: string;
-    psTangClassName?: string;
-    psGiamClassName?: string;
-  }
-
-  const renderGridRow = (row: GridRowData) => {
-    const isSelected = selectedRowKey === row.key;
-    const boldSummary = row.isSummary ? "font-semibold text-neutral-900" : "";
-    const cellFocusProps = (colIdx: number) => ({
-      type: "text" as const,
-      readOnly: true,
-      "data-mode": "select" as const,
-      onMouseDown: (e: React.MouseEvent<HTMLInputElement>) =>
-        handleExcelMouseDown(e, "select"),
-      onFocus: (e: React.FocusEvent<HTMLInputElement>) => {
-        setSelectedRowKey(row.key);
-        e.currentTarget.select();
-        selectAllLater(e.currentTarget);
-      },
-      onDoubleClick: () => {
-        if (row.entry) void handleOpenEntryVoucher(row.entry);
-      },
-      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) =>
-        handleCellKeyDown(e, colIdx, row.entry),
-      onCopy: handleCellCopy,
-    });
-
-    return (
-      <tr
-        key={row.key}
-        data-grid-row="true"
-        data-row-key={row.key}
-        onClick={() => setSelectedRowKey(row.key)}
-        onDoubleClick={() => {
-          if (row.entry) void handleOpenEntryVoucher(row.entry);
-        }}
-        title={row.entry ? "Nhấp đúp hoặc nhấn Enter / F3 để xem hóa đơn" : undefined}
-        className={
-          isSelected
-            ? "xl-row-active"
-            : row.isMarked
-              ? "xl-row-marked"
-              : undefined
-        }
-      >
-        <td className="xl-rowhead font-mono">{row.rowHead}</td>
-        <td className="xl-cell">
-          <input
-            {...cellFocusProps(1)}
-            value={row.maCt}
-            className={`xl-input text-center font-mono grid-cell-input ${
-              row.maCtClassName || "font-medium text-neutral-600"
-            }`}
-          />
-        </td>
-        <td className="xl-cell">
-          <input
-            {...cellFocusProps(2)}
-            value={row.ngay}
-            className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
-          />
-        </td>
-        <td className="xl-cell">
-          <input
-            {...cellFocusProps(3)}
-            value={row.soCt}
-            className={`xl-input font-mono font-semibold grid-cell-input ${
-              row.soCtClassName || "text-primary-700"
-            }`}
-          />
-        </td>
-        <td className="xl-cell min-w-[280px]">
-          <input
-            {...cellFocusProps(4)}
-            value={row.dienGiai}
-            title={row.dienGiai}
-            className={`xl-input text-black truncate grid-cell-input ${
-              row.dienGiaiClassName || boldSummary
-            }`}
-          />
-        </td>
-        <td className="xl-cell">
-          <input
-            {...cellFocusProps(5)}
-            value={row.psTang}
-            className={`xl-input text-right font-mono pr-3 grid-cell-input ${
-              row.psTangClassName ||
-              (row.isSummary
-                ? "font-semibold text-neutral-900"
-                : "font-medium text-neutral-900")
-            }`}
-          />
-        </td>
-        <td className="xl-cell">
-          <input
-            {...cellFocusProps(6)}
-            value={row.psGiam}
-            className={`xl-input text-right font-mono pr-3 grid-cell-input ${
-              row.psGiamClassName || "text-neutral-700"
-            }`}
-          />
-        </td>
-      </tr>
-    );
-  };
-
   if (!isOpen) return null;
 
   const activeCode = (ledger?.ma_dt || inputMaDt || "").trim();
@@ -729,331 +534,38 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         </header>
 
         {/* ===== Compact Filter Toolbar ===== */}
-        <section
-          className="bg-neutral-50 border-b border-neutral-300 px-3 py-1.5 text-xs shrink-0"
-          data-purpose="query-filter-bar"
-        >
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <label
-                className="erp-label"
-                htmlFor="debt-ledger-from-date"
-              >
-                Từ ngày:
-              </label>
-              <input
-                id="debt-ledger-from-date"
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void fetchLedger();
-                  }
-                }}
-                className="erp-input h-7 w-32 font-mono text-neutral-800 bg-white"
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <label
-                className="erp-label"
-                htmlFor="debt-ledger-to-date"
-              >
-                Đến ngày:
-              </label>
-              <input
-                id="debt-ledger-to-date"
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void fetchLedger();
-                  }
-                }}
-                className="erp-input h-7 w-32 font-mono text-neutral-800 bg-white"
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-1 min-w-[260px]">
-              <label className="erp-label">Mã ĐT:</label>
-              <div className="flex items-center">
-                <div className="w-28">
-                  <Autocomplete
-                    inputRef={maDtInputRef}
-                    data-autofocus
-                    value={inputMaDt}
-                    onChange={(val) => {
-                      const clean = val.toUpperCase();
-                      setInputMaDt(clean);
-                      maDtLatestRef.current = clean;
-                      applyLocalCustomerMeta(clean.trim());
-                    }}
-                    onSelect={(opt) => handleSelectCustomer(opt.value, opt.hint)}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.ctrlKey &&
-                        !e.shiftKey &&
-                        !e.metaKey &&
-                        !e.altKey
-                      ) {
-                        e.preventDefault();
-                        const clean = maDtLatestRef.current.trim().toUpperCase();
-                        const hit = applyLocalCustomerMeta(clean);
-                        if (hit) {
-                          setInputMaDt(hit.ma_dt);
-                          maDtLatestRef.current = hit.ma_dt;
-                          void fetchLedger(hit.ma_dt, fromDate, toDate);
-                        } else {
-                          void fetchLedger(clean, fromDate, toDate);
-                        }
-                      }
-                    }}
-                    fetcher={fetchCustomersLocal}
-                    openOnTypeOnly
-                    hideIcon
-                    debounceMs={30}
-                    maxResults={30}
-                    dropdownMinWidth={560}
-                    placeholder="Mã KH..."
-                    className="h-7 uppercase font-bold text-xs border-neutral-300 rounded-r-none text-primary-800"
-                  />
-                </div>
-                <button
-                  className="h-7 px-2 bg-neutral-200 hover:bg-neutral-300 border-y border-r border-neutral-300 text-neutral-600 rounded-r flex items-center justify-center cursor-pointer"
-                  title="Tìm đối tượng [F4]"
-                  type="button"
-                  onClick={() => {
-                    maDtInputRef.current?.focus();
-                    maDtInputRef.current?.select();
-                  }}
-                >
-                  <Search className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              <input
-                className="erp-input h-7 flex-1 min-w-[160px] bg-neutral-100 text-neutral-700 font-medium truncate cursor-default"
-                readOnly
-                type="text"
-                value={tenDt}
-                placeholder="Tên đối tượng..."
-                title={tenDt}
-                tabIndex={-1}
-              />
-            </div>
-
-            <Button
-              variant="primary"
-              size="sm"
-              className="h-7 px-3 shrink-0"
-              disabled={loading}
-              onClick={() => void fetchLedger()}
-              type="button"
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span>Tìm kiếm</span>
-            </Button>
-          </div>
-
-          {errorMsg && (
-            <div className="mt-1.5 px-2.5 py-1 bg-danger-50 border border-danger-200 text-danger-700 rounded text-xs">
-              {errorMsg}
-            </div>
-          )}
-        </section>
+        <DebtFilterToolbar
+          fromDate={fromDate}
+          toDate={toDate}
+          inputMaDt={inputMaDt}
+          tenDt={tenDt}
+          loading={loading}
+          errorMsg={errorMsg}
+          maDtInputRef={maDtInputRef}
+          onFromDateChange={setFromDate}
+          onToDateChange={setToDate}
+          onMaDtChange={handleMaDtChange}
+          onSelectCustomer={handleSelectCustomer}
+          onMaDtEnter={handleMaDtEnter}
+          onSearch={() => void fetchLedger()}
+          fetchCustomers={fetchCustomersLocal}
+        />
 
         {/* ===== Ledger Data Grid (Excel-style matching VoucherList.tsx) ===== */}
-        <div
-          ref={gridScrollRef}
-          className="flex-1 overflow-auto table-sticky-header bg-white"
-          data-purpose="ledger-grid-container"
-        >
-          <table
-            ref={tableRef}
-            className="w-full text-left dense-table border-collapse text-[12.5px] xl-grid"
-          >
-            <thead
-              ref={gridHeadRef}
-              className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300"
-            >
-              <tr>
-                <th
-                  className="w-9 text-center border-r border-neutral-200"
-                  scope="col"
-                >
-                  #
-                </th>
-                <th
-                  className="w-14 text-center border-r border-neutral-200"
-                  scope="col"
-                >
-                  Ctừ
-                </th>
-                <th
-                  className="w-24 text-center border-r border-neutral-200"
-                  scope="col"
-                >
-                  Ngày
-                </th>
-                <th
-                  className="w-28 text-left border-r border-neutral-200 font-mono"
-                  scope="col"
-                >
-                  Số phiếu
-                </th>
-                <th
-                  className="min-w-[280px] border-r border-neutral-200"
-                  scope="col"
-                >
-                  Diễn giải
-                </th>
-                <th
-                  className="w-36 text-right pr-3 border-r border-neutral-200"
-                  scope="col"
-                >
-                  Ps tăng
-                </th>
-                <th className="w-36 text-right pr-3" scope="col">
-                  Ps giảm
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-200 font-sans">
-              {/* Dư đầu kỳ */}
-              {renderGridRow({
-                key: "opening",
-                rowHead: "—",
-                maCt: "",
-                ngay: "",
-                soCt: "",
-                dienGiai: "Dư đầu kỳ",
-                psTang:
-                  ledger && ledger.du_dau_tang !== 0
-                    ? formatSpaceNumber(ledger.du_dau_tang)
-                    : "",
-                psGiam:
-                  ledger && ledger.du_dau_giam !== 0
-                    ? formatSpaceNumber(ledger.du_dau_giam)
-                    : "",
-                isSummary: true,
-                psGiamClassName:
-                  ledger && ledger.du_dau_giam !== 0
-                    ? "font-semibold text-emerald-700"
-                    : "font-semibold text-neutral-900",
-              })}
-
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-neutral-400"
-                  >
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-1.5 text-primary-600" />
-                    Đang tải sổ chi tiết công nợ...
-                  </td>
-                </tr>
-              ) : !inputMaDt.trim() && !ledger ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-10 text-center text-neutral-400 italic"
-                  >
-                    Nhập Mã ĐT rồi nhấn Enter để tra cứu sổ chi tiết công nợ.
-                  </td>
-                </tr>
-              ) : entries.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-8 text-center text-neutral-400 italic"
-                  >
-                    Không có phát sinh trong khoảng thời gian đã chọn.
-                  </td>
-                </tr>
-              ) : (
-                entries.map((entry, rowIdx) => {
-                  const isCreditRow = entry.ps_giam > 0 && entry.ps_tang === 0;
-                  const maCtUpper = (entry.ma_ct || "").trim().toUpperCase();
-                  const isDrillable = Boolean(
-                    entry.stt && (maCtUpper === "X1" || maCtUpper === "N5"),
-                  );
-                  return renderGridRow({
-                    key: `entry-${rowIdx}`,
-                    entry,
-                    rowHead: String(rowIdx + 1),
-                    maCt: isDrillable ? `${maCtUpper} ↗` : entry.ma_ct || "",
-                    ngay: formatDate(entry.ngay_ct),
-                    soCt: entry.so_ct || "",
-                    dienGiai: entry.dien_giai || "",
-                    psTang:
-                      entry.ps_tang !== 0
-                        ? formatSpaceNumber(entry.ps_tang)
-                        : "",
-                    psGiam:
-                      entry.ps_giam !== 0
-                        ? formatSpaceNumber(entry.ps_giam)
-                        : "",
-                    isMarked: isCreditRow,
-                    maCtClassName: isDrillable
-                      ? "font-bold text-primary-700"
-                      : isCreditRow
-                        ? "font-bold text-amber-700"
-                        : "font-medium text-neutral-600",
-                    soCtClassName: isDrillable
-                      ? "text-primary-700 underline decoration-dotted cursor-pointer"
-                      : isCreditRow
-                        ? "text-emerald-700"
-                        : "text-primary-700",
-                    psGiamClassName:
-                      entry.ps_giam !== 0
-                        ? "font-bold text-emerald-700"
-                        : "text-neutral-700",
-                  });
-                })
-              )}
-            </tbody>
-            <tfoot className="sticky bottom-0 z-10 bg-white shadow-[0_-1px_0_#cbd5e1]">
-              {/* Phát sinh trong kỳ */}
-              {renderGridRow({
-                key: "period",
-                rowHead: "Σ",
-                maCt: "",
-                ngay: "",
-                soCt: "",
-                dienGiai: "Phát sinh trong kỳ",
-                psTang: ledger ? formatSpaceNumber(ledger.tong_ps_tang) : "0",
-                psGiam: ledger ? formatSpaceNumber(ledger.tong_ps_giam) : "0",
-                isSummary: true,
-                psGiamClassName:
-                  ledger && ledger.tong_ps_giam !== 0
-                    ? "font-semibold text-emerald-700"
-                    : "font-semibold text-neutral-900",
-              })}
-
-              {/* Dư cuối kỳ */}
-              {renderGridRow({
-                key: "closing",
-                rowHead: "≡",
-                maCt: "",
-                ngay: "",
-                soCt: "",
-                dienGiai: "Dư cuối kỳ",
-                psTang: ledger ? formatSpaceNumber(ledger.du_cuoi_tang) : "0",
-                psGiam: ledger ? formatSpaceNumber(ledger.du_cuoi_giam) : "0",
-                isSummary: true,
-                psGiamClassName:
-                  ledger && ledger.du_cuoi_giam > 0
-                    ? "font-semibold text-emerald-700"
-                    : "font-semibold text-neutral-400",
-              })}
-            </tfoot>
-          </table>
-        </div>
+        <DebtLedgerTable
+          ledger={ledger}
+          entries={entries}
+          loading={loading}
+          inputMaDt={inputMaDt}
+          selectedRowKey={selectedRowKey}
+          gridScrollRef={gridScrollRef}
+          gridHeadRef={gridHeadRef}
+          tableRef={tableRef}
+          onSelectRowKey={setSelectedRowKey}
+          onOpenEntryVoucher={(entry) => void handleOpenEntryVoucher(entry)}
+          onCellKeyDown={handleCellKeyDown}
+          onCellCopy={handleCellCopy}
+        />
 
         {/* ===== Compact Modal Footer matching PickupDialog/FilterDialog ===== */}
         <footer className="bg-neutral-100 px-3.5 py-2 flex items-center justify-between gap-3 border-t border-neutral-300 shrink-0 select-none text-xs">
