@@ -26,7 +26,7 @@ interface PromotionCounterProps {
   programs?: PromotionProgram[];
 }
 
-export const PromotionCounter: React.FC<PromotionCounterProps> = ({
+export const PromotionCounter: React.FC<PromotionCounterProps> = React.memo(({
   items,
   ngayCt,
   maTte = "VND",
@@ -489,4 +489,6 @@ export const PromotionCounter: React.FC<PromotionCounterProps> = ({
       )}
     </>
   );
-};
+});
+
+PromotionCounter.displayName = "PromotionCounter";

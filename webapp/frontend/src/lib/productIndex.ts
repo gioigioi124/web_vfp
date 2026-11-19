@@ -28,8 +28,15 @@ let worker: Worker | null = null;
 let readyPromise: Promise<void> | null = null;
 let ready = false;
 let reqSeq = 0;
-const pendingSearch = new Map<number, (items: ProductInfo[]) => void>();
-const pendingItem = new Map<number, (item: ProductInfo | null) => void>();
+let latestSearchSeq = 0;
+const pendingSearch = new Map<
+  number,
+  { resolve: (items: ProductInfo[]) => void; timer: number }
+>();
+const pendingItem = new Map<
+  number,
+  { resolve: (item: ProductInfo | null) => void; timer: number }
+>();
 
 function ensureWorker(): Worker {
   if (worker) return worker;
@@ -45,18 +52,20 @@ function ensureWorker(): Worker {
       return;
     }
     if (data.type === "result") {
-      const cb = pendingSearch.get(data.id);
-      if (cb) {
+      const entry = pendingSearch.get(data.id);
+      if (entry) {
+        window.clearTimeout(entry.timer);
         pendingSearch.delete(data.id);
-        cb(data.items || []);
+        entry.resolve(data.items || []);
       }
       return;
     }
     if (data.type === "item") {
-      const cb = pendingItem.get(data.id);
-      if (cb) {
+      const entry = pendingItem.get(data.id);
+      if (entry) {
+        window.clearTimeout(entry.timer);
         pendingItem.delete(data.id);
-        cb(data.item ?? null);
+        entry.resolve(data.item ?? null);
       }
     }
   };
@@ -67,16 +76,22 @@ export function initProductIndex(): Promise<void> {
   if (readyPromise) return readyPromise;
   const w = ensureWorker();
   readyPromise = new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(fallbackTimer);
+      w.removeEventListener("message", onReady);
+      resolve();
+    };
     const onReady = (e: MessageEvent) => {
       if (e.data?.type === "ready") {
-        w.removeEventListener("message", onReady);
-        resolve();
+        finish();
       }
     };
+    const fallbackTimer = window.setTimeout(finish, 8000);
     w.addEventListener("message", onReady);
     w.postMessage({ type: "init" });
-    // An toàn: không chờ vô hạn nếu worker lỗi.
-    setTimeout(resolve, 8000);
   });
   return readyPromise;
 }
@@ -92,22 +107,45 @@ export function refreshProductIndex(): void {
 export function searchProducts(q: string): Promise<AutocompleteOption[]> {
   const query = (q || "").trim();
   if (!query) return Promise.resolve([]);
+  if (!readyPromise) void initProductIndex();
   const w = ensureWorker();
   const id = ++reqSeq;
+  latestSearchSeq = id;
+
+  // Hủy ngay các search cũ hơn đang treo để không tốn callback & bộ nhớ
+  for (const [oldId, oldEntry] of Array.from(pendingSearch.entries())) {
+    if (oldId < id) {
+      window.clearTimeout(oldEntry.timer);
+      pendingSearch.delete(oldId);
+      oldEntry.resolve([]);
+    }
+  }
+
   return new Promise<AutocompleteOption[]>((resolve) => {
-    pendingSearch.set(id, (items) => {
-      resolve(
-        items.map((it) => ({ value: it.ma, label: it.ma, hint: it.ten || "" })),
-      );
-    });
-    w.postMessage({ type: "search", id, q: query });
-    // Nếu worker chưa sẵn sàng, trả rỗng để component dùng fallback server.
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (pendingSearch.has(id)) {
         pendingSearch.delete(id);
         resolve([]);
       }
     }, 3000);
+
+    pendingSearch.set(id, {
+      timer,
+      resolve: (items) => {
+        if (id < latestSearchSeq) {
+          resolve([]);
+          return;
+        }
+        resolve(
+          items.map((it) => ({
+            value: it.ma,
+            label: it.ma,
+            hint: it.ten || "",
+          })),
+        );
+      },
+    });
+    w.postMessage({ type: "search", id, q: query });
   });
 }
 
@@ -115,16 +153,17 @@ export function searchProducts(q: string): Promise<AutocompleteOption[]> {
 export function getProductByCode(ma: string): Promise<ProductInfo | null> {
   const code = (ma || "").trim().toUpperCase();
   if (!code) return Promise.resolve(null);
+  if (!readyPromise) void initProductIndex();
   const w = ensureWorker();
   const id = ++reqSeq;
   return new Promise<ProductInfo | null>((resolve) => {
-    pendingItem.set(id, resolve);
-    w.postMessage({ type: "getByCode", id, ma: code });
-    setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (pendingItem.has(id)) {
         pendingItem.delete(id);
         resolve(null);
       }
     }, 2000);
+    pendingItem.set(id, { timer, resolve });
+    w.postMessage({ type: "getByCode", id, ma: code });
   });
 }

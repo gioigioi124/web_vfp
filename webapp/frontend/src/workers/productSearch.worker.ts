@@ -106,8 +106,11 @@ function search(q: string): IndexItem[] {
 }
 
 // ---------------------------------------------------------------- IndexedDB
+let dbPromise: Promise<IDBDatabase | null> | null = null;
+
 function openDb(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve) => {
     try {
       const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = () => {
@@ -117,11 +120,16 @@ function openDb(): Promise<IDBDatabase | null> {
         }
       };
       req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
+      req.onerror = () => {
+        dbPromise = null;
+        resolve(null);
+      };
     } catch {
+      dbPromise = null;
       resolve(null);
     }
   });
+  return dbPromise;
 }
 
 async function saveToIdb() {
@@ -129,8 +137,9 @@ async function saveToIdb() {
   if (!db) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
+    // Lưu trực tiếp `items` đã sắp xếp và đã có _ten/_ma/_k để lần mở sau không phải sort & normalize lại
     tx.objectStore(IDB_STORE).put(
-      { items: [...map.values()], since, epoch },
+      { items, since, epoch, preSorted: true },
       "state",
     );
   } catch {
@@ -148,10 +157,30 @@ async function loadFromIdb(): Promise<boolean> {
       req.onsuccess = () => {
         const state = req.result;
         if (state && Array.isArray(state.items)) {
-          map = new Map(state.items.map((it: IndexItem) => [it.id, it]));
+          const loadedItems = state.items as IndexItem[];
           since = state.since || 0;
           epoch = state.epoch || 0;
-          rebuild();
+          const first = loadedItems[0];
+          const isPreNormalized =
+            Boolean(state.preSorted) &&
+            (!first ||
+              (typeof first._ten === "string" &&
+                typeof first._ma === "string" &&
+                typeof first._k === "string"));
+
+          if (isPreNormalized) {
+            items = loadedItems;
+            map = new Map();
+            byCode = new Map();
+            for (let i = 0; i < items.length; i++) {
+              const it = items[i];
+              map.set(it.id, it);
+              byCode.set(it.ma, it.id);
+            }
+          } else {
+            map = new Map(loadedItems.map((it) => [it.id, it]));
+            rebuild();
+          }
           resolve(true);
         } else {
           resolve(false);
@@ -165,14 +194,14 @@ async function loadFromIdb(): Promise<boolean> {
 }
 
 // -------------------------------------------------------------------- sync
-async function sync(): Promise<void> {
+async function sync(): Promise<boolean> {
   const res = await fetch(
     `/api/products/changes?since=${since}&epoch_c=${epoch}`,
   );
-  if (!res.ok) return;
+  if (!res.ok) return false;
   const body = await res.json();
   const data = body?.data;
-  if (!data) return;
+  if (!data) return false;
 
   if (data.full) {
     map = new Map();
@@ -181,7 +210,7 @@ async function sync(): Promise<void> {
   if (!data.full && (!data.items || data.items.length === 0)) {
     since = data.max_v ?? since;
     epoch = data.epoch ?? epoch;
-    return;
+    return false;
   }
   for (const it of data.items as Array<IndexItem & { del?: boolean }>) {
     if (it.del) map.delete(it.id);
@@ -191,6 +220,7 @@ async function sync(): Promise<void> {
   epoch = data.epoch ?? epoch;
   rebuild();
   void saveToIdb();
+  return true;
 }
 
 // ---------------------------------------------------------------- messaging
@@ -204,16 +234,21 @@ ctx.onmessage = async (e: MessageEvent) => {
     const loaded = await loadFromIdb();
     const hasWarehouseField =
       items.length > 0 && Object.prototype.hasOwnProperty.call(items[0], "ma_kho");
+    let notifiedReady = false;
     if (loaded && map.size > 0 && hasWarehouseField) {
       // Báo sẵn sàng ngay lập tức từ IndexedDB để người dùng tra cứu không cần chờ mạng.
       ctx.postMessage({ type: "ready", count: map.size });
+      notifiedReady = true;
     }
+    let changed = false;
     try {
-      await sync();
+      changed = await sync();
     } catch {
       /* offline: dùng dữ liệu IndexedDB nếu có */
     }
-    ctx.postMessage({ type: "ready", count: map.size });
+    if (!notifiedReady || changed) {
+      ctx.postMessage({ type: "ready", count: map.size });
+    }
     return;
   }
 

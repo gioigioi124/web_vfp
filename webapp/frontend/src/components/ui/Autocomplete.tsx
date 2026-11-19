@@ -102,10 +102,21 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
   const updateDropdownPosition = () => {
     if (!internalInputRef.current) return;
     const rect = internalInputRef.current.getBoundingClientRect();
+    const width = Math.min(
+      Math.max(rect.width, dropdownMinWidth),
+      Math.max(200, window.innerWidth - 16),
+    );
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const dropdownEstHeight = 230;
+    const top =
+      spaceBelow < dropdownEstHeight && rect.top > dropdownEstHeight
+        ? Math.max(8, rect.top - dropdownEstHeight - 2)
+        : rect.bottom + 2;
     setDropdownRect({
-      top: rect.bottom + 2,
-      left: rect.left,
-      width: Math.max(rect.width, dropdownMinWidth),
+      top,
+      left,
+      width,
     });
   };
 
@@ -137,8 +148,9 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     return () => clearTimeout(timer);
   }, [value, open, fetcher, minChars, debounceMs, maxResults]);
 
-  // Đóng dropdown khi click ra ngoài
+  // Đóng dropdown khi click ra ngoài (chỉ gắn listener khi đang mở)
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -146,7 +158,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [open]);
 
   // Cuộn dòng đang sáng vào vùng nhìn thấy của dropdown khi nhấn phím lên/xuống
   useEffect(() => {

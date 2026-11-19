@@ -19,22 +19,58 @@ import {
  * Tải MỘT lần khi mở form -> gợi ý/tra cứu tức thì, không chờ mạng mỗi lần gõ.
  */
 
-let kho: KhoItem[] = [];
-let xe: XeItem[] = [];
-let boPhan: BoPhanItem[] = [];
-let taiKhoan: TaiKhoanItem[] = [];
+interface IndexedEntry<T> {
+  item: T;
+  code: string;
+  name: string;
+  _code: string;
+  _name: string;
+  _all: string;
+}
+
+let kho: IndexedEntry<KhoItem>[] = [];
+let xe: IndexedEntry<XeItem>[] = [];
+let boPhan: IndexedEntry<BoPhanItem>[] = [];
+let taiKhoan: IndexedEntry<TaiKhoanItem>[] = [];
 let tienTe: TienTeItem[] = [];
+
+let khoByCode = new Map<string, KhoItem>();
+let xeByCode = new Map<string, XeItem>();
+let xeByName = new Map<string, XeItem>();
+let boPhanByCode = new Map<string, BoPhanItem>();
+
 let loaded = false;
 let loadPromise: Promise<void> | null = null;
 
-async function getJson<T>(url: string): Promise<T[]> {
+function buildIndexed<T>(
+  items: T[],
+  codeOf: (i: T) => string,
+  nameOf: (i: T) => string,
+): IndexedEntry<T>[] {
+  return items.map((item) => {
+    const code = codeOf(item) || "";
+    const name = nameOf(item) || "";
+    const _code = normalizeSearchText(code);
+    const _name = normalizeSearchText(name);
+    return {
+      item,
+      code,
+      name,
+      _code,
+      _name,
+      _all: `${_code} ${_name}`.trim(),
+    };
+  });
+}
+
+async function getJson<T>(url: string): Promise<T[] | null> {
   try {
     const res = await fetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const body = await res.json();
     return (body?.data ?? []) as T[];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -48,11 +84,46 @@ export function initCatalogCache(): Promise<void> {
       getJson<TaiKhoanItem>("/api/lookups/tai-khoan"),
       getJson<TienTeItem>("/api/lookups/tien-te"),
     ]);
-    kho = k;
-    xe = x;
-    boPhan = b;
-    taiKhoan = t;
-    tienTe = tt;
+
+    if (!k && !x && !b && !t && !tt) {
+      // Mất mạng hoàn toàn -> reset để lần gọi sau thử lại
+      loadPromise = null;
+      return;
+    }
+
+    const kList = k ?? [];
+    const xList = x ?? [];
+    const bList = b ?? [];
+    const tList = t ?? [];
+    const ttList = tt ?? [];
+
+    kho = buildIndexed(kList, (i) => i.ma_kho, (i) => i.ten_kho || "");
+    xe = buildIndexed(xList, (i) => i.ma_xe, (i) => i.ten_xe || "");
+    boPhan = buildIndexed(bList, (i) => i.ma_bp, (i) => i.ten_bp || "");
+    taiKhoan = buildIndexed(tList, (i) => i.tk, (i) => i.ten_tk || "");
+    tienTe = ttList;
+
+    khoByCode = new Map();
+    for (const i of kList) {
+      const key = (i.ma_kho || "").trim().toUpperCase();
+      if (key) khoByCode.set(key, i);
+    }
+
+    xeByCode = new Map();
+    xeByName = new Map();
+    for (const i of xList) {
+      const cKey = (i.ma_xe || "").trim().toUpperCase();
+      const nKey = (i.ten_xe || "").trim().toUpperCase();
+      if (cKey) xeByCode.set(cKey, i);
+      if (nKey) xeByName.set(nKey, i);
+    }
+
+    boPhanByCode = new Map();
+    for (const i of bList) {
+      const key = (i.ma_bp || "").trim().toUpperCase();
+      if (key) boPhanByCode.set(key, i);
+    }
+
     loaded = true;
   })();
   return loadPromise;
@@ -62,94 +133,60 @@ export function isCatalogReady(): boolean {
   return loaded;
 }
 
-function filterOptions<T>(
-  items: T[],
+function filterIndexed<T>(
+  entries: IndexedEntry<T>[],
   q: string,
-  codeOf: (i: T) => string,
-  nameOf: (i: T) => string,
   limit = 30,
 ): AutocompleteOption[] {
   const { phrase, words } = parseSearchQuery(q);
   if (!words.length) {
-    return items.slice(0, limit).map((it) => ({
-      value: codeOf(it),
-      label: codeOf(it),
-      hint: nameOf(it),
+    return entries.slice(0, limit).map((e) => ({
+      value: e.code,
+      label: e.code,
+      hint: e.name,
     }));
   }
-  return collectRanked(items, limit, (it) => {
-    const code = normalizeSearchText(codeOf(it));
-    const name = normalizeSearchText(nameOf(it));
-    return rankByFields(name, code, `${code} ${name}`.trim(), phrase, words);
-  }).map((it) => ({
-    value: codeOf(it),
-    label: codeOf(it),
-    hint: nameOf(it),
+  return collectRanked(entries, limit, (e) =>
+    rankByFields(e._name, e._code, e._all, phrase, words),
+  ).map((e) => ({
+    value: e.code,
+    label: e.code,
+    hint: e.name,
   }));
 }
 
 export function searchKho(q: string): AutocompleteOption[] {
-  return filterOptions(
-    kho,
-    q,
-    (i) => i.ma_kho,
-    (i) => i.ten_kho || "",
-  );
+  return filterIndexed(kho, q);
 }
 
 export function getKho(maKho: string): KhoItem | null {
   const clean = (maKho || "").trim().toUpperCase();
   if (!clean) return null;
-  return (
-    kho.find((i) => (i.ma_kho || "").trim().toUpperCase() === clean) || null
-  );
+  return khoByCode.get(clean) || null;
 }
 
 export function searchXe(q: string): AutocompleteOption[] {
-  return filterOptions(
-    xe,
-    q,
-    (i) => i.ma_xe,
-    (i) => i.ten_xe || "",
-  );
+  return filterIndexed(xe, q);
 }
 
 export function searchBoPhan(q: string): AutocompleteOption[] {
-  return filterOptions(
-    boPhan,
-    q,
-    (i) => i.ma_bp,
-    (i) => i.ten_bp || "",
-  );
+  return filterIndexed(boPhan, q);
 }
 
 export function searchTaiKhoan(q: string): AutocompleteOption[] {
-  return filterOptions(
-    taiKhoan,
-    q,
-    (i) => i.tk,
-    (i) => i.ten_tk || "",
-  );
+  return filterIndexed(taiKhoan, q);
 }
 
 export function getXe(maXe: string): XeItem | null {
   const clean = (maXe || "").trim().toUpperCase();
   if (!clean) return null;
-  return (
-    xe.find(
-      (i) =>
-        (i.ma_xe || "").trim().toUpperCase() === clean ||
-        (i.ten_xe || "").trim().toUpperCase() === clean,
-    ) || null
-  );
+  return xeByCode.get(clean) || xeByName.get(clean) || null;
 }
 
 export function getBoPhan(maBp: string): BoPhanItem | null {
   const clean = (maBp || "").trim().toUpperCase();
   if (!clean) return null;
-  return (
-    boPhan.find((i) => (i.ma_bp || "").trim().toUpperCase() === clean) || null
-  );
+  return boPhanByCode.get(clean) || null;
 }
 
 export function getTienTeList(): TienTeItem[] {

@@ -54,7 +54,7 @@ interface VfpLookupCellProps {
  * - Rời ô: kiểm tra mã (onCommit) trừ khi vừa chọn từ dropdown (đánh dấu "ok").
  * - Sửa chữ: gọi onValueChange để cha xóa tên/giá cũ của mã trước đó.
  */
-export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
+export const VfpLookupCell: React.FC<VfpLookupCellProps> = React.memo(({
   value,
   onValueChange,
   onPick,
@@ -71,6 +71,7 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
   dropdownMinWidth = 320,
   advanceOnPick = true,
 }) => {
+  const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<VfpOption[]>([]);
   const [highlight, setHighlight] = useState(0);
@@ -81,23 +82,23 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     maxWidth: number;
   } | null>(null);
 
+  const displayValue = draft !== null ? draft : value;
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const ddRef = useRef<HTMLUListElement | null>(null);
   const internalRef = useRef<HTMLInputElement | null>(null);
   const timerRef = useRef<number | null>(null);
-  // "seq" hủy ngầm: mọi lần vào ô / chọn xong / xóa hết chữ đều tăng seq
-  // nên kết quả tìm kiếm trả về trễ sẽ bị bỏ, dropdown không bật lên sau khi đã rời đi.
   const reqSeqRef = useRef(0);
-  // "data-ok": giá trị đã chọn từ dropdown -> rời ô không kiểm tra lại.
   const okRef = useRef<string>("");
-  // Cờ hủy: khi Esc -> không kiểm tra/không enrich khi rời ô (giống Excel).
   const cancelRef = useRef(false);
-  // Chế độ ô kiểu Excel (select / enter / edit).
   const { mode, modeRef, setMode } = useExcelCellMode();
-  // Nội dung đã bị sửa trong lần chọn ô này chưa (chỉ kiểm tra mã khi có sửa).
   const dirtyRef = useRef(false);
-  // Giá trị lúc bắt đầu chọn ô — để Esc khôi phục.
   const origRef = useRef<string>("");
+
+  // Reset local draft when parent value changes externally (e.g. pickup, undo, row delete)
+  useEffect(() => {
+    setDraft(null);
+  }, [value]);
 
   const setRefs = (el: HTMLInputElement | null) => {
     internalRef.current = el;
@@ -114,11 +115,20 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     const el = internalRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const avail = Math.max(300, window.innerWidth - r.left - 16);
+    const maxAllowed = Math.max(260, window.innerWidth - 16);
+    const minWidth = Math.min(Math.max(r.width, dropdownMinWidth), maxAllowed);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - minWidth - 8));
+    const avail = Math.max(minWidth, window.innerWidth - left - 8);
+    const spaceBelow = window.innerHeight - r.bottom;
+    const dropdownEstHeight = 230;
+    const top =
+      spaceBelow < dropdownEstHeight && r.top > dropdownEstHeight
+        ? Math.max(8, r.top - dropdownEstHeight - 2)
+        : r.bottom + 2;
     setRect({
-      top: r.bottom + 2,
-      left: r.left,
-      minWidth: Math.min(Math.max(r.width, dropdownMinWidth), avail),
+      top,
+      left,
+      minWidth,
       maxWidth: avail,
     });
   }, [dropdownMinWidth]);
@@ -162,8 +172,9 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     };
   }, [open]);
 
-  // Đóng khi click ra ngoài
+  // Đóng khi click ra ngoài (chỉ gắn listener khi dropdown đang mở)
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t) || ddRef.current?.contains(t)) return;
@@ -171,7 +182,7 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [open]);
 
   // Cuộn dòng đang sáng vào tầm nhìn
   useEffect(() => {
@@ -214,6 +225,8 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     const opt = options[i];
     if (!opt) return;
     okRef.current = opt.value;
+    dirtyRef.current = false;
+    setDraft(null);
     // Đồng bộ DOM ngay để blur (nếu có) không thấy giá trị cũ.
     if (internalRef.current) internalRef.current.value = opt.value;
     onPick(opt);
@@ -232,7 +245,11 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     dirtyRef.current = true;
     // Gõ / dán khi đang ở chế độ chọn -> chuyển sang chế độ nhập.
     if (modeRef.current === "select") setMode("enter");
-    onValueChange(v);
+    // Giữ bản nháp cục bộ trong cell — KHÔNG re-render toàn bộ VoucherForm/DetailGrid mỗi phím gõ!
+    setDraft(v);
+    if (!v) {
+      onValueChange("");
+    }
     scheduleSearch(v);
   };
 
@@ -293,14 +310,17 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
         return;
       }
       if (m !== "select") {
-        // Đang nhập/sửa -> hủy, khôi phục giá trị ban đầu và ở lại ô (giống Excel).
+        // Đang nhập/sửa -> hủy bản nháp cục bộ, khôi phục giá trị ban đầu (0 re-render cha).
         const orig = origRef.current;
-        if (dirtyRef.current && el.value !== orig) {
+        setDraft(null);
+        if (el.value !== orig) {
           el.value = orig;
+        }
+        if (dirtyRef.current && orig !== value) {
           onValueChange(orig);
           if (orig.trim()) onCommit(orig);
-          okRef.current = orig;
         }
+        okRef.current = orig;
         dirtyRef.current = false;
         setMode("select");
         selectAllLater(el);
@@ -316,7 +336,8 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
       e.preventDefault();
       if (el.value) {
         okRef.current = "";
-        dirtyRef.current = true;
+        dirtyRef.current = false;
+        setDraft(null);
         onValueChange("");
       }
       return;
@@ -342,6 +363,8 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     setMode("select");
     const wasDirty = dirtyRef.current;
     dirtyRef.current = false;
+    const rawCurrent = internalRef.current?.value ?? displayValue;
+    setDraft(null);
     // Esc -> hủy: không kiểm tra/không enrich khi rời ô.
     if (cancelRef.current) {
       cancelRef.current = false;
@@ -349,10 +372,14 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
     }
     // Kiểu Excel: chỉ chọn ô rồi rời đi (không sửa) -> không kiểm tra lại mã.
     if (!wasDirty) return;
-    const v = (internalRef.current?.value ?? value).trim();
-    if (!v) return;
+    const v = rawCurrent.trim();
+    if (!v) {
+      onValueChange("");
+      return;
+    }
     if (okRef.current && okRef.current.trim().toUpperCase() === v.toUpperCase())
       return;
+    onValueChange(v);
     onCommit(v);
   };
 
@@ -365,23 +392,19 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
         spellCheck={false}
         data-vfp-lookup="true"
         data-mode={mode}
-        value={value}
+        value={displayValue}
         disabled={disabled}
         placeholder={placeholder}
         onChange={handleChange}
         onMouseDown={(e) => handleExcelMouseDown(e, modeRef.current)}
         onFocus={(e) => {
           onFocusRow?.();
-          // Kiểu Excel: khi ô được CHỌN (focus) -> chế độ chọn, bôi đen toàn bộ (ẩn).
-          // Nhờ vậy gõ phím sẽ THAY THẾ nội dung cũ, Delete xóa trắng ô.
-          // (Double-click / F2 sẽ đặt con trỏ để sửa từng ký tự — xem onDoubleClick/onKeyDown.)
           setMode("select");
           dirtyRef.current = false;
           origRef.current = e.currentTarget.value;
           selectAllLater(e.currentTarget);
         }}
         onDoubleClick={(e) => {
-          // Double-click: vào chế độ SỬA -> con trỏ ở cuối chữ (không bôi đen).
           setMode("edit");
           caretToEndLater(e.currentTarget);
         }}
@@ -418,7 +441,7 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
               <span className="font-mono font-bold text-primary-800 shrink-0">
                 <HighlightText
                   text={opt.label}
-                  query={value}
+                  query={displayValue}
                   className="text-red-600 font-bold"
                 />
               </span>
@@ -427,7 +450,7 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
                   className="text-neutral-700 font-sans truncate text-left flex-1"
                   title={opt.hint}
                 >
-                  <HighlightText text={opt.hint} query={value} />
+                  <HighlightText text={opt.hint} query={displayValue} />
                 </span>
               )}
             </li>
@@ -436,4 +459,5 @@ export const VfpLookupCell: React.FC<VfpLookupCellProps> = ({
       )}
     </div>
   );
-};
+});
+VfpLookupCell.displayName = "VfpLookupCell";

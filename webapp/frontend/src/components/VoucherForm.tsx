@@ -1,4 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  lazy,
+  Suspense,
+} from "react";
 import { VoucherFullDetail, VoucherDetail } from "../types/voucher";
 import { DetailGrid, DetailGridHandle } from "./DetailGrid";
 import {
@@ -26,8 +34,13 @@ import {
 } from "../lib/catalogCache";
 import { calcLoai2Item, calcVoucherTotals } from "../lib/calc";
 import { isModalOpen, useModalLock } from "../lib/modalLock";
-import { PriceCalculatorModal } from "./PriceCalculatorModal";
 import { PromotionCounter } from "./PromotionCounter";
+
+const PriceCalculatorModal = lazy(() =>
+  import("./PriceCalculatorModal").then((m) => ({
+    default: m.PriceCalculatorModal,
+  })),
+);
 import {
   Printer,
   CreditCard,
@@ -842,26 +855,27 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   // giá trị Số tấm / Hệ số vừa commit.
   const itemsLatestRef = useRef<VoucherDetail[]>(items);
   itemsLatestRef.current = items;
+  const activeRowIndexRef = useRef<number>(activeRowIndex);
+  activeRowIndexRef.current = activeRowIndex;
 
   // Detail Item changes & recalculations
-  const handleItemChange = (
-    idx: number,
-    updatedItem: VoucherDetail,
-    fieldName?: string,
-  ) => {
-    const calculated = calcLoai2Item(
-      { ...updatedItem, gia_tb_tt: "C" },
-      tyGia,
-      fieldName || "",
-      maTte,
-    );
-    const next = [...itemsLatestRef.current];
-    next[idx] = calculated;
-    itemsLatestRef.current = next;
-    setItems(next);
-  };
+  const handleItemChange = useCallback(
+    (idx: number, updatedItem: VoucherDetail, fieldName?: string) => {
+      const calculated = calcLoai2Item(
+        { ...updatedItem, gia_tb_tt: "C" },
+        tyGia,
+        fieldName || "",
+        maTte,
+      );
+      const next = [...itemsLatestRef.current];
+      next[idx] = calculated;
+      itemsLatestRef.current = next;
+      setItems(next);
+    },
+    [tyGia, maTte],
+  );
 
-  const handleDeleteItem = (idx: number) => {
+  const handleDeleteItem = useCallback((idx: number) => {
     const curr = itemsLatestRef.current;
     if (curr.length <= 1) return;
     const next = curr.filter((_, i) => i !== idx);
@@ -871,20 +885,21 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     itemsLatestRef.current = next;
     setItems(next);
     setActiveRowIndex(nextActive);
-  };
+  }, []);
 
-  const handleAddItem = () => {
+  const handleAddItem = useCallback(() => {
     setErrorMessage(null);
     const curr = itemsLatestRef.current;
+    const currActive = activeRowIndexRef.current;
 
     // Tìm dòng trống (chưa có mã hàng hóa / mã vật tư)
     let emptyIdx = -1;
     if (
-      activeRowIndex >= 0 &&
-      activeRowIndex < curr.length &&
-      (!curr[activeRowIndex]?.ma_vt || !curr[activeRowIndex].ma_vt.trim())
+      currActive >= 0 &&
+      currActive < curr.length &&
+      (!curr[currActive]?.ma_vt || !curr[currActive].ma_vt.trim())
     ) {
-      emptyIdx = activeRowIndex;
+      emptyIdx = currActive;
     } else {
       emptyIdx = curr.findIndex((it) => !it.ma_vt || !it.ma_vt.trim());
     }
@@ -901,11 +916,14 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     itemsLatestRef.current = next;
     setItems(next);
     setActiveRowIndex(next.length - 1);
-  };
+  }, []);
 
-  // Calculate voucher totals
-  const totals = calcVoucherTotals(items, tyGia, thueGtgt, loaiCk);
-  const totalQty = items.reduce((s, it) => s + (it.so_luong9 || 0), 0);
+  // Calculate voucher totals (memoized, single-pass)
+  const totals = useMemo(
+    () => calcVoucherTotals(items, tyGia, thueGtgt, loaiCk),
+    [items, tyGia, thueGtgt, loaiCk],
+  );
+  const totalQty = totals.totalQty;
 
   // Save handler (POST / PUT): lúc lưu tự động kiểm tra số phiếu, nếu trùng tự thay bằng số gợi ý
   const handleSave = async (bypassChecks: boolean = false) => {
@@ -1153,15 +1171,41 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
 
-  // Keyboard shortcut listener for Ctrl+Enter / Esc / F8 / F4
+  const keydownCtxRef = useRef({
+    isEditable,
+    isSuspended,
+    isWarehouse,
+    saving,
+    activeRowIndex,
+    onViewDebt,
+    openDebtLedger,
+    onBack,
+    handleDeleteItem,
+    handleAddItem,
+  });
+  keydownCtxRef.current = {
+    isEditable,
+    isSuspended,
+    isWarehouse,
+    saving,
+    activeRowIndex,
+    onViewDebt,
+    openDebtLedger,
+    onBack,
+    handleDeleteItem,
+    handleAddItem,
+  };
+
+  // Keyboard shortcut listener for Ctrl+Enter / Esc / F8 / F4 (attached once)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const ctx = keydownCtxRef.current;
       // Khi có dialog đang mở (PickupDialog / DebtPanel / ...) hoặc form đang bị tạm dừng -> khóa cứng,
       // không cho ESC/Ctrl+Enter/F8/F4 thoát ra ngoài form.
-      if (isSuspended || isModalOpen()) return;
+      if (ctx.isSuspended || isModalOpen()) return;
       if (
-        isEditable &&
-        !saving &&
+        ctx.isEditable &&
+        !ctx.saving &&
         e.key === "Enter" &&
         e.ctrlKey &&
         !e.shiftKey &&
@@ -1170,8 +1214,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         e.preventDefault();
         handleSaveRef.current(false);
       } else if (
-        isEditable &&
-        !saving &&
+        ctx.isEditable &&
+        !ctx.saving &&
         e.key === "Enter" &&
         e.shiftKey &&
         !e.ctrlKey &&
@@ -1186,21 +1230,21 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         !e.altKey &&
         (e.key.toLowerCase() === "e" || e.code === "KeyE")
       ) {
-        if (!onViewDebt) return;
+        if (!ctx.onViewDebt) return;
         e.preventDefault();
         e.stopPropagation();
-        openDebtLedger();
+        ctx.openDebtLedger();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        onBack();
-      } else if (e.key === "F8" && isEditable) {
+        ctx.onBack();
+      } else if (e.key === "F8" && ctx.isEditable) {
         e.preventDefault();
-        handleDeleteItem(activeRowIndex);
-      } else if (e.key === "F4" && isEditable && !isWarehouse) {
+        ctx.handleDeleteItem(ctx.activeRowIndex);
+      } else if (e.key === "F4" && ctx.isEditable && !ctx.isWarehouse) {
         e.preventDefault();
         setShowAccountPicker(true);
       } else if (
-        isEditable &&
+        ctx.isEditable &&
         (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
         !e.altKey &&
@@ -1214,7 +1258,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           maDtInputRef.current.select();
         }
       } else if (
-        isEditable &&
+        ctx.isEditable &&
         e.ctrlKey &&
         (e.code === "NumpadAdd" ||
           e.key === "+" ||
@@ -1223,21 +1267,20 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       ) {
         // Ctrl + (numpad hoặc phím +/=) = thêm dòng
         e.preventDefault();
-        handleAddItem();
+        ctx.handleAddItem();
       } else if (
-        isEditable &&
+        ctx.isEditable &&
         e.ctrlKey &&
         (e.code === "NumpadSubtract" || e.key === "-")
       ) {
         // Ctrl - (numpad) = xóa dòng đang chọn
         e.preventDefault();
-        handleDeleteItem(activeRowIndex);
+        ctx.handleDeleteItem(ctx.activeRowIndex);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditable, isSuspended, isWarehouse, activeRowIndex, items, maDt, tenDt, maDtError, ngayCt, soCt, totals, onViewDebt, openDebtLedger, voucher?.user_name]);
+  }, []);
 
   // Khóa hẳn phím F5 tải lại trang trong VoucherForm; khi đang thêm/sửa sẽ mở Máy tính đơn giá cho dòng đang chọn.
   const handleOpenPriceCalc = useCallback(() => {
@@ -2230,12 +2273,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 </span>
                 <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
                   <span className="font-mono font-bold text-neutral-900 text-xs">
-                    {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9).
-                        Không dùng totals.ttien_nt (giá vốn COGS) để tránh hiển thị 0. */}
-                    {formatCurrency(
-                      items.reduce((s, it) => s + (it.tien_nt9 || 0), 0),
-                      maTte,
-                    )}
+                    {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9) từ calcVoucherTotals */}
+                    {formatCurrency(totals.ttien_nt, maTte)}
                   </span>
                 </div>
               </div>
@@ -2373,26 +2412,38 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       )}
 
       {/* Price Calculator Modal (F5) */}
-      <PriceCalculatorModal
-        isOpen={showPriceCalc}
-        rowNumber={
-          Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1))) +
-          1
-        }
-        itemCode={
-          items[
-            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
-          ]?.ma_vt
-        }
-        itemName={
-          items[
-            Math.max(0, Math.min(activeRowIndex, Math.max(0, items.length - 1)))
-          ]?.ten_vt
-        }
-        initialValue={calcInitialPrice}
-        onApply={handleApplyCalculatedPrice}
-        onClose={handleClosePriceCalc}
-      />
+      {showPriceCalc && (
+        <Suspense fallback={null}>
+          <PriceCalculatorModal
+            isOpen={showPriceCalc}
+            rowNumber={
+              Math.max(
+                0,
+                Math.min(activeRowIndex, Math.max(0, items.length - 1)),
+              ) + 1
+            }
+            itemCode={
+              items[
+                Math.max(
+                  0,
+                  Math.min(activeRowIndex, Math.max(0, items.length - 1)),
+                )
+              ]?.ma_vt
+            }
+            itemName={
+              items[
+                Math.max(
+                  0,
+                  Math.min(activeRowIndex, Math.max(0, items.length - 1)),
+                )
+              ]?.ten_vt
+            }
+            initialValue={calcInitialPrice}
+            onApply={handleApplyCalculatedPrice}
+            onClose={handleClosePriceCalc}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

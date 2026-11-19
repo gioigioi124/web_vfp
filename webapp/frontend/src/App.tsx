@@ -1,23 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useModalLock } from "./lib/modalLock";
 import { peek } from "./lib/apiCache";
-import {
-  initCustomerIndex,
-  searchCustomers,
-  getCustomer,
-} from "./lib/customerIndex";
+import { initCustomerIndex, getCustomer } from "./lib/customerIndex";
 import { VoucherList } from "./components/VoucherList";
-import { VoucherForm } from "./components/VoucherForm";
-import { FilterDialog } from "./components/FilterDialog";
-import { PickupDialog } from "./components/PickupDialog";
-import { DebtPanel } from "./components/DebtPanel";
-import { PrintPreview } from "./components/PrintPreview";
-import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { Autocomplete } from "./components/ui/Autocomplete";
-import { Badge } from "./components/ui/Badge";
+import { TopHeaderBar } from "./components/TopHeaderBar";
 import { formatDate } from "./lib/format";
 import { invalidatePrintCache } from "./lib/printCache";
 import {
@@ -25,7 +22,28 @@ import {
   VoucherDetail,
   VoucherHeader,
 } from "./types/voucher";
-import { User, ShieldCheck, RefreshCw, Trash2, X, Keyboard } from "lucide-react";
+import { ShieldCheck, RefreshCw, Trash2, X, Keyboard } from "lucide-react";
+
+const loadVoucherForm = () =>
+  import("./components/VoucherForm").then((m) => ({ default: m.VoucherForm }));
+const VoucherForm = lazy(loadVoucherForm);
+const FilterDialog = lazy(() =>
+  import("./components/FilterDialog").then((m) => ({ default: m.FilterDialog })),
+);
+const PickupDialog = lazy(() =>
+  import("./components/PickupDialog").then((m) => ({ default: m.PickupDialog })),
+);
+const DebtPanel = lazy(() =>
+  import("./components/DebtPanel").then((m) => ({ default: m.DebtPanel })),
+);
+const PrintPreview = lazy(() =>
+  import("./components/PrintPreview").then((m) => ({ default: m.PrintPreview })),
+);
+const ShortcutsDialog = lazy(() =>
+  import("./components/ShortcutsDialog").then((m) => ({
+    default: m.ShortcutsDialog,
+  })),
+);
 
 export function App() {
   const {
@@ -72,81 +90,23 @@ export function App() {
   const [marked, setMarked] = useState<Set<string>>(new Set());
   const pendingClearMarkedRef = useRef<boolean>(false);
 
-  // Ô tìm kiếm nhanh khách hàng & ngày chứng từ trên header (Enter để di chuyển và tìm kiếm)
-  const [headerNgayCt1, setHeaderNgayCt1] = useState<string>(
-    filters?.ngay_ct1 || "",
-  );
-  const [headerNgayCt2, setHeaderNgayCt2] = useState<string>(
-    filters?.ngay_ct2 || "",
-  );
-  const [headerCustomerQuery, setHeaderCustomerQuery] = useState<string>(
-    filters?.ma_dt || "",
-  );
-  const [headerDienGiai, setHeaderDienGiai] = useState<string>(
-    filters?.dien_giai || "",
-  );
-  const headerCustomerRef = useRef<string>(filters?.ma_dt || "");
-  const headerDienGiaiRef = useRef<string>(filters?.dien_giai || "");
-  const ngayCt1InputRef = useRef<HTMLInputElement | null>(null);
-  const ngayCt2InputRef = useRef<HTMLInputElement | null>(null);
-  const customerSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const dienGiaiInputRef = useRef<HTMLInputElement | null>(null);
-
+  // Idle-prefetch VoucherForm chunk để bấm F2/F3 mở tức thì mà không làm nặng initial bundle
   useEffect(() => {
-    setHeaderNgayCt1(filters?.ngay_ct1 || "");
-    setHeaderNgayCt2(filters?.ngay_ct2 || "");
-    const dt = filters?.ma_dt || "";
-    setHeaderCustomerQuery(dt);
-    headerCustomerRef.current = dt;
-    const dg = filters?.dien_giai || "";
-    setHeaderDienGiai(dg);
-    headerDienGiaiRef.current = dg;
-  }, [filters?.ngay_ct1, filters?.ngay_ct2, filters?.ma_dt, filters?.dien_giai]);
-
-  const fetchHeaderKhachHangOptions = useCallback(async (query: string) => {
-    await initCustomerIndex();
-    return searchCustomers(query);
+    const w = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof w.requestIdleCallback === "function") {
+      const id = w.requestIdleCallback(() => {
+        void loadVoucherForm();
+      }, { timeout: 2500 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const timer = window.setTimeout(() => {
+      void loadVoucherForm();
+    }, 1500);
+    return () => window.clearTimeout(timer);
   }, []);
-
-  const resolveHeaderCustomer = useCallback(async (rawQuery: string) => {
-    const trimmed = rawQuery.trim();
-    if (!trimmed) return "";
-    await initCustomerIndex();
-    const exact = getCustomer(trimmed);
-    return exact
-      ? exact.ma_dt
-      : (searchCustomers(trimmed, 1)[0]?.value ?? trimmed);
-  }, []);
-
-  const handleHeaderSearchSubmit = useCallback(
-    async (overrideMaDt?: string, overrideDienGiai?: string) => {
-      const rawDt =
-        overrideMaDt !== undefined ? overrideMaDt : headerCustomerRef.current;
-      const resolvedDt =
-        overrideMaDt !== undefined
-          ? overrideMaDt
-          : await resolveHeaderCustomer(rawDt);
-      headerCustomerRef.current = resolvedDt;
-      setHeaderCustomerQuery(resolvedDt);
-
-      const dg = (
-        overrideDienGiai !== undefined
-          ? overrideDienGiai
-          : headerDienGiaiRef.current
-      ).trim();
-
-      // Mọi thao tác tìm kiếm hoặc xóa lọc từ header đều reset lọc kho & mã hàng của F9
-      handleApplyFilter({
-        ngay_ct1: headerNgayCt1,
-        ngay_ct2: headerNgayCt2,
-        ma_dt: resolvedDt,
-        dien_giai: dg,
-        ma_kho: "",
-        ma_vt: "",
-      });
-    },
-    [handleApplyFilter, headerNgayCt1, headerNgayCt2, resolveHeaderCustomer],
-  );
 
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<
@@ -172,7 +132,7 @@ export function App() {
     setTimeout(() => setNotification(null), 3500);
   };
 
-  const toggleMark = (stt: string | null) => {
+  const toggleMark = useCallback((stt: string | null) => {
     if (!stt) return;
     setMarked((prev) => {
       const next = new Set(prev);
@@ -180,7 +140,7 @@ export function App() {
       else next.add(stt);
       return next;
     });
-  };
+  }, []);
 
   // ==== Đồng bộ URL route (/sales-invoices, /sales-invoices/new, /sales-invoices/:stt) ====
   const { stt: sttParam } = useParams();
@@ -189,15 +149,19 @@ export function App() {
   const isNew = sttParam === "new";
   const isEditing = Boolean(sttParam && !isNew);
 
-  const navToDetail = (stt: string) => {
-    navigate(`/sales-invoices/${encodeURIComponent(stt)}`);
-  };
-  const navToNew = () => navigate("/sales-invoices/new");
-  const navToList = () => navigate("/sales-invoices");
+  const navToDetail = useCallback(
+    (stt: string) => {
+      navigate(`/sales-invoices/${encodeURIComponent(stt)}`);
+    },
+    [navigate],
+  );
+  const navToNew = useCallback(() => navigate("/sales-invoices/new"), [navigate]);
+  const navToList = useCallback(() => navigate("/sales-invoices"), [navigate]);
+  const openFilterModal = useCallback(() => setIsFilterOpen(true), [setIsFilterOpen]);
 
   // Lấy dữ liệu phiếu tức thì (từ state activeVoucher, cache RAM, hoặc ghép từ dòng đang chọn)
   // để mở form Sửa (mode="S") không bị trống ở render đầu tiên trước khi useEffect chạy.
-  const editingVoucher: VoucherFullDetail | null = (() => {
+  const editingVoucher = useMemo<VoucherFullDetail | null>(() => {
     if (!sttParam || isNew) return null;
     if (activeVoucher?.stt === sttParam) return activeVoucher;
     const cached = peek<any>(`voucher:${voucherMode}:${sttParam}`);
@@ -212,7 +176,7 @@ export function App() {
       };
     }
     return null;
-  })();
+  }, [sttParam, isNew, activeVoucher, voucherMode, vouchers, selectedStt, listDetail]);
 
   useEffect(() => {
     if (sttParam && !isNew) {
@@ -728,253 +692,56 @@ export function App() {
 
       {/* ===== Top Global Header (ẩn khi đang mở form Thêm mới / Sửa chứng từ) ===== */}
       {!sttParam && (
-        <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 flex-shrink-0 z-30">
-          <div className="px-3.5 py-1.5 flex items-center justify-between gap-4">
-            {/* Logo, Breadcrumb, Tiêu đề & Khung lọc nhanh (dịch sang trái để dropdown KH rộng rãi) */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div
-                className={`flex items-center justify-center w-7 h-7 rounded text-white font-bold text-sm shadow ${
-                  voucherMode === "warehouse"
-                    ? "bg-emerald-700"
-                    : "bg-primary-700"
-                }`}
-              >
-                {voucherMode === "warehouse" ? "KH" : "PX"}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-neutral-600">/</span>
-                {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Phiếu Kho (KH_2014) */}
-                <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded border border-neutral-700">
-                  <button
-                    type="button"
-                    onClick={() => setVoucherMode("sales")}
-                    className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
-                      voucherMode === "sales"
-                        ? "bg-primary-700 text-white shadow-xs"
-                        : "text-neutral-400 hover:text-neutral-200"
-                    }`}
-                    title="Quản lý Hóa đơn / Phiếu Xuất Bán (CSDL VP_2014)"
-                  >
-                    Phiếu Xuất Bán
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoucherMode("warehouse")}
-                    className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
-                      voucherMode === "warehouse"
-                        ? "bg-emerald-700 text-white shadow-xs"
-                        : "text-neutral-400 hover:text-neutral-200"
-                    }`}
-                    title="Quản lý Phiếu Xuất Kho (CSDL KH_2014)"
-                  >
-                    Phiếu Xuất Kho
-                  </button>
-                </div>
-                <Badge
-                  variant={voucherMode === "warehouse" ? "info" : "success"}
-                  className="ml-0.5 font-mono text-[10px]"
-                >
-                  {voucherMode === "warehouse" ? "CSDL: KH_2014" : "CSDL: VP_2014"}
-                </Badge>
-              </div>
-
-              {/* Khung tìm kiếm & bộ lọc ngày (Enter để di chuyển & tìm kiếm) */}
-              <div className="flex items-center gap-2 ml-2">
-                <div className="flex items-center gap-1.5 bg-neutral-800 border border-neutral-700 px-2 py-0.5 rounded text-xs text-neutral-300">
-                  <label
-                    htmlFor="header-ngay-ct1"
-                    className="text-[11px] text-neutral-400 select-none"
-                  >
-                    Từ
-                  </label>
-                  <input
-                    ref={ngayCt1InputRef}
-                    id="header-ngay-ct1"
-                    type="date"
-                    value={headerNgayCt1}
-                    onChange={(e) => setHeaderNgayCt1(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        ngayCt2InputRef.current?.focus();
-                      }
-                    }}
-                    className="bg-transparent text-white font-mono text-[11px] outline-none [color-scheme:dark] cursor-pointer"
-                    title="Từ ngày chứng từ (Enter sang Đến ngày)"
-                  />
-                  <span className="text-neutral-600">-</span>
-                  <label
-                    htmlFor="header-ngay-ct2"
-                    className="text-[11px] text-neutral-400 select-none"
-                  >
-                    Đến
-                  </label>
-                  <input
-                    ref={ngayCt2InputRef}
-                    id="header-ngay-ct2"
-                    type="date"
-                    value={headerNgayCt2}
-                    onChange={(e) => setHeaderNgayCt2(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        customerSearchInputRef.current?.focus();
-                        customerSearchInputRef.current?.select();
-                      }
-                    }}
-                    className="bg-transparent text-white font-mono text-[11px] outline-none [color-scheme:dark] cursor-pointer"
-                    title="Đến ngày chứng từ (Enter sang ô Khách hàng)"
-                  />
-                </div>
-
-                {/* Input tìm kiếm khách hàng (RAM index, dropdown 680px, Enter để tìm) */}
-                <div className="relative w-48">
-                  <Autocomplete
-                    inputRef={customerSearchInputRef}
-                    selectOnFocus
-                    value={headerCustomerQuery}
-                    onChange={(val) => {
-                      headerCustomerRef.current = val;
-                      setHeaderCustomerQuery(val);
-                    }}
-                    fetcher={fetchHeaderKhachHangOptions}
-                    openOnTypeOnly
-                    debounceMs={30}
-                    maxResults={30}
-                    dropdownMinWidth={680}
-                    hideIcon={!!headerCustomerQuery}
-                    placeholder="Mã/Tên KH (Enter tìm)"
-                    className="w-full !pr-7 py-1 text-xs rounded bg-white text-neutral-900 border-neutral-300 font-medium placeholder-neutral-400"
-                    onSelect={(opt) => {
-                      void handleHeaderSearchSubmit(opt.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.defaultPrevented) {
-                        e.preventDefault();
-                        void handleHeaderSearchSubmit();
-                      }
-                    }}
-                  />
-                  {headerCustomerQuery && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleHeaderSearchSubmit("");
-                      }}
-                      className="absolute inset-y-0 right-1.5 flex items-center text-neutral-400 hover:text-neutral-700 cursor-pointer z-10"
-                      title="Xóa lọc khách hàng (xóa cả kho & mã hàng)"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Input tìm kiếm theo diễn giải (Enter để tìm) */}
-                <div className="relative w-48">
-                  <input
-                    ref={dienGiaiInputRef}
-                    type="text"
-                    value={headerDienGiai}
-                    onChange={(e) => {
-                      headerDienGiaiRef.current = e.target.value;
-                      setHeaderDienGiai(e.target.value);
-                    }}
-                    onFocus={(e) => {
-                      const target = e.currentTarget;
-                      target.select();
-                      setTimeout(() => {
-                        if (document.activeElement === target) {
-                          target.select();
-                        }
-                      }, 0);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void handleHeaderSearchSubmit();
-                      }
-                    }}
-                    placeholder="Diễn giải (Enter tìm)..."
-                    className="erp-input w-full !pr-7 py-1 text-xs rounded bg-white text-neutral-900 border-neutral-300 font-medium placeholder-neutral-400"
-                    title="Tìm theo diễn giải (Enter để tìm)"
-                  />
-                  {headerDienGiai && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        headerDienGiaiRef.current = "";
-                        setHeaderDienGiai("");
-                        void handleHeaderSearchSubmit(undefined, "");
-                      }}
-                      className="absolute inset-y-0 right-1.5 flex items-center text-neutral-400 hover:text-neutral-700 cursor-pointer z-10"
-                      title="Xóa lọc diễn giải (xóa cả kho & mã hàng)"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Nút chức năng & thông tin người dùng */}
-            <div className="flex items-center gap-2 flex-shrink-0">
-
-              {/* Nút làm mới */}
-              <button
-                onClick={() => refresh()}
-                disabled={loading}
-                className="p-1 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 hover:text-white transition flex items-center justify-center cursor-pointer"
-                title="Làm mới dữ liệu từ SQL (F5)"
-              >
-                <RefreshCw
-                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-                />
-              </button>
-
-              {/* Người dùng */}
-              <div className="flex items-center gap-1.5 bg-neutral-800 px-2.5 py-1 rounded border border-neutral-700">
-                <User className="w-3.5 h-3.5 text-primary-300" />
-                <span className="font-semibold text-neutral-200 text-xs">
-                  KTCN3
-                </span>
-                <span className="text-neutral-400 text-[10px]">(ĐVCS: S1)</span>
-              </div>
-            </div>
-          </div>
-        </header>
+        <TopHeaderBar
+          voucherMode={voucherMode}
+          onChangeVoucherMode={setVoucherMode}
+          filters={filters}
+          loading={loading}
+          onApplyFilter={handleApplyFilter}
+          onRefresh={refresh}
+        />
       )}
 
       {/* Main View Area */}
       <main className="flex-1 overflow-hidden relative min-h-0">
         {sttParam ? (
-          <VoucherForm
-            key={`${voucherMode}:${isNew ? "new" : sttParam}`}
-            stt={isNew ? undefined : sttParam}
-            mode={isNew ? "M" : "S"}
-            voucherMode={voucherMode}
-            isSuspended={!!warehouseOverlay || isDebtOpen}
-            voucher={isNew ? null : editingVoucher}
-            initialInherited={inheritedData || undefined}
-            pickupPayload={pickupPayload}
-            onClearPickupPayload={() => setPickupPayload(null)}
-            onBack={navToList}
-            onPrint={() => {
-              const targetStt = editingVoucher?.stt || sttParam;
-              if (targetStt && !isNew) {
-                invalidatePrintCache(targetStt);
-                handleOpenPrint(targetStt);
-              }
-            }}
-            onViewDebt={(dt) => handleOpenDebt(dt)}
-            onOpenPickup={handleOpenPickup}
-            onSaveSuccess={(newStt) => {
-              invalidatePrintCache(newStt);
-              setSelectedStt(newStt);
-              handleCloseDetail({ skipFetch: true });
-              refresh({ silent: vouchers.length > 0 });
-              navToList();
-            }}
-          />
+          <Suspense
+            fallback={
+              <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500 gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-primary-600" />
+                <span>Đang tải biểu mẫu chứng từ...</span>
+              </div>
+            }
+          >
+            <VoucherForm
+              key={`${voucherMode}:${isNew ? "new" : sttParam}`}
+              stt={isNew ? undefined : sttParam}
+              mode={isNew ? "M" : "S"}
+              voucherMode={voucherMode}
+              isSuspended={!!warehouseOverlay || isDebtOpen}
+              voucher={isNew ? null : editingVoucher}
+              initialInherited={inheritedData || undefined}
+              pickupPayload={pickupPayload}
+              onClearPickupPayload={() => setPickupPayload(null)}
+              onBack={navToList}
+              onPrint={() => {
+                const targetStt = editingVoucher?.stt || sttParam;
+                if (targetStt && !isNew) {
+                  invalidatePrintCache(targetStt);
+                  handleOpenPrint(targetStt);
+                }
+              }}
+              onViewDebt={(dt) => handleOpenDebt(dt)}
+              onOpenPickup={handleOpenPickup}
+              onSaveSuccess={(newStt) => {
+                invalidatePrintCache(newStt);
+                setSelectedStt(newStt);
+                handleCloseDetail({ skipFetch: true });
+                refresh({ silent: vouchers.length > 0 });
+                navToList();
+              }}
+            />
+          </Suspense>
         ) : (
           <VoucherList
             vouchers={vouchers}
@@ -989,11 +756,11 @@ export function App() {
             debtAmount={debtAmount}
             voucherMode={voucherMode}
             onSelectStt={setSelectedStt}
-            onEditVoucher={(stt) => navToDetail(stt)}
+            onEditVoucher={navToDetail}
             onToggleMark={toggleMark}
-            onOpenFilter={() => setIsFilterOpen(true)}
+            onOpenFilter={openFilterModal}
             onOpenPrint={handleOpenPrint}
-            onOpenPickup={() => handleOpenPickup()}
+            onOpenPickup={handleOpenPickup}
             onOpenDebt={handleOpenDebt}
             onRefresh={refresh}
             onChangePage={handleChangePage}
@@ -1115,120 +882,149 @@ export function App() {
         </footer>
       )}
 
-      {/* Modals */}
-      <FilterDialog
-        isOpen={isFilterOpen}
-        onClose={() => setIsFilterOpen(false)}
-        filters={filters}
-        onApply={handleApplyFilter}
-      />
+      {/* Modals (lazy-loaded & conditionally mounted only when open) */}
+      {isFilterOpen && (
+        <Suspense fallback={null}>
+          <FilterDialog
+            isOpen={isFilterOpen}
+            onClose={() => setIsFilterOpen(false)}
+            filters={filters}
+            onApply={handleApplyFilter}
+          />
+        </Suspense>
+      )}
 
-      <PickupDialog
-        isOpen={isPickupOpen}
-        isSuspended={!!warehouseOverlay || !!deleteTarget}
-        onClose={() => setIsPickupOpen(false)}
-        maDt={
-          pickupParams.maDt ||
-          activeVoucher?.ma_dt ||
-          currentSelectedVoucher?.ma_dt ||
-          ""
-        }
-        ngayCt={
-          pickupParams.ngayCt ||
-          activeVoucher?.ngay_ct ||
-          currentSelectedVoucher?.ngay_ct ||
-          undefined
-        }
-        refreshTrigger={pickupRefreshTrigger}
-        focusStt={pickupFocusStt}
-        onCreateWarehouseSlip={() => {
-          void handleCreateWarehouseSlipFromPickup();
-        }}
-        onEditWarehouseSlip={(stt) => {
-          void handleEditWarehouseSlipFromPickup(stt);
-        }}
-        onDeleteWarehouseSlip={(slip) => {
-          setDeleteTarget({
-            stt: slip.stt,
-            so_ct: slip.so_ct,
-            ma_dt: slip.ma_dt,
-            ten_dt: slip.ten_dt,
-            ngay_ct: slip.ngay_ct,
-            dbMode: "warehouse",
-            fromPickup: true,
-          });
-        }}
-        onAccept={(_slips, items, maXe) => {
-          setPickupPayload({ items, ma_xe: maXe });
-          if (!sttParam) {
-            // If currently on list view, open new voucher form with pickup items
-            navToNew();
-          }
-          showToast(`Đã lấy ${items.length} dòng hàng từ kho.`);
-        }}
-      />
+      {isPickupOpen && (
+        <Suspense fallback={null}>
+          <PickupDialog
+            isOpen={isPickupOpen}
+            isSuspended={!!warehouseOverlay || !!deleteTarget}
+            onClose={() => setIsPickupOpen(false)}
+            maDt={
+              pickupParams.maDt ||
+              activeVoucher?.ma_dt ||
+              currentSelectedVoucher?.ma_dt ||
+              ""
+            }
+            ngayCt={
+              pickupParams.ngayCt ||
+              activeVoucher?.ngay_ct ||
+              currentSelectedVoucher?.ngay_ct ||
+              undefined
+            }
+            refreshTrigger={pickupRefreshTrigger}
+            focusStt={pickupFocusStt}
+            onCreateWarehouseSlip={() => {
+              void handleCreateWarehouseSlipFromPickup();
+            }}
+            onEditWarehouseSlip={(stt) => {
+              void handleEditWarehouseSlipFromPickup(stt);
+            }}
+            onDeleteWarehouseSlip={(slip) => {
+              setDeleteTarget({
+                stt: slip.stt,
+                so_ct: slip.so_ct,
+                ma_dt: slip.ma_dt,
+                ten_dt: slip.ten_dt,
+                ngay_ct: slip.ngay_ct,
+                dbMode: "warehouse",
+                fromPickup: true,
+              });
+            }}
+            onAccept={(_slips, items, maXe) => {
+              setPickupPayload({ items, ma_xe: maXe });
+              if (!sttParam) {
+                // If currently on list view, open new voucher form with pickup items
+                navToNew();
+              }
+              showToast(`Đã lấy ${items.length} dòng hàng từ kho.`);
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Overlay Thêm / Sửa Phiếu Xuất Kho (KH_2014) mở trực tiếp từ PickupDialog */}
       {warehouseOverlay && (
         <div className="fixed inset-0 z-[60] bg-white flex flex-col overflow-hidden shadow-2xl">
-          <VoucherForm
-            key={`wh-overlay:${warehouseOverlay.mode}:${warehouseOverlay.stt || "new"}`}
-            stt={warehouseOverlay.stt}
-            mode={warehouseOverlay.mode}
-            voucherMode="warehouse"
-            voucher={warehouseOverlay.voucher || null}
-            initialInherited={warehouseOverlay.initialInherited}
-            onBack={() => {
-              setWarehouseOverlay(null);
-            }}
-            onPrint={() => {}}
-            onViewDebt={(dt) => handleOpenDebt(dt)}
-            onOpenPickup={() => {}}
-            onSaveSuccess={(savedStt) => {
-              setWarehouseOverlay(null);
-              setPickupFocusStt(savedStt);
-              setPickupRefreshTrigger((prev) => prev + 1);
-              showToast(
-                warehouseOverlay.mode === "M"
-                  ? "Đã tạo mới phiếu xuất kho thành công."
-                  : "Đã cập nhật phiếu xuất kho thành công.",
-              );
-            }}
-          />
+          <Suspense
+            fallback={
+              <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500 gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin text-primary-600" />
+                <span>Đang tải phiếu xuất kho...</span>
+              </div>
+            }
+          >
+            <VoucherForm
+              key={`wh-overlay:${warehouseOverlay.mode}:${warehouseOverlay.stt || "new"}`}
+              stt={warehouseOverlay.stt}
+              mode={warehouseOverlay.mode}
+              voucherMode="warehouse"
+              voucher={warehouseOverlay.voucher || null}
+              initialInherited={warehouseOverlay.initialInherited}
+              onBack={() => {
+                setWarehouseOverlay(null);
+              }}
+              onPrint={() => {}}
+              onViewDebt={(dt) => handleOpenDebt(dt)}
+              onOpenPickup={() => {}}
+              onSaveSuccess={(savedStt) => {
+                setWarehouseOverlay(null);
+                setPickupFocusStt(savedStt);
+                setPickupRefreshTrigger((prev) => prev + 1);
+                showToast(
+                  warehouseOverlay.mode === "M"
+                    ? "Đã tạo mới phiếu xuất kho thành công."
+                    : "Đã cập nhật phiếu xuất kho thành công.",
+                );
+              }}
+            />
+          </Suspense>
         </div>
       )}
 
-      <DebtPanel
-        isOpen={isDebtOpen}
-        onClose={() => setIsDebtOpen(false)}
-        maDt={debtMaDt}
-      />
+      {isDebtOpen && (
+        <Suspense fallback={null}>
+          <DebtPanel
+            isOpen={isDebtOpen}
+            onClose={() => setIsDebtOpen(false)}
+            maDt={debtMaDt}
+          />
+        </Suspense>
+      )}
 
-      <ShortcutsDialog
-        isOpen={isShortcutsOpen}
-        onClose={() => setIsShortcutsOpen(false)}
-      />
+      {isShortcutsOpen && (
+        <Suspense fallback={null}>
+          <ShortcutsDialog
+            isOpen={isShortcutsOpen}
+            onClose={() => setIsShortcutsOpen(false)}
+          />
+        </Suspense>
+      )}
       </div>
 
-      <PrintPreview
-        isOpen={isPrintOpen}
-        onClose={() => {
-          setIsPrintOpen(false);
-          pendingClearMarkedRef.current = false;
-        }}
-        onPrintComplete={() => {
-          if (pendingClearMarkedRef.current) {
-            pendingClearMarkedRef.current = false;
-            setMarked(new Set());
-          }
-        }}
-        onError={(msg) => showToast(msg)}
-        stts={printStts}
-        inGia={printInGia ?? printPrice}
-        copies={printCopies}
-        mode={printMode}
-        dbMode={voucherMode}
-      />
+      {isPrintOpen && (
+        <Suspense fallback={null}>
+          <PrintPreview
+            isOpen={isPrintOpen}
+            onClose={() => {
+              setIsPrintOpen(false);
+              pendingClearMarkedRef.current = false;
+            }}
+            onPrintComplete={() => {
+              if (pendingClearMarkedRef.current) {
+                pendingClearMarkedRef.current = false;
+                setMarked(new Set());
+              }
+            }}
+            onError={(msg) => showToast(msg)}
+            stts={printStts}
+            inGia={printInGia ?? printPrice}
+            copies={printCopies}
+            mode={printMode}
+            dbMode={voucherMode}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

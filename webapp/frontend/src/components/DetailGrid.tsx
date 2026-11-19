@@ -52,18 +52,32 @@ function getTokenHighlightClass(token: string): string {
   return "font-extrabold text-neutral-950";
 }
 
+const MAX_SPEC_CACHE = 400;
+const specHighlightCache = new Map<string, React.ReactNode>();
+
 function renderHighlightedSpecs(text: string): React.ReactNode {
+  if (!text) return text;
+  const cached = specHighlightCache.get(text);
+  if (cached !== undefined) return cached;
   const parts = text.split(SPEC_TOKEN_REGEX);
-  if (parts.length <= 1) return text;
-  return parts.map((part, idx) =>
-    idx % 2 === 1 ? (
-      <span key={idx} className={getTokenHighlightClass(part)}>
-        {part}
-      </span>
-    ) : (
-      <React.Fragment key={idx}>{part}</React.Fragment>
-    ),
-  );
+  const rendered: React.ReactNode =
+    parts.length <= 1
+      ? text
+      : parts.map((part, idx) =>
+          idx % 2 === 1 ? (
+            <span key={idx} className={getTokenHighlightClass(part)}>
+              {part}
+            </span>
+          ) : (
+            <React.Fragment key={idx}>{part}</React.Fragment>
+          ),
+        );
+  if (specHighlightCache.size >= MAX_SPEC_CACHE) {
+    const oldestKey = specHighlightCache.keys().next().value;
+    if (oldestKey !== undefined) specHighlightCache.delete(oldestKey);
+  }
+  specHighlightCache.set(text, rendered);
+  return rendered;
 }
 
 /** Kết quả tra giá trả về cho DetailGrid (đơn giá ngoại tệ + % chiết khấu). */
@@ -324,7 +338,7 @@ interface DetailGridProps {
   onLookupPrice?: (maVt: string) => Promise<PriceLookupResult | null>;
 }
 
-export const DetailGrid: React.FC<DetailGridProps> = ({
+export const DetailGrid: React.FC<DetailGridProps> = React.memo(({
   items,
   currency = "VND",
   embedded = false,
@@ -377,8 +391,10 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
   const [internalActiveRow, setInternalActiveRow] = useState<number>(0);
 
   useEffect(() => {
-    setInternalActiveRow(0);
-  }, [items]);
+    if (!onSelectRow) {
+      setInternalActiveRow(0);
+    }
+  }, [items, onSelectRow]);
 
   const currentActiveRow = onSelectRow ? activeRowIndex : internalActiveRow;
   const handleSelectRow = useCallback(
@@ -526,7 +542,7 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
         }
       }
     },
-    [ensureTrVisible],
+    [ensureTrVisible, variant, editable],
   );
   // Luôn giữ bản mới nhất của danh sách dòng để tránh callback async (lookup DmVt)
   // ghi đè các ô người dùng đã nhập (Đơn giá/Số lượng/CK...) bằng snapshot cũ.
@@ -1002,12 +1018,37 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
       const cellIdx = td ? Array.from(tr.children).indexOf(td) : -1;
       if (cellIdx < 0) return;
       const targetCell = targetRow.children[cellIdx] as HTMLElement | undefined;
-      const targetInput = targetCell?.querySelector<HTMLInputElement>(
-        "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
-      );
+      let targetInput =
+        targetCell?.querySelector<HTMLInputElement>(
+          "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
+        ) ||
+        targetCell?.querySelector<HTMLInputElement>(
+          "input.grid-cell-input:not([disabled])",
+        );
+      if (!targetInput) {
+        // Fallback khi dòng đích là dòng dịch vụ (loai_vt === "4") có ô bị disabled:
+        // tìm ô gần nhất có thể focus trong dòng đích để không bị kẹt phím ↑/↓.
+        const rowCells = Array.from(targetRow.children);
+        for (let offset = 1; offset < rowCells.length; offset++) {
+          for (const candidateIdx of [cellIdx - offset, cellIdx + offset]) {
+            if (candidateIdx < 0 || candidateIdx >= rowCells.length) continue;
+            const candidate = (
+              rowCells[candidateIdx] as HTMLElement | undefined
+            )?.querySelector<HTMLInputElement>(
+              "input.grid-cell-input:not([disabled]):not([data-readonly='true'])",
+            );
+            if (candidate) {
+              targetInput = candidate;
+              break;
+            }
+          }
+          if (targetInput) break;
+        }
+      }
       if (targetInput) {
-        targetInput.focus();
+        targetInput.focus({ preventScroll: true });
         targetInput.select();
+        ensureTrVisible(targetRow as HTMLTableRowElement);
       }
       return;
     }
@@ -2300,4 +2341,6 @@ export const DetailGrid: React.FC<DetailGridProps> = ({
       </div>
     </div>
   );
-};
+});
+
+DetailGrid.displayName = "DetailGrid";

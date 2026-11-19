@@ -213,18 +213,142 @@ export function isProgramActiveOnDate(
  * - Khớp đứng độc lập không liền chữ cái ASCII (VD: "ST5193", "TM 574", "TMD 5901").
  * - Hoặc viết dính sau từ tiếng Việt và đứng ngay trước chữ số (VD: "cấpTD 5050", "vảiTM 573", "ômTD5056").
  */
+interface CompiledMatcher {
+  excludeCodePrefixes: string[] | null;
+  exactCodes: Set<string> | null;
+  codePrefixes: string[] | null;
+  excludeNameContains: string[] | null;
+  nameContains: string[] | null;
+  nameTokenRegex: RegExp | null;
+  allOf: CompiledMatcher[] | null;
+  anyOf: CompiledMatcher[] | null;
+  customFilter?: (item: VoucherDetail) => boolean;
+}
+
+const compiledMatcherCache = new WeakMap<ItemMatcher, CompiledMatcher>();
+
+function compileNameTokensRegex(tokens: string[]): RegExp | null {
+  const parts: string[] = [];
+  for (const rawToken of tokens) {
+    const token = rawToken.trim().toUpperCase();
+    if (!token) continue;
+    const escaped = escapeRegExp(token);
+    parts.push(`(?:(?<![A-Z])${escaped}(?![A-Z])|${escaped}(?=\\s*[-/]?\\s*\\d))`);
+  }
+  if (parts.length === 0) return null;
+  return new RegExp(parts.join("|"));
+}
+
+function compileMatcher(matcher: ItemMatcher): CompiledMatcher {
+  const cached = compiledMatcherCache.get(matcher);
+  if (cached) return cached;
+
+  const normalizeList = (arr?: string[]) => {
+    if (!arr || arr.length === 0) return null;
+    const cleaned = arr.map((s) => s.trim().toUpperCase()).filter(Boolean);
+    return cleaned.length > 0 ? cleaned : null;
+  };
+
+  const exactList = normalizeList(matcher.exactCodes);
+  const compiled: CompiledMatcher = {
+    excludeCodePrefixes: normalizeList(matcher.excludeCodePrefixes),
+    exactCodes: exactList ? new Set(exactList) : null,
+    codePrefixes: normalizeList(matcher.codePrefixes),
+    excludeNameContains: normalizeList(matcher.excludeNameContains),
+    nameContains: normalizeList(matcher.nameContains),
+    nameTokenRegex: matcher.nameTokens?.length
+      ? compileNameTokensRegex(matcher.nameTokens)
+      : null,
+    allOf: matcher.allOf?.length
+      ? matcher.allOf.map((sub) => compileMatcher(sub))
+      : null,
+    anyOf: matcher.anyOf?.length
+      ? matcher.anyOf.map((sub) => compileMatcher(sub))
+      : null,
+    customFilter: matcher.customFilter,
+  };
+
+  compiledMatcherCache.set(matcher, compiled);
+  return compiled;
+}
+
+function matchesCompiled(
+  item: VoucherDetail,
+  maVt: string,
+  tenUpper: string,
+  c: CompiledMatcher,
+): boolean {
+  if (c.excludeCodePrefixes) {
+    for (let i = 0; i < c.excludeCodePrefixes.length; i++) {
+      if (maVt.startsWith(c.excludeCodePrefixes[i])) return false;
+    }
+  }
+
+  if (c.exactCodes && !c.exactCodes.has(maVt)) {
+    return false;
+  }
+
+  if (c.codePrefixes) {
+    let hit = false;
+    for (let i = 0; i < c.codePrefixes.length; i++) {
+      if (maVt.startsWith(c.codePrefixes[i])) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) return false;
+  }
+
+  if (c.excludeNameContains) {
+    for (let i = 0; i < c.excludeNameContains.length; i++) {
+      if (tenUpper.includes(c.excludeNameContains[i])) return false;
+    }
+  }
+
+  if (c.nameContains) {
+    let hit = false;
+    for (let i = 0; i < c.nameContains.length; i++) {
+      if (tenUpper.includes(c.nameContains[i])) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) return false;
+  }
+
+  if (c.nameTokenRegex && !c.nameTokenRegex.test(tenUpper)) {
+    return false;
+  }
+
+  if (c.allOf) {
+    for (let i = 0; i < c.allOf.length; i++) {
+      if (!matchesCompiled(item, maVt, tenUpper, c.allOf[i])) return false;
+    }
+  }
+
+  if (c.anyOf) {
+    let hit = false;
+    for (let i = 0; i < c.anyOf.length; i++) {
+      if (matchesCompiled(item, maVt, tenUpper, c.anyOf[i])) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) return false;
+  }
+
+  if (c.customFilter && !c.customFilter(item)) {
+    return false;
+  }
+
+  return true;
+}
+
 export function hasNameToken(tenVt: string, tokens: string[]): boolean {
   if (!tenVt || tokens.length === 0) return false;
-  const upper = tenVt.toUpperCase();
-  return tokens.some((rawToken) => {
-    const token = rawToken.trim().toUpperCase();
-    if (!token) return false;
-    const escaped = escapeRegExp(token);
-    const regex = new RegExp(
-      `(?:(?<![A-Z])${escaped}(?![A-Z])|${escaped}(?=\\s*[-/]?\\s*\\d))`,
-    );
-    return regex.test(upper);
-  });
+  const regex = compileNameTokensRegex(tokens);
+  if (!regex) return false;
+  return regex.test(tenVt.toUpperCase());
 }
 
 /** Kiểm tra một dòng vật tư có thỏa mãn ItemMatcher hay không. */
@@ -233,63 +357,9 @@ export function matchesItem(
   matcher: ItemMatcher,
 ): boolean {
   const maVt = (item.ma_vt || "").trim().toUpperCase();
-  const tenVt = (item.ten_vt || "").trim();
-  const tenUpper = tenVt.toUpperCase();
-
   if (!maVt) return false;
-
-  if (matcher.excludeCodePrefixes?.length) {
-    const excluded = matcher.excludeCodePrefixes.some((p) =>
-      maVt.startsWith(p.trim().toUpperCase()),
-    );
-    if (excluded) return false;
-  }
-
-  if (matcher.exactCodes?.length) {
-    const exactHit = matcher.exactCodes.some(
-      (c) => maVt === c.trim().toUpperCase(),
-    );
-    if (!exactHit) return false;
-  }
-
-  if (matcher.codePrefixes?.length) {
-    const prefixHit = matcher.codePrefixes.some((p) =>
-      maVt.startsWith(p.trim().toUpperCase()),
-    );
-    if (!prefixHit) return false;
-  }
-
-  if (matcher.excludeNameContains?.length) {
-    const excludedByName = matcher.excludeNameContains.some((s) =>
-      tenUpper.includes(s.trim().toUpperCase()),
-    );
-    if (excludedByName) return false;
-  }
-
-  if (matcher.nameContains?.length) {
-    const containsHit = matcher.nameContains.some((s) =>
-      tenUpper.includes(s.trim().toUpperCase()),
-    );
-    if (!containsHit) return false;
-  }
-
-  if (matcher.nameTokens?.length) {
-    if (!hasNameToken(tenVt, matcher.nameTokens)) return false;
-  }
-
-  if (matcher.allOf?.length) {
-    if (!matcher.allOf.every((sub) => matchesItem(item, sub))) return false;
-  }
-
-  if (matcher.anyOf?.length) {
-    if (!matcher.anyOf.some((sub) => matchesItem(item, sub))) return false;
-  }
-
-  if (matcher.customFilter && !matcher.customFilter(item)) {
-    return false;
-  }
-
-  return true;
+  const tenUpper = (item.ten_vt || "").trim().toUpperCase();
+  return matchesCompiled(item, maVt, tenUpper, compileMatcher(matcher));
 }
 
 function getItemQty(

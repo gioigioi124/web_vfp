@@ -70,7 +70,7 @@ interface VoucherListProps {
   onChangePage: (page: number) => void;
 }
 
-export const VoucherList: React.FC<VoucherListProps> = ({
+export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   vouchers,
   pagination,
   summary,
@@ -766,4 +766,6 @@ export const VoucherList: React.FC<VoucherListProps> = ({
       </section>
     </div>
   );
-};
+});
+
+VoucherList.displayName = "VoucherList";

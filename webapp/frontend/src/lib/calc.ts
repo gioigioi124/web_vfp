@@ -11,6 +11,7 @@ export interface CalculatedTotals {
   ttien2: number;
   ttien3: number;
   ttien0: number;
+  totalQty: number;
 }
 
 export function round(value: number, decimals: number = 2): number {
@@ -143,22 +144,28 @@ export function calcVoucherTotals(
 ): CalculatedTotals {
   const safeTyGia = tyGia > 0 ? tyGia : 1.0;
 
-  const ttien_nt = round(
-    items.reduce((sum, it) => sum + (it.tien_nt9 || 0), 0),
-    2,
-  );
-  const ttien_nt4 = round(
-    items.reduce((sum, it) => sum + (it.tien_nt4 || 0), 0),
-    2,
-  );
-  const ttien_nt2 = round(
-    items.reduce((sum, it) => sum + (it.tien_nt2 || 0), 0),
-    2,
-  );
+  let rawNt = 0;
+  let rawNt4 = 0;
+  let rawNt2 = 0;
+  let ttien = 0;
+  let ttien4 = 0;
+  let ttien2 = 0;
+  let totalQty = 0;
 
-  const ttien = items.reduce((sum, it) => sum + Math.round(it.tien9 || 0), 0);
-  const ttien4 = items.reduce((sum, it) => sum + Math.round(it.tien4 || 0), 0);
-  const ttien2 = items.reduce((sum, it) => sum + Math.round(it.tien2 || 0), 0);
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    rawNt += it.tien_nt9 || 0;
+    rawNt4 += it.tien_nt4 || 0;
+    rawNt2 += it.tien_nt2 || 0;
+    ttien += Math.round(it.tien9 || 0);
+    ttien4 += Math.round(it.tien4 || 0);
+    ttien2 += Math.round(it.tien2 || 0);
+    totalQty += Number(it.so_luong9 || 0);
+  }
+
+  const ttien_nt = round(rawNt, 2);
+  const ttien_nt4 = round(rawNt4, 2);
+  const ttien_nt2 = round(rawNt2, 2);
 
   // VAT Calculation
   let ttien_nt3 = 0;
@@ -186,5 +193,6 @@ export function calcVoucherTotals(
     ttien2,
     ttien3,
     ttien0,
+    totalQty: round(totalQty, 2),
   };
 }
