@@ -208,6 +208,7 @@ export function refreshCustomerIndex(): Promise<boolean> {
 }
 
 export function initCustomerIndex(): Promise<void> {
+  if (loaded) return Promise.resolve();
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     // 1) Ưu tiên nạp ngay từ IndexedDB (0ms, không chặn mạng dù mở lại sau nhiều giờ)

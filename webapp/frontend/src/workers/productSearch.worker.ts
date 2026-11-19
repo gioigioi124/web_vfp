@@ -194,33 +194,43 @@ async function loadFromIdb(): Promise<boolean> {
 }
 
 // -------------------------------------------------------------------- sync
-async function sync(): Promise<boolean> {
-  const res = await fetch(
-    `/api/products/changes?since=${since}&epoch_c=${epoch}`,
-  );
-  if (!res.ok) return false;
-  const body = await res.json();
-  const data = body?.data;
-  if (!data) return false;
+let syncPromise: Promise<boolean> | null = null;
 
-  if (data.full) {
-    map = new Map();
-    byCode = new Map();
-  }
-  if (!data.full && (!data.items || data.items.length === 0)) {
-    since = data.max_v ?? since;
-    epoch = data.epoch ?? epoch;
-    return false;
-  }
-  for (const it of data.items as Array<IndexItem & { del?: boolean }>) {
-    if (it.del) map.delete(it.id);
-    else map.set(it.id, it);
-  }
-  since = data.max_v ?? since;
-  epoch = data.epoch ?? epoch;
-  rebuild();
-  void saveToIdb();
-  return true;
+async function sync(): Promise<boolean> {
+  if (syncPromise) return syncPromise;
+  syncPromise = (async () => {
+    try {
+      const res = await fetch(
+        `/api/products/changes?since=${since}&epoch_c=${epoch}`,
+      );
+      if (!res.ok) return false;
+      const body = await res.json();
+      const data = body?.data;
+      if (!data) return false;
+
+      if (data.full) {
+        map = new Map();
+        byCode = new Map();
+      }
+      if (!data.full && (!data.items || data.items.length === 0)) {
+        since = data.max_v ?? since;
+        epoch = data.epoch ?? epoch;
+        return false;
+      }
+      for (const it of data.items as Array<IndexItem & { del?: boolean }>) {
+        if (it.del) map.delete(it.id);
+        else map.set(it.id, it);
+      }
+      since = data.max_v ?? since;
+      epoch = data.epoch ?? epoch;
+      rebuild();
+      void saveToIdb();
+      return true;
+    } finally {
+      syncPromise = null;
+    }
+  })();
+  return syncPromise;
 }
 
 // ---------------------------------------------------------------- messaging
