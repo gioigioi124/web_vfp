@@ -29,8 +29,12 @@ except Exception:  # pragma: no cover
 from app.config import settings
 from app.database import close_all_pools, test_db_connection
 from app.routers import lookups, vouchers, pickup, debt, print as print_router
-from app.routers import prices, products
+from app.routers import prices, products, customers
 from app.services.product_index_service import product_index_service, REFRESH_INTERVAL
+from app.services.customer_index_service import (
+    customer_index_service,
+    REFRESH_INTERVAL as CUSTOMER_REFRESH_INTERVAL,
+)
 
 logging.basicConfig(
     level=logging.INFO if settings.DEBUG else logging.WARNING,
@@ -65,14 +69,32 @@ async def _product_index_loop():
         await asyncio.sleep(REFRESH_INTERVAL)
 
 
+async def _customer_index_loop():
+    """Quét nền danh mục khách hàng để phát hiện thay đổi (chạy trong thread executor)."""
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, customer_index_service.load_disk_cache)
+    except Exception as e:  # pragma: no cover
+        logger.warning(f"Customer index disk cache load failed: {e}")
+
+    while True:
+        try:
+            await loop.run_in_executor(None, customer_index_service.refresh)
+        except Exception as e:  # pragma: no cover - phòng hờ
+            logger.warning(f"Customer index refresh failed: {e}")
+        await asyncio.sleep(CUSTOMER_REFRESH_INTERVAL)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Chạy ngầm việc nạp và đồng bộ danh mục vật tư để mở cổng 8000 ngay lập tức.
-    task = asyncio.create_task(_product_index_loop())
+    # Chạy ngầm việc nạp và đồng bộ danh mục vật tư + khách hàng để mở cổng 8000 ngay lập tức.
+    product_task = asyncio.create_task(_product_index_loop())
+    customer_task = asyncio.create_task(_customer_index_loop())
     try:
         yield
     finally:
-        task.cancel()
+        product_task.cancel()
+        customer_task.cancel()
         close_all_pools()
 
 
@@ -122,6 +144,7 @@ app.include_router(debt.router)
 app.include_router(print_router.router)
 app.include_router(prices.router)
 app.include_router(products.router)
+app.include_router(customers.router)
 
 
 def _app_info_payload():

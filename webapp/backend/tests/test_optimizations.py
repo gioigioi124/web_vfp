@@ -14,6 +14,7 @@ from app.repositories.debt_repo import DebtRepository
 from app.repositories.price_repo import PriceRepository
 from app.repositories.voucher_repo import VoucherRepository
 from app.schemas.voucher import VoucherCreateRequest, VoucherDetailSchema
+from app.services.customer_index_service import CustomerIndexService
 from app.services.product_index_service import ProductIndexService
 from app.utils.ttl_cache import TTLCache
 
@@ -321,3 +322,83 @@ def test_fast_json_response_utf8_vietnamese():
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/json")
+
+
+# ---------------------------------------------------------------------------
+# 7. CustomerIndexService (fingerprint skip, delta sync, pre-gzipped payload, ETag 304)
+# ---------------------------------------------------------------------------
+def test_customer_index_checksum_skip_delta_pre_gzip_and_304():
+    svc = CustomerIndexService()
+    row_kh01 = {
+        "ma_dt": "KH01",
+        "ten_dt": "Công ty Ánh Dương",
+        "dia_chi": "Hải Phòng",
+        "ong_ba": "Anh Hùng",
+        "ms_thue": "0200123456",
+        "han_tt": 15,
+        "gioi_han": 50_000_000.0,
+        "toi_han": 0.0,
+        "doi_tac": "Anh Hùng",
+        "ma_bp": "KD1",
+        "ten_bp": "Kinh doanh 1",
+        "ma_xe": "",
+        "ma_vm": "V01",
+    }
+
+    with (
+        patch.object(svc, "_compute_fingerprint", return_value=((1, 111), (1, 222), (1, 333))) as mock_fp,
+        patch.object(svc, "_read_all", return_value={"KH01": row_kh01}) as mock_read,
+        patch.object(svc, "_save_disk_cache"),
+    ):
+        svc.refresh(force=True)
+        assert mock_read.call_count == 1
+        assert svc._loaded is True
+        assert svc.version == 1
+
+        # Identical fingerprint skips _read_all entirely
+        svc.refresh(force=False)
+        assert mock_fp.call_count == 2
+        assert mock_read.call_count == 1
+
+    # Changed fingerprint with updated Gioi_Han triggers delta v=2
+    updated_kh01 = {**row_kh01, "gioi_han": 80_000_000.0}
+    with (
+        patch.object(svc, "_compute_fingerprint", return_value=((1, 999), (1, 222), (1, 333))),
+        patch.object(svc, "_read_all", return_value={"KH01": updated_kh01}),
+        patch.object(svc, "_save_disk_cache"),
+    ):
+        svc.refresh(force=False)
+    assert svc.version == 2
+    delta = svc.get_changes(since=1, epoch_c=svc.epoch)
+    assert delta["full"] is False
+    assert len(delta["items"]) == 1
+    assert delta["items"][0]["ma_dt"] == "KH01"
+    assert delta["items"][0]["gioi_han"] == 80_000_000.0
+
+    # O(1) RAM lookup does not touch SQL
+    with patch("app.services.customer_index_service.get_db_cursor") as mock_db:
+        found = svc.get_by_code("kh01")
+        assert found is not None
+        assert found["ten_dt"] == "Công ty Ánh Dương"
+        assert found["gioi_han"] == 80_000_000.0
+        assert mock_db.call_count == 0
+
+    # Pre-gzipped full payload & ETag + 304 Not Modified via router
+    gz_body, is_gz, etag = svc.get_changes_response_bytes(since=0, epoch_c=0, accept_gzip=True)
+    assert is_gz is True
+    assert etag == svc.get_etag()
+    decoded = json.loads(gzip.decompress(gz_body).decode("utf-8"))
+    assert decoded["data"]["full"] is True
+    assert decoded["data"]["items"][0]["ma_dt"] == "KH01"
+
+    with patch("app.routers.customers.customer_index_service", svc):
+        client = TestClient(app)
+        res_304 = client.get(
+            f"/api/customers/changes?since={svc.version}&epoch_c={svc.epoch}",
+            headers={"If-None-Match": etag},
+        )
+        assert res_304.status_code == 304
+        res_search = client.get("/api/customers/search?q=anh+duong")
+        assert res_search.status_code == 200
+        assert res_search.json()["data"][0]["ma_dt"] == "KH01"
+
