@@ -39,6 +39,24 @@ class PriceListDetailResponse(PriceListHeaderSchema):
     items: List[PriceListDetailSchema] = []
 
 
+class PriceListPageResponse(BaseModel):
+    items: List[PriceListHeaderSchema]
+    total_records: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class PriceListItemsPageResponse(BaseModel):
+    stt: str
+    total_count: int
+    filtered_count: int
+    offset: int
+    limit: int
+    has_more: bool
+    items: List[PriceListDetailSchema]
+
+
 class PriceListSaveItemInput(BaseModel):
     ma_vt: str
     gia: float = 0.0

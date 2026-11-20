@@ -4,6 +4,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   FileSpreadsheet,
@@ -19,6 +21,8 @@ import {
   PriceListDetailItem,
   PriceListExportRow,
   PriceListHeader,
+  PriceListItemsPageResponse,
+  PriceListPageResponse,
 } from "../../types/priceList";
 import { formatCurrency, formatDate, getTodayDate } from "../../lib/format";
 import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
@@ -39,6 +43,8 @@ function csvEscape(v: unknown): string {
   return s;
 }
 
+const DETAIL_CHUNK_SIZE = 500;
+
 export const PriceListWorkspace: React.FC = () => {
   const today = getTodayDate();
   const [fromDate, setFromDate] = useState(`${today.slice(0, 7)}-01`);
@@ -48,13 +54,22 @@ export const PriceListWorkspace: React.FC = () => {
   const [filterMaDt, setFilterMaDt] = useState("");
 
   const [headers, setHeaders] = useState<PriceListHeader[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loadingList, setLoadingList] = useState(false);
   const [checkedStts, setCheckedStts] = useState<Set<string>>(new Set());
 
   const [activeStt, setActiveStt] = useState<string | null>(null);
   const [activeItems, setActiveItems] = useState<PriceListDetailItem[]>([]);
+  const [detailTotalCount, setDetailTotalCount] = useState(0);
+  const [detailFilteredCount, setDetailFilteredCount] = useState(0);
+  const [detailHasMore, setDetailHasMore] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingMoreDetail, setLoadingMoreDetail] = useState(false);
   const [detailSearch, setDetailSearch] = useState("");
+  const [debouncedDetailSearch, setDebouncedDetailSearch] = useState("");
   const [activeDetailRow, setActiveDetailRow] = useState(0);
 
   const [sortKey, setSortKey] = useState<SortKey>("so_ct");
@@ -64,6 +79,8 @@ export const PriceListWorkspace: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const masterScrollRef = useRef<HTMLDivElement | null>(null);
   const detailScrollRef = useRef<HTMLDivElement | null>(null);
+  const masterAbortRef = useRef<AbortController | null>(null);
+  const detailAbortRef = useRef<AbortController | null>(null);
   const [topPct, setTopPct] = useState(52);
   const [draggingSplit, setDraggingSplit] = useState(false);
 
@@ -102,19 +119,47 @@ export const PriceListWorkspace: React.FC = () => {
   }, []);
 
   const loadHeaders = useCallback(
-    async (preserveActiveStt?: string | null) => {
+    async (preserveActiveStt?: string | null, overridePage?: number) => {
+      masterAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      masterAbortRef.current = ctrl;
+
+      const targetPage = overridePage ?? page;
       setLoadingList(true);
       try {
-        const q = new URLSearchParams();
+        const q = new URLSearchParams({
+          page: String(targetPage),
+          page_size: String(pageSize),
+        });
         if (fromDate) q.set("from_date", fromDate);
         if (toDate) q.set("to_date", toDate);
-        const res = await fetch(`/api/price-lists?${q.toString()}`);
+        if (filterSoCt.trim()) q.set("so_ct", filterSoCt.trim());
+        if (filterMaVm.trim()) q.set("ma_vm", filterMaVm.trim());
+        if (filterMaDt.trim()) q.set("ma_dt", filterMaDt.trim());
+
+        const res = await fetch(`/api/price-lists?${q.toString()}`, {
+          signal: ctrl.signal,
+        });
         const body = await res.json();
         if (!res.ok || !body?.success) {
           throw new Error(body?.detail || "Không tải được danh sách bảng giá.");
         }
-        const rows: PriceListHeader[] = Array.isArray(body.data) ? body.data : [];
+        const paged = body.data as PriceListPageResponse | PriceListHeader[];
+        const rows: PriceListHeader[] = Array.isArray(paged)
+          ? paged
+          : Array.isArray(paged?.items)
+            ? paged.items
+            : [];
         setHeaders(rows);
+        if (!Array.isArray(paged) && paged) {
+          setTotalRecords(paged.total_records ?? rows.length);
+          setTotalPages(paged.total_pages ?? 1);
+          setPage(paged.page ?? targetPage);
+        } else {
+          setTotalRecords(rows.length);
+          setTotalPages(1);
+        }
+
         setCheckedStts((prev) => {
           const valid = new Set(rows.map((r) => r.stt));
           const next = new Set<string>();
@@ -124,53 +169,148 @@ export const PriceListWorkspace: React.FC = () => {
           return next;
         });
 
-        const nextActive =
-          preserveActiveStt !== undefined
-            ? preserveActiveStt
-            : activeStt && rows.some((r) => r.stt === activeStt)
-              ? activeStt
-              : rows[0]?.stt || null;
-        setActiveStt(nextActive);
+        setActiveStt((prevActive) => {
+          if (preserveActiveStt !== undefined) {
+            return preserveActiveStt;
+          }
+          if (prevActive && rows.some((r) => r.stt === prevActive)) {
+            return prevActive;
+          }
+          return rows[0]?.stt || null;
+        });
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         showToast(
           "error",
           err instanceof Error ? err.message : "Lỗi tải danh sách bảng giá.",
         );
       } finally {
-        setLoadingList(false);
+        if (!ctrl.signal.aborted) {
+          setLoadingList(false);
+        }
       }
     },
-    [fromDate, toDate, activeStt, showToast],
+    [
+      fromDate,
+      toDate,
+      filterSoCt,
+      filterMaVm,
+      filterMaDt,
+      page,
+      pageSize,
+      showToast,
+    ],
   );
 
-  const loadDetail = useCallback(async (stt: string | null) => {
-    if (!stt) {
-      setActiveItems([]);
-      return;
-    }
-    setLoadingDetail(true);
-    try {
-      const res = await fetch(`/api/price-lists/${encodeURIComponent(stt)}`);
-      const body = await res.json();
-      if (!res.ok || !body?.success) {
-        throw new Error(body?.detail || "Không tải được chi tiết bảng giá.");
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [fromDate, toDate, filterSoCt, filterMaVm, filterMaDt, pageSize]);
+
+  // Debounced server-side Master fetch
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadHeaders();
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [loadHeaders]);
+
+  // Debounce detail search input
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedDetailSearch(detailSearch.trim());
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [detailSearch]);
+
+  const loadDetailChunk = useCallback(
+    async (stt: string | null, qStr: string, offset: number, append: boolean) => {
+      if (!stt) {
+        setActiveItems([]);
+        setDetailTotalCount(0);
+        setDetailFilteredCount(0);
+        setDetailHasMore(false);
+        return;
       }
-      setActiveItems(Array.isArray(body.data?.items) ? body.data.items : []);
-    } catch {
-      setActiveItems([]);
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, []);
+
+      if (!append) {
+        detailAbortRef.current?.abort();
+      }
+      const ctrl = new AbortController();
+      if (!append) {
+        detailAbortRef.current = ctrl;
+        setLoadingDetail(true);
+      } else {
+        setLoadingMoreDetail(true);
+      }
+
+      try {
+        const params = new URLSearchParams({
+          offset: String(offset),
+          limit: String(DETAIL_CHUNK_SIZE),
+        });
+        if (qStr) params.set("q", qStr);
+
+        const res = await fetch(
+          `/api/price-lists/${encodeURIComponent(stt)}/items?${params.toString()}`,
+          { signal: ctrl.signal },
+        );
+        const body = await res.json();
+        if (!res.ok || !body?.success || !body?.data) {
+          throw new Error(body?.detail || "Không tải được chi tiết bảng giá.");
+        }
+        const d = body.data as PriceListItemsPageResponse;
+        setDetailTotalCount(d.total_count ?? 0);
+        setDetailFilteredCount(d.filtered_count ?? 0);
+        setDetailHasMore(Boolean(d.has_more));
+        setActiveItems((prev) => (append ? [...prev, ...(d.items || [])] : d.items || []));
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (!append) {
+          setActiveItems([]);
+          setDetailTotalCount(0);
+          setDetailFilteredCount(0);
+          setDetailHasMore(false);
+        }
+      } finally {
+        if (!ctrl.signal.aborted) {
+          setLoadingDetail(false);
+          setLoadingMoreDetail(false);
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    void loadHeaders(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void loadDetailChunk(activeStt, debouncedDetailSearch, 0, false);
+  }, [activeStt, debouncedDetailSearch, loadDetailChunk]);
 
+  const handleLoadMoreDetail = useCallback(() => {
+    if (!activeStt || !detailHasMore || loadingDetail || loadingMoreDetail) return;
+    void loadDetailChunk(activeStt, debouncedDetailSearch, activeItems.length, true);
+  }, [
+    activeStt,
+    detailHasMore,
+    loadingDetail,
+    loadingMoreDetail,
+    loadDetailChunk,
+    debouncedDetailSearch,
+    activeItems.length,
+  ]);
+
+  // Auto-load next detail chunk when scrolling near the bottom of detail grid
   useEffect(() => {
-    void loadDetail(activeStt);
-  }, [activeStt, loadDetail]);
+    const el = detailScrollRef.current;
+    if (!el || !detailHasMore) return;
+    const onScroll = () => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) {
+        handleLoadMoreDetail();
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [detailHasMore, handleLoadMoreDetail]);
 
   // Drag split handler
   useEffect(() => {
@@ -191,29 +331,7 @@ export const PriceListWorkspace: React.FC = () => {
   }, [draggingSplit]);
 
   const filteredHeaders = useMemo(() => {
-    const qSo = filterSoCt.trim().toLowerCase();
-    const qVm = filterMaVm.trim().toLowerCase();
-    const qDt = filterMaDt.trim().toLowerCase();
-
-    const list = headers.filter((h) => {
-      if (qSo && !(h.so_ct || "").toLowerCase().includes(qSo)) return false;
-      if (
-        qVm &&
-        !(h.ma_vm || "").toLowerCase().includes(qVm) &&
-        !(h.ten_vm || "").toLowerCase().includes(qVm)
-      ) {
-        return false;
-      }
-      if (
-        qDt &&
-        !(h.ma_dt || "").toLowerCase().includes(qDt) &&
-        !(h.ten_dt || "").toLowerCase().includes(qDt)
-      ) {
-        return false;
-      }
-      return true;
-    });
-
+    const list = [...headers];
     list.sort((a, b) => {
       let cmp = 0;
       if (sortKey === "item_count") {
@@ -225,9 +343,8 @@ export const PriceListWorkspace: React.FC = () => {
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-
     return list;
-  }, [headers, filterSoCt, filterMaVm, filterMaDt, sortKey, sortDir]);
+  }, [headers, sortKey, sortDir]);
 
   const selectedHeaders = useMemo(
     () => headers.filter((h) => checkedStts.has(h.stt)),
@@ -239,15 +356,7 @@ export const PriceListWorkspace: React.FC = () => {
     [headers, activeStt],
   );
 
-  const filteredDetailItems = useMemo(() => {
-    const q = detailSearch.trim().toLowerCase();
-    if (!q) return activeItems;
-    return activeItems.filter(
-      (it) =>
-        (it.ma_vt || "").toLowerCase().includes(q) ||
-        (it.ten_vt || "").toLowerCase().includes(q),
-    );
-  }, [activeItems, detailSearch]);
+  const filteredDetailItems = activeItems;
 
   const allFilteredChecked =
     filteredHeaders.length > 0 &&
@@ -611,7 +720,7 @@ export const PriceListWorkspace: React.FC = () => {
             className="erp-input h-7 w-40 text-[12px]"
           />
           <span className="ml-auto text-[11px] text-slate-500">
-            Hiển thị <strong>{filteredHeaders.length}</strong> / {headers.length} bảng giá
+            Trang <strong>{page}/{totalPages}</strong> · <strong>{filteredHeaders.length}</strong> / {totalRecords} bảng giá
           </span>
         </div>
 
@@ -711,12 +820,15 @@ export const PriceListWorkspace: React.FC = () => {
       {/* Split Pane Body */}
       <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Top Pane: BG Headers */}
-        <div
-          ref={masterScrollRef}
+        <section
           style={{ height: `${topPct}%` }}
-          className="min-h-[140px] overflow-auto table-sticky-header bg-white border-b border-slate-200"
+          className="min-h-[140px] flex flex-col overflow-hidden bg-white border-b border-slate-200"
         >
-          <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+          <div
+            ref={masterScrollRef}
+            className="flex-1 min-h-0 overflow-auto table-sticky-header"
+          >
+            <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
             <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
               <tr>
                 <th
@@ -980,8 +1092,54 @@ export const PriceListWorkspace: React.FC = () => {
                 </>
               )}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+
+          {/* Master Pagination Bar */}
+          <div className="shrink-0 bg-neutral-100 border-t border-neutral-200 px-3 py-1 flex items-center justify-between text-[11px] text-neutral-600">
+            <span>
+              Tổng <b className="font-mono text-neutral-900">{totalRecords}</b> bảng giá · Đang hiển thị{" "}
+              <b className="font-mono text-neutral-900">{filteredHeaders.length}</b> dòng trên trang
+            </span>
+            <div className="flex items-center gap-2">
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="bg-white border border-neutral-300 rounded px-1.5 py-0.5 font-mono text-[11px] text-neutral-700"
+                title="Số bảng giá mỗi trang"
+              >
+                <option value={50}>50 / trang</option>
+                <option value={100}>100 / trang</option>
+                <option value={200}>200 / trang</option>
+                <option value={500}>500 / trang</option>
+              </select>
+              <button
+                type="button"
+                disabled={page <= 1 || loadingList}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+                title="Trang trước"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-mono px-1">
+                Trang {page}/{totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages || loadingList}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+                title="Trang sau"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* Draggable Splitter */}
         <div
@@ -1008,10 +1166,25 @@ export const PriceListWorkspace: React.FC = () => {
                     : activeHeader.ma_vm
                       ? `Vùng: ${activeHeader.ma_vm}`
                       : "Chung"}{" "}
-                  · <strong>{activeItems.length}</strong> mặt hàng
+                  · Đã tải <strong>{activeItems.length}</strong> /{" "}
+                  <strong>{detailFilteredCount}</strong>
+                  {detailFilteredCount !== detailTotalCount
+                    ? ` (tổng ${detailTotalCount})`
+                    : ""}{" "}
+                  mặt hàng
                 </span>
               ) : (
                 <span className="text-slate-400">Chọn một bảng giá phía trên để xem chi tiết</span>
+              )}
+              {detailHasMore && (
+                <button
+                  type="button"
+                  disabled={loadingMoreDetail}
+                  onClick={handleLoadMoreDetail}
+                  className="px-2 py-0.5 rounded bg-sky-50 border border-sky-200 text-[11px] font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+                >
+                  {loadingMoreDetail ? "Đang tải thêm..." : `+ Tải thêm (${DETAIL_CHUNK_SIZE})`}
+                </button>
               )}
             </div>
 
@@ -1022,7 +1195,7 @@ export const PriceListWorkspace: React.FC = () => {
                   type="text"
                   value={detailSearch}
                   onChange={(e) => setDetailSearch(e.target.value)}
-                  placeholder="Tìm mã / tên hàng trong bảng giá..."
+                  placeholder="Tìm mã / tên hàng (SQL server)..."
                   className="erp-input h-7 pl-7 w-56 text-[12px]"
                 />
               </div>
@@ -1268,6 +1441,9 @@ export const PriceListWorkspace: React.FC = () => {
         onSuccess={(msg) => {
           showToast("success", msg);
           void loadHeaders();
+          if (activeStt) {
+            void loadDetailChunk(activeStt, debouncedDetailSearch, 0, false);
+          }
         }}
       />
 
@@ -1280,7 +1456,7 @@ export const PriceListWorkspace: React.FC = () => {
           showToast("success", msg);
           void loadHeaders(stt || activeStt);
           if (stt && stt === activeStt) {
-            void loadDetail(stt);
+            void loadDetailChunk(stt, debouncedDetailSearch, 0, false);
           }
         }}
       />

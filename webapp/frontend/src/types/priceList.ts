@@ -114,3 +114,22 @@ export interface PriceListExportRow {
   gia_ban: number;
   chiet_khau_phan_tram: number;
 }
+
+export interface PriceListPageResponse {
+  items: PriceListHeader[];
+  total_records: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface PriceListItemsPageResponse {
+  stt: string;
+  total_count: number;
+  filtered_count: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  items: PriceListDetailItem[];
+}
+

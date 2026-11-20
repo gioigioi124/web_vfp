@@ -176,3 +176,68 @@ def test_delete_items_and_bulk_date_copy():
         assert resp.status_code == 201
         assert resp.json()["data"]["copied_count"] == 1
         assert resp.json()["data"]["copied_items"] == 1
+
+
+def test_list_price_lists_paged_and_items_paged():
+    from datetime import date
+
+    mock_cur = MagicMock()
+    mock_cur.fetchone.return_value = (150,)
+    mock_cur.fetchall.side_effect = [
+        [
+            (
+                "S1_BG_1",
+                "S1",
+                date(2026, 11, 20),
+                "BG01",
+                "KH001",
+                "Khach A",
+                "",
+                "",
+                "VND",
+                1.0,
+                date(2026, 11, 20),
+                None,
+                "ADMIN",
+                True,
+                "0",
+            )
+        ],
+        [("S1_BG_1", 1250)],
+    ]
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_cur
+    mock_ctx.__exit__.return_value = False
+
+    with patch("app.repositories.price_list_repo.get_db_cursor", return_value=mock_ctx):
+        resp = client.get("/api/price-lists?page=2&page_size=50&so_ct=BG")
+        assert resp.status_code == 200
+        d = resp.json()["data"]
+        assert d["total_records"] == 150
+        assert d["page"] == 2
+        assert d["page_size"] == 50
+        assert d["total_pages"] == 3
+        assert len(d["items"]) == 1
+        assert d["items"][0]["item_count"] == 1250
+
+    # BG0 paginated items endpoint
+    items_cur = MagicMock()
+    items_cur.fetchone.side_effect = [(1200,), (1200,)]
+    items_cur.fetchall.return_value = [
+        ("ST0_1", "S1_BG_1", "VT001", "Ton lanh", "Tam", 125000.0, 5.0),
+        ("ST0_2", "S1_BG_1", "VT002", "Ton mau", "Tam", 145000.0, 0.0),
+    ]
+    items_ctx = MagicMock()
+    items_ctx.__enter__.return_value = items_cur
+    items_ctx.__exit__.return_value = False
+
+    with patch("app.repositories.price_list_repo.get_db_cursor", return_value=items_ctx):
+        resp = client.get("/api/price-lists/S1_BG_1/items?q=Ton&offset=0&limit=2")
+        assert resp.status_code == 200
+        d = resp.json()["data"]
+        assert d["total_count"] == 1200
+        assert d["filtered_count"] == 1200
+        assert d["has_more"] is True
+        assert len(d["items"]) == 2
+        assert d["items"][0]["ma_vt"] == "VT001"
+

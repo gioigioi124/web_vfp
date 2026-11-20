@@ -40,7 +40,21 @@ def list_price_lists(
     so_ct: Optional[str] = Query(None, description="Lọc theo Số CT"),
     ma_vm: Optional[str] = Query(None, description="Lọc theo Mã vùng"),
     ma_dt: Optional[str] = Query(None, description="Lọc theo Mã khách hàng"),
+    page: Optional[int] = Query(None, ge=1, description="Trang (nếu phân trang server-side)"),
+    page_size: int = Query(100, ge=1, le=1000, description="Số dòng mỗi trang"),
 ):
+    if page is not None:
+        res = price_list_repository.list_price_lists_paged(
+            from_date=from_date,
+            to_date=to_date,
+            so_ct=so_ct,
+            ma_vm=ma_vm,
+            ma_dt=ma_dt,
+            page=page,
+            page_size=page_size,
+        )
+        return {"success": True, "data": res.model_dump()}
+
     items = price_list_repository.list_price_lists(
         from_date=from_date,
         to_date=to_date,
@@ -263,6 +277,19 @@ def commit_delete_items(req: PriceListDeleteItemsCommitRequest):
 def export_price_lists(req: PriceListExportRequest):
     rows = price_list_repository.export_price_lists(req.stt_list)
     return {"success": True, "data": [r.model_dump() for r in rows]}
+
+
+@router.get("/{stt}/items")
+def get_price_list_items(
+    stt: str,
+    q: Optional[str] = Query(None, description="Tìm theo mã hoặc tên vật tư"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    res = price_list_repository.get_price_list_items_page(
+        stt=stt, q=q, offset=offset, limit=limit
+    )
+    return {"success": True, "data": res.model_dump()}
 
 
 @router.get("/{stt}")

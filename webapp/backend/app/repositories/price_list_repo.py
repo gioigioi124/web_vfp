@@ -20,6 +20,8 @@ from app.schemas.price_list import (
     PriceListImportNewPreviewResponse,
     PriceListImportUpdateCommitRequest,
     PriceListImportUpdatePreviewResponse,
+    PriceListItemsPageResponse,
+    PriceListPageResponse,
     PriceListSaveRequest,
     PriceListUpdateItemPreview,
 )
@@ -103,14 +105,14 @@ class PriceListRepository:
             logger.warning(f"DmDt lookup warning in PriceListRepository: {e}")
         return out
 
-    def list_price_lists(
+    def _build_header_where(
         self,
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         so_ct: Optional[str] = None,
         ma_vm: Optional[str] = None,
         ma_dt: Optional[str] = None,
-    ) -> List[PriceListHeaderSchema]:
+    ) -> Tuple[str, List[Any]]:
         where_clauses: List[str] = []
         params: List[Any] = []
 
@@ -130,6 +132,40 @@ class PriceListRepository:
                 params.append(f"%{_escape_sql_like(val)}%")
 
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        return where_sql, params
+
+    def _fetch_bg0_counts(self, cur: Any, stts: List[str]) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        clean = [s for s in stts if s]
+        if not clean:
+            return counts
+        for i in range(0, len(clean), 400):
+            chunk = clean[i:i + 400]
+            ph = ",".join(["?"] * len(chunk))
+            cur.execute(
+                f"SELECT RTRIM(Stt), COUNT(1) FROM {self.vp_db}.dbo.BG0 WITH (NOLOCK) "
+                f"WHERE Stt IN ({ph}) GROUP BY Stt",
+                chunk,
+            )
+            for row in cur.fetchall():
+                counts[(row[0] or "").strip()] = int(row[1] or 0)
+        return counts
+
+    def list_price_lists(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        so_ct: Optional[str] = None,
+        ma_vm: Optional[str] = None,
+        ma_dt: Optional[str] = None,
+    ) -> List[PriceListHeaderSchema]:
+        where_sql, params = self._build_header_where(
+            from_date=from_date,
+            to_date=to_date,
+            so_ct=so_ct,
+            ma_vm=ma_vm,
+            ma_dt=ma_dt,
+        )
         sql = f"""
             SELECT
                 RTRIM(b.Stt) AS Stt,
@@ -146,16 +182,10 @@ class PriceListRepository:
                 b.Ngay_Ct2,
                 LTRIM(RTRIM(ISNULL(b.UserName, ''))) AS UserName,
                 ISNULL(b.Confirmed, 1) AS Confirmed,
-                ISNULL(b.Closed, '0') AS Closed,
-                ISNULL(cnt.ItemCount, 0) AS ItemCount
+                ISNULL(b.Closed, '0') AS Closed
             FROM {self.vp_db}.dbo.BG b WITH (NOLOCK)
             LEFT JOIN {self.sys_db}.dbo.DmDt d WITH (NOLOCK) ON d.Ma_Dt = b.Ma_Dt
             LEFT JOIN {self.sys_db}.dbo.DmVm vm WITH (NOLOCK) ON vm.Ma_Vm = b.Ma_Vm
-            OUTER APPLY (
-                SELECT COUNT(1) AS ItemCount
-                FROM {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK)
-                WHERE b0.Stt = b.Stt
-            ) cnt
             {where_sql}
             ORDER BY LTRIM(RTRIM(ISNULL(b.So_Ct, ''))) ASC,
                      LTRIM(RTRIM(ISNULL(b.Ma_Vm, ''))) ASC,
@@ -167,10 +197,15 @@ class PriceListRepository:
         try:
             with get_db_cursor(self.vp_db) as cur:
                 cur.execute(sql, params)
-                for r in cur.fetchall():
+                rows = cur.fetchall()
+                counts = self._fetch_bg0_counts(
+                    cur, [(r[0] or "").strip() for r in rows]
+                )
+                for r in rows:
+                    stt_val = (r[0] or "").strip()
                     results.append(
                         PriceListHeaderSchema(
-                            stt=(r[0] or "").strip(),
+                            stt=stt_val,
                             ma_dvcs=(r[1] or "S1").strip(),
                             ngay_ct=r[2].strftime("%Y-%m-%d") if r[2] else "",
                             so_ct=(r[3] or "").strip(),
@@ -185,12 +220,228 @@ class PriceListRepository:
                             user_name=(r[12] or "").strip(),
                             confirmed=bool(r[13]),
                             closed=(r[14] or "0").strip(),
-                            item_count=int(r[15] or 0),
+                            item_count=counts.get(stt_val, 0),
                         )
                     )
         except Exception as e:
             logger.error(f"Error listing price lists (BG): {e}")
         return results
+
+    def list_price_lists_paged(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        so_ct: Optional[str] = None,
+        ma_vm: Optional[str] = None,
+        ma_dt: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> PriceListPageResponse:
+        safe_page = max(1, int(page))
+        safe_size = max(1, min(1000, int(page_size)))
+        where_sql, params = self._build_header_where(
+            from_date=from_date,
+            to_date=to_date,
+            so_ct=so_ct,
+            ma_vm=ma_vm,
+            ma_dt=ma_dt,
+        )
+        count_sql = f"SELECT COUNT(1) FROM {self.vp_db}.dbo.BG b WITH (NOLOCK) {where_sql}"
+        offset = (safe_page - 1) * safe_size
+        page_sql = f"""
+            ;WITH PageBG AS (
+                SELECT
+                    b.Stt, b.Ma_DvCs, b.Ngay_Ct, b.So_Ct, b.Ma_Dt, b.Ma_Vm,
+                    b.Ma_Tte, b.Ty_Gia, b.Ngay_Ct1, b.Ngay_Ct2, b.UserName,
+                    b.Confirmed, b.Closed
+                FROM {self.vp_db}.dbo.BG b WITH (NOLOCK)
+                {where_sql}
+                ORDER BY LTRIM(RTRIM(ISNULL(b.So_Ct, ''))) ASC,
+                         LTRIM(RTRIM(ISNULL(b.Ma_Vm, ''))) ASC,
+                         b.Ngay_Ct DESC,
+                         LTRIM(RTRIM(ISNULL(b.Ma_Dt, ''))) ASC,
+                         b.Stt ASC
+                OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+            )
+            SELECT
+                RTRIM(b.Stt) AS Stt,
+                RTRIM(b.Ma_DvCs) AS Ma_DvCs,
+                b.Ngay_Ct,
+                LTRIM(RTRIM(ISNULL(b.So_Ct, ''))) AS So_Ct,
+                LTRIM(RTRIM(ISNULL(b.Ma_Dt, ''))) AS Ma_Dt,
+                {self.fn_uni}(ISNULL(d.Ten_Dt, '')) AS Ten_Dt,
+                LTRIM(RTRIM(ISNULL(b.Ma_Vm, ''))) AS Ma_Vm,
+                {self.fn_uni}(ISNULL(vm.Ten_Vm, '')) AS Ten_Vm,
+                RTRIM(b.Ma_Tte) AS Ma_Tte,
+                ISNULL(b.Ty_Gia, 1) AS Ty_Gia,
+                b.Ngay_Ct1,
+                b.Ngay_Ct2,
+                LTRIM(RTRIM(ISNULL(b.UserName, ''))) AS UserName,
+                ISNULL(b.Confirmed, 1) AS Confirmed,
+                ISNULL(b.Closed, '0') AS Closed
+            FROM PageBG b
+            LEFT JOIN {self.sys_db}.dbo.DmDt d WITH (NOLOCK) ON d.Ma_Dt = b.Ma_Dt
+            LEFT JOIN {self.sys_db}.dbo.DmVm vm WITH (NOLOCK) ON vm.Ma_Vm = b.Ma_Vm
+            ORDER BY LTRIM(RTRIM(ISNULL(b.So_Ct, ''))) ASC,
+                     LTRIM(RTRIM(ISNULL(b.Ma_Vm, ''))) ASC,
+                     b.Ngay_Ct DESC,
+                     LTRIM(RTRIM(ISNULL(b.Ma_Dt, ''))) ASC,
+                     b.Stt ASC
+        """
+        items: List[PriceListHeaderSchema] = []
+        total_records = 0
+        try:
+            with get_db_cursor(self.vp_db) as cur:
+                cur.execute(count_sql, params)
+                cnt_row = cur.fetchone()
+                total_records = int(cnt_row[0] or 0) if cnt_row else 0
+                if total_records > 0 and offset < total_records:
+                    cur.execute(page_sql, [*params, offset, safe_size])
+                    rows = cur.fetchall()
+                    counts = self._fetch_bg0_counts(
+                        cur, [(r[0] or "").strip() for r in rows]
+                    )
+                    for r in rows:
+                        stt_val = (r[0] or "").strip()
+                        items.append(
+                            PriceListHeaderSchema(
+                                stt=stt_val,
+                                ma_dvcs=(r[1] or "S1").strip(),
+                                ngay_ct=r[2].strftime("%Y-%m-%d") if r[2] else "",
+                                so_ct=(r[3] or "").strip(),
+                                ma_dt=(r[4] or "").strip(),
+                                ten_dt=(r[5] or "").strip(),
+                                ma_vm=(r[6] or "").strip(),
+                                ten_vm=(r[7] or "").strip(),
+                                ma_tte=(r[8] or "VND").strip(),
+                                ty_gia=float(r[9] or 1.0),
+                                ngay_ct1=r[10].strftime("%Y-%m-%d") if r[10] else None,
+                                ngay_ct2=r[11].strftime("%Y-%m-%d") if r[11] else None,
+                                user_name=(r[12] or "").strip(),
+                                confirmed=bool(r[13]),
+                                closed=(r[14] or "0").strip(),
+                                item_count=counts.get(stt_val, 0),
+                            )
+                        )
+        except Exception as e:
+            logger.error(f"Error listing paged price lists (BG): {e}")
+
+        total_pages = max(1, (total_records + safe_size - 1) // safe_size)
+        return PriceListPageResponse(
+            items=items,
+            total_records=total_records,
+            page=safe_page,
+            page_size=safe_size,
+            total_pages=total_pages,
+        )
+
+    def get_price_list_items_page(
+        self,
+        stt: str,
+        q: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 500,
+    ) -> PriceListItemsPageResponse:
+        clean_stt = (stt or "").strip()
+        safe_offset = max(0, int(offset))
+        safe_limit = max(1, min(2000, int(limit)))
+        clean_q = (q or "").strip()
+
+        if not clean_stt:
+            return PriceListItemsPageResponse(
+                stt="",
+                total_count=0,
+                filtered_count=0,
+                offset=safe_offset,
+                limit=safe_limit,
+                has_more=False,
+                items=[],
+            )
+
+        total_count = 0
+        filtered_count = 0
+        items: List[PriceListDetailSchema] = []
+
+        filter_join = ""
+        filter_sql = ""
+        filter_params: List[Any] = [clean_stt]
+        if clean_q:
+            esc = f"%{_escape_sql_like(clean_q.upper())}%"
+            esc_text = f"%{_escape_sql_like(clean_q)}%"
+            filter_join = f"LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = b0.Ma_Vt"
+            filter_sql = (
+                f" AND (UPPER(RTRIM(ISNULL(b0.Ma_Vt, ''))) LIKE ? ESCAPE '\\' "
+                f"OR {self.fn_uni}(ISNULL(v.Ten_Vt, '')) LIKE ? ESCAPE '\\')"
+            )
+            filter_params.extend([esc, esc_text])
+
+        try:
+            with get_db_cursor(self.vp_db) as cur:
+                cur.execute(
+                    f"SELECT COUNT(1) FROM {self.vp_db}.dbo.BG0 WITH (NOLOCK) WHERE Stt = ?",
+                    [clean_stt],
+                )
+                row_total = cur.fetchone()
+                total_count = int(row_total[0] or 0) if row_total else 0
+
+                if clean_q:
+                    cur.execute(
+                        f"SELECT COUNT(1) FROM {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK) "
+                        f"{filter_join} WHERE b0.Stt = ?{filter_sql}",
+                        filter_params,
+                    )
+                    row_filtered = cur.fetchone()
+                    filtered_count = int(row_filtered[0] or 0) if row_filtered else 0
+                else:
+                    filtered_count = total_count
+
+                if filtered_count > 0 and safe_offset < filtered_count:
+                    items_sql = f"""
+                        ;WITH PageItems AS (
+                            SELECT b0.Stt0, b0.Stt, b0.Ma_Vt, b0.Dvt, b0.Gia, b0.CK
+                            FROM {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK)
+                            {filter_join}
+                            WHERE b0.Stt = ?{filter_sql}
+                            ORDER BY RTRIM(b0.Ma_Vt) ASC, b0.Stt0 ASC
+                            OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
+                        )
+                        SELECT
+                            RTRIM(p.Stt0) AS Stt0,
+                            RTRIM(p.Stt) AS Stt,
+                            RTRIM(ISNULL(p.Ma_Vt, '')) AS Ma_Vt,
+                            {self.fn_uni}(ISNULL(v.Ten_Vt, '')) AS Ten_Vt,
+                            {self.fn_uni}(ISNULL(p.Dvt, '')) AS Dvt,
+                            ISNULL(p.Gia, 0) AS Gia,
+                            ISNULL(p.CK, 0) AS CK
+                        FROM PageItems p
+                        LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = p.Ma_Vt
+                        ORDER BY RTRIM(p.Ma_Vt) ASC, p.Stt0 ASC
+                    """
+                    cur.execute(items_sql, [*filter_params, safe_offset, safe_limit])
+                    items = [
+                        PriceListDetailSchema(
+                            stt0=(dr[0] or "").strip(),
+                            stt=(dr[1] or "").strip(),
+                            ma_vt=(dr[2] or "").strip(),
+                            ten_vt=(dr[3] or "").strip(),
+                            dvt=(dr[4] or "").strip(),
+                            gia=float(dr[5] or 0.0),
+                            ck=float(dr[6] or 0.0),
+                        )
+                        for dr in cur.fetchall()
+                    ]
+        except Exception as e:
+            logger.error(f"Error getting paged BG0 items ({clean_stt}): {e}")
+
+        return PriceListItemsPageResponse(
+            stt=clean_stt,
+            total_count=total_count,
+            filtered_count=filtered_count,
+            offset=safe_offset,
+            limit=safe_limit,
+            has_more=(safe_offset + len(items)) < filtered_count,
+            items=items,
+        )
 
     def get_price_list_detail(self, stt: str) -> Optional[PriceListDetailResponse]:
         clean_stt = (stt or "").strip()
