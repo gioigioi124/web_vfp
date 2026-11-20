@@ -21,6 +21,7 @@ import { Autocomplete, AutocompleteOption } from "../ui/Autocomplete";
 import { VfpLookupCell, VfpOption } from "../ui/VfpLookupCell";
 import { NumCell } from "../detail-grid/NumCell";
 import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 
 interface PriceListFormModalProps {
   isOpen: boolean;
@@ -53,11 +54,13 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
   onSaved,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLTableSectionElement | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeRow, setActiveRow] = useState(0);
 
   const [ngayCt, setNgayCt] = useState(getTodayDate());
   const [ngayCt1, setNgayCt1] = useState(getTodayDate());
@@ -69,6 +72,12 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
   const [userName, setUserName] = useState("ADMIN");
   const [closed, setClosed] = useState("0");
   const [rows, setRows] = useState<EditableRow[]>([makeEmptyRow()]);
+
+  const formGrid = useVirtualExcelGrid({
+    totalRows: rows.length,
+    scrollContainerRef: gridScrollRef,
+    onSelectRow: setActiveRow,
+  });
 
   useModalLock(isOpen, containerRef);
 
@@ -215,6 +224,8 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
         setRows((prev) => [...prev, makeEmptyRow()]);
       }
 
+      setActiveRow(nextRow);
+      formGrid.scrollToRow(nextRow);
       requestAnimationFrame(() => {
         const rowEl = gridRef.current?.querySelector<HTMLTableRowElement>(
           `tr[data-row-idx="${nextRow}"]`,
@@ -227,7 +238,7 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
         target?.focus();
       });
     },
-    [rows.length],
+    [rows.length, formGrid],
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -448,107 +459,143 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
           )}
 
           {/* BG0 Grid */}
-          <div className="flex-1 min-h-0 overflow-auto p-4">
+          <div
+            ref={gridScrollRef}
+            className="flex-1 min-h-0 overflow-auto p-4 table-sticky-header"
+          >
             {loading ? (
               <div className="py-12 text-center text-slate-500 text-[12px]">
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-primary" />
                 Đang tải chi tiết mặt hàng...
               </div>
             ) : (
-              <table className="xl-grid w-full border-collapse">
-                <thead className="vfp-header sticky top-0 z-10">
+              <table className="xl-grid xl-grid-no-hover dense-table w-full border-collapse text-[12px]">
+                <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
                   <tr>
-                    <th className="w-10 text-center">STT</th>
-                    <th className="w-40">Mã hàng (Ma_Vt)</th>
-                    <th>Tên vật tư / hàng hóa</th>
-                    <th className="w-20 text-center">ĐVT</th>
-                    <th className="w-36 text-right">Đơn giá (Gia)</th>
-                    <th className="w-24 text-right">% CK</th>
-                    <th className="w-10 text-center">Xóa</th>
+                    <th className="w-10 text-center border-r border-neutral-200">#</th>
+                    <th className="w-40 border-r border-neutral-200 font-mono">Mã hàng (Ma_Vt)</th>
+                    <th className="min-w-[240px] border-r border-neutral-200">Tên vật tư / hàng hóa</th>
+                    <th className="w-20 text-center border-r border-neutral-200">ĐVT</th>
+                    <th className="w-36 text-right border-r border-neutral-200 font-mono">Đơn giá (Gia)</th>
+                    <th className="w-24 text-right border-r border-neutral-200 font-mono">% CK</th>
+                    <th className="w-12 text-center">Xóa</th>
                   </tr>
                 </thead>
-                <tbody ref={gridRef}>
-                  {rows.map((r, idx) => (
-                    <tr key={r._key} data-row-idx={idx}>
-                      <td className="text-center text-[11px] text-slate-500">{idx + 1}</td>
-                      <td data-nav-col="ma_vt">
-                        <VfpLookupCell
-                          value={r.ma_vt}
-                          onValueChange={(v) =>
-                            updateRow(idx, { ma_vt: v.toUpperCase(), ten_vt: "", dvt: "" })
-                          }
-                          onPick={(opt) => {
-                            void handleProductCommit(idx, opt.value);
-                          }}
-                          onCommit={(raw) => {
-                            void handleProductCommit(idx, raw);
-                          }}
-                          fetcher={fetchProductOptions}
-                          onNavigate={(dir) => handleNavigate(idx, "ma_vt", dir)}
-                          dropdownMinWidth={380}
-                          placeholder="Mã VT..."
-                        />
-                      </td>
-                      <td>
-                        <ReadOnlyGridInput
-                          value={r.ten_vt || ""}
-                          rowIndex={idx}
-                          className="xl-ro w-full"
-                          placeholder="Tên vật tư..."
-                          isFormReadOnlyColumn
-                          onSelectRow={() => {}}
-                          onKeyDown={() => {}}
-                          onCopy={() => {}}
-                        />
-                      </td>
-                      <td>
-                        <ReadOnlyGridInput
-                          value={r.dvt || ""}
-                          rowIndex={idx}
-                          className="xl-ro w-full text-center"
-                          placeholder=""
-                          isFormReadOnlyColumn
-                          onSelectRow={() => {}}
-                          onKeyDown={() => {}}
-                          onCopy={() => {}}
-                        />
-                      </td>
-                      <td>
-                        <NumCell
-                          value={r.gia}
-                          compactDecimals
-                          dataField="gia"
-                          onCommit={(v) => updateRow(idx, { gia: v })}
-                          onNavigate={(dir) => handleNavigate(idx, "gia", dir)}
-                        />
-                      </td>
-                      <td>
-                        <NumCell
-                          value={r.ck}
-                          compactDecimals
-                          dataField="ck"
-                          onCommit={(v) => updateRow(idx, { ck: v })}
-                          onNavigate={(dir) => handleNavigate(idx, "ck", dir)}
-                        />
-                      </td>
-                      <td className="text-center">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRows((prev) =>
-                              prev.length > 1
-                                ? prev.filter((_, i) => i !== idx)
-                                : [makeEmptyRow()],
-                            )
-                          }
-                          className="p-1 text-slate-400 hover:text-rose-600"
-                          title="Xóa dòng"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
+                <tbody ref={gridRef} className="divide-y divide-neutral-200">
+                  {formGrid.topSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
+                      <td
+                        colSpan={7}
+                        style={{ height: formGrid.topSpacerHeight, padding: 0, border: 0 }}
+                      />
                     </tr>
-                  ))}
+                  )}
+                  {rows
+                    .slice(formGrid.startIndex, formGrid.endIndex)
+                    .map((r, sliceIdx) => {
+                      const idx = formGrid.startIndex + sliceIdx;
+                      return (
+                        <tr
+                          key={r._key}
+                          data-row-idx={idx}
+                          data-vrow={idx}
+                          onClick={() => setActiveRow(idx)}
+                          className={idx === activeRow ? "xl-row-active" : undefined}
+                        >
+                          <td className="xl-rowhead font-mono">{idx + 1}</td>
+                          <td className="xl-cell" data-nav-col="ma_vt">
+                            <VfpLookupCell
+                              value={r.ma_vt}
+                              onFocusRow={() => setActiveRow(idx)}
+                              onValueChange={(v) =>
+                                updateRow(idx, { ma_vt: v.toUpperCase(), ten_vt: "", dvt: "" })
+                              }
+                              onPick={(opt) => {
+                                void handleProductCommit(idx, opt.value);
+                              }}
+                              onCommit={(raw) => {
+                                void handleProductCommit(idx, raw);
+                              }}
+                              fetcher={fetchProductOptions}
+                              onNavigate={(dir) => handleNavigate(idx, "ma_vt", dir)}
+                              dropdownMinWidth={380}
+                              placeholder="Mã VT..."
+                              className="xl-input font-mono font-bold text-primary-800"
+                            />
+                          </td>
+                          <td className="xl-ro">
+                            <ReadOnlyGridInput
+                              value={r.ten_vt || ""}
+                              rowIndex={idx}
+                              className="xl-input text-neutral-900 grid-cell-input"
+                              placeholder="Tên vật tư..."
+                              isFormReadOnlyColumn
+                              onSelectRow={setActiveRow}
+                              onKeyDown={(e) => formGrid.handleCellKeyDown(e, idx)}
+                              onCopy={formGrid.handleCellCopy}
+                            />
+                          </td>
+                          <td className="xl-ro">
+                            <ReadOnlyGridInput
+                              value={r.dvt || ""}
+                              rowIndex={idx}
+                              className="xl-input text-center text-neutral-600 grid-cell-input"
+                              placeholder=""
+                              isFormReadOnlyColumn
+                              onSelectRow={setActiveRow}
+                              onKeyDown={(e) => formGrid.handleCellKeyDown(e, idx)}
+                              onCopy={formGrid.handleCellCopy}
+                            />
+                          </td>
+                          <td className="xl-cell xl-amber">
+                            <NumCell
+                              value={r.gia}
+                              compactDecimals
+                              dataField="gia"
+                              onFocus={() => setActiveRow(idx)}
+                              onCommit={(v) => updateRow(idx, { gia: v })}
+                              onNavigate={(dir) => handleNavigate(idx, "gia", dir)}
+                              className="xl-input text-right font-mono font-bold text-neutral-900"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <NumCell
+                              value={r.ck}
+                              compactDecimals
+                              dataField="ck"
+                              onFocus={() => setActiveRow(idx)}
+                              onCommit={(v) => updateRow(idx, { ck: v })}
+                              onNavigate={(dir) => handleNavigate(idx, "ck", dir)}
+                              className="xl-input text-right font-mono text-neutral-800"
+                            />
+                          </td>
+                          <td className="xl-ro text-center">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRows((prev) =>
+                                  prev.length > 1
+                                    ? prev.filter((_, i) => i !== idx)
+                                    : [makeEmptyRow()],
+                                )
+                              }
+                              className="p-1 text-slate-400 hover:text-rose-600"
+                              title="Xóa dòng"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {formGrid.bottomSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
+                      <td
+                        colSpan={7}
+                        style={{ height: formGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                      />
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}

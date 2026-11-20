@@ -15,6 +15,8 @@ import { initCatalogCache, searchTaiKhoan } from "../../lib/catalogCache";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { useModalLock } from "../../lib/modalLock";
 import { Autocomplete, AutocompleteOption } from "../ui/Autocomplete";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useExcelGridNav } from "../ui/useExcelGridNav";
 
 interface BaoCoImportModalProps {
   isOpen: boolean;
@@ -47,6 +49,8 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<BaoCoImportPreviewResponse | null>(null);
+  const [activeRow, setActiveRow] = useState<number>(0);
+  const { handleCellKeyDown, handleCellCopy } = useExcelGridNav();
 
   useModalLock(isOpen, containerRef);
 
@@ -55,6 +59,7 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
     setError(null);
     setPreview(null);
     setFileName("");
+    setActiveRow(0);
   }, [isOpen]);
 
   const fetchTkOptions = useCallback(async (q: string): Promise<AutocompleteOption[]> => {
@@ -272,43 +277,85 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {preview.rows.map((r) => (
+                {preview.rows.map((r, idx) => (
                   <tr
                     key={r.row_index}
-                    className={r.valid ? "" : "bg-danger-50/70"}
+                    onClick={() => setActiveRow(idx)}
+                    className={
+                      idx === activeRow
+                        ? "xl-row-active"
+                        : r.valid
+                          ? ""
+                          : "bg-danger-50/70"
+                    }
                   >
-                    <td className="xl-ro text-center font-mono text-neutral-500">
+                    <td className="xl-rowhead font-mono">
                       {r.row_index}
                     </td>
-                    <td className="xl-ro px-2 font-mono">
-                      {r.ngay_ct ? formatDate(r.ngay_ct) : "—"}
+                    <td className="xl-cell">
+                      <ReadOnlyGridInput
+                        value={r.ngay_ct ? formatDate(r.ngay_ct) : "—"}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                      />
                     </td>
-                    <td className="xl-ro px-2 font-mono font-bold text-primary-800">
-                      {r.ma_dt || "—"}
+                    <td className="xl-cell">
+                      <ReadOnlyGridInput
+                        value={r.ma_dt || "—"}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className="xl-input font-mono font-bold text-primary-800 grid-cell-input"
+                      />
                     </td>
-                    <td className="xl-ro px-2 truncate max-w-[200px]" title={r.ten_dt}>
-                      {r.ten_dt || ""}
+                    <td className="xl-cell max-w-[200px]">
+                      <ReadOnlyGridInput
+                        value={r.ten_dt || ""}
+                        title={r.ten_dt}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className="xl-input text-neutral-900 truncate grid-cell-input"
+                      />
                     </td>
-                    <td className="xl-ro px-2 truncate max-w-[260px]" title={r.noi_dung}>
-                      {r.noi_dung}
+                    <td className="xl-cell max-w-[260px]">
+                      <ReadOnlyGridInput
+                        value={r.noi_dung || ""}
+                        title={r.noi_dung}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className="xl-input text-neutral-800 truncate grid-cell-input"
+                      />
                     </td>
-                    <td className="xl-ro px-2 text-right font-mono font-bold">
-                      {formatCurrency(r.so_tien, "VND")}
+                    <td className="xl-cell">
+                      <ReadOnlyGridInput
+                        value={formatCurrency(r.so_tien, "VND")}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className="xl-input text-right font-mono font-bold text-neutral-900 grid-cell-input"
+                      />
                     </td>
-                    <td className="xl-ro px-2 text-center">
-                      {r.valid ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-[11px]">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Hợp lệ
-                        </span>
-                      ) : (
-                        <span
-                          className="text-danger-700 font-semibold text-[11px]"
-                          title={r.error || ""}
-                        >
-                          {r.error || "Lỗi"}
-                        </span>
-                      )}
+                    <td className="xl-cell">
+                      <ReadOnlyGridInput
+                        value={r.valid ? "Hợp lệ" : r.error || "Lỗi"}
+                        title={r.error || ""}
+                        rowIndex={idx}
+                        onSelectRow={setActiveRow}
+                        onKeyDown={(e) => handleCellKeyDown(e, idx)}
+                        onCopy={handleCellCopy}
+                        className={`xl-input text-center font-semibold grid-cell-input ${
+                          r.valid ? "text-emerald-700" : "text-danger-700"
+                        }`}
+                      />
                     </td>
                   </tr>
                 ))}

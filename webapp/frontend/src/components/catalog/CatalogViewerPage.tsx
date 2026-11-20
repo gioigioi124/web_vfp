@@ -21,7 +21,8 @@ import {
 import { cachedFetch, invalidate, peek } from "../../lib/apiCache";
 import { formatCurrency, formatNumber2 } from "../../lib/format";
 import { normalizeSearchText, parseSearchQuery } from "../../lib/searchMatch";
-import { HighlightText } from "../ui/HighlightText";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 
 type CatalogRow = Record<string, any>;
 
@@ -60,10 +61,11 @@ export const CatalogViewerPage: React.FC = () => {
   const [sortKey, setSortKey] = useState<string>(activeConfig.defaultSortKey);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(999999);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Reset local search/sort/page when switching catalog
   useEffect(() => {
@@ -170,6 +172,11 @@ export const CatalogViewerPage: React.FC = () => {
   }, [query]);
 
   const selectedRow = pagedRows[selectedIndex] || null;
+  const catalogGrid = useVirtualExcelGrid({
+    totalRows: pagedRows.length,
+    scrollContainerRef: tableScrollRef,
+    onSelectRow: setSelectedIndex,
+  });
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -317,7 +324,7 @@ export const CatalogViewerPage: React.FC = () => {
       )}
 
       {/* Main Dense Table */}
-      <main className="flex-1 min-h-0 overflow-auto bg-white">
+      <main ref={tableScrollRef} className="flex-1 min-h-0 overflow-auto bg-white">
         <table className="w-full border-collapse xl-grid table-sticky-header text-xs">
           <thead>
             <tr>
@@ -376,60 +383,74 @@ export const CatalogViewerPage: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              pagedRows.map((row, idx) => {
-                const rowNo = (safePage - 1) * pageSize + idx + 1;
-                const isActive = idx === selectedIndex;
-                return (
-                  <tr
-                    key={`${rowNo}-${String(row[activeConfig.defaultSortKey] ?? idx)}`}
-                    onClick={() => setSelectedIndex(idx)}
-                    className={`cursor-pointer ${isActive ? "xl-row-active" : ""}`}
-                  >
-                    <td className="xl-rowhead font-mono">{rowNo}</td>
-                    {activeConfig.columns.map((col) => {
-                      const raw = row[col.key];
-                      const formatted = formatCellValue(raw, col);
-                      const alignClass =
-                        col.align === "right"
-                          ? "text-right"
-                          : col.align === "center"
-                            ? "text-center"
-                            : "text-left";
-                      const fontClass =
-                        col.type === "mono" ||
-                        col.type === "currency" ||
-                        col.type === "number"
-                          ? "font-mono"
-                          : "";
-                      return (
-                        <td
-                          key={col.key}
-                          className={`xl-ro px-2 py-1 truncate max-w-[340px] ${alignClass} ${fontClass} ${
-                            col.key === activeConfig.defaultSortKey
-                              ? "font-bold text-primary-800"
-                              : "text-neutral-800"
-                          }`}
-                          title={formatted}
-                        >
-                          {col.type === "badge" ? (
-                            formatted ? (
-                              <span className="inline-block px-1.5 py-0 rounded bg-neutral-100 border border-neutral-300 font-mono text-[10px] font-semibold text-neutral-700">
-                                {formatted}
-                              </span>
-                            ) : (
-                              ""
-                            )
-                          ) : query && activeConfig.searchKeys.includes(col.key) ? (
-                            <HighlightText text={formatted} query={query} />
-                          ) : (
-                            formatted
-                          )}
-                        </td>
-                      );
-                    })}
+              <>
+                {catalogGrid.topSpacerHeight > 0 && (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={activeConfig.columns.length + 1}
+                      style={{ height: catalogGrid.topSpacerHeight, padding: 0, border: 0 }}
+                    />
                   </tr>
-                );
-              })
+                )}
+                {pagedRows
+                  .slice(catalogGrid.startIndex, catalogGrid.endIndex)
+                  .map((row, sliceIdx) => {
+                    const idx = catalogGrid.startIndex + sliceIdx;
+                    const rowNo = (safePage - 1) * pageSize + idx + 1;
+                    const isActive = idx === selectedIndex;
+                    return (
+                      <tr
+                        key={`${rowNo}-${String(row[activeConfig.defaultSortKey] ?? idx)}`}
+                        data-vrow={idx}
+                        onClick={() => setSelectedIndex(idx)}
+                        className={`cursor-pointer ${isActive ? "xl-row-active" : ""}`}
+                      >
+                        <td className="xl-rowhead font-mono">{rowNo}</td>
+                        {activeConfig.columns.map((col) => {
+                          const raw = row[col.key];
+                          const formatted = formatCellValue(raw, col);
+                          const alignClass =
+                            col.align === "right"
+                              ? "text-right"
+                              : col.align === "center"
+                                ? "text-center"
+                                : "text-left";
+                          const fontClass =
+                            col.type === "mono" ||
+                            col.type === "currency" ||
+                            col.type === "number"
+                              ? "font-mono"
+                              : "";
+                          return (
+                            <td key={col.key} className="xl-cell max-w-[340px]">
+                              <ReadOnlyGridInput
+                                value={formatted}
+                                title={formatted}
+                                rowIndex={idx}
+                                onSelectRow={setSelectedIndex}
+                                onKeyDown={(e) => catalogGrid.handleCellKeyDown(e, idx)}
+                                onCopy={catalogGrid.handleCellCopy}
+                                className={`xl-input grid-cell-input ${alignClass} ${fontClass} ${
+                                  col.key === activeConfig.defaultSortKey
+                                    ? "font-bold text-primary-800"
+                                    : "text-neutral-800"
+                                }`}
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                {catalogGrid.bottomSpacerHeight > 0 && (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={activeConfig.columns.length + 1}
+                      style={{ height: catalogGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                    />
+                  </tr>
+                )}
+              </>
             )}
           </tbody>
         </table>
@@ -479,6 +500,7 @@ export const CatalogViewerPage: React.FC = () => {
             className="bg-white border border-neutral-300 rounded px-1.5 py-0.5 font-mono text-[11px] text-neutral-700"
             title="Số dòng mỗi trang"
           >
+            <option value={999999}>Tất cả (Ảo hóa)</option>
             <option value={100}>100 / trang</option>
             <option value={200}>200 / trang</option>
             <option value={500}>500 / trang</option>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { BookOpen, FileSpreadsheet, RefreshCw, Search } from "lucide-react";
 import { CashLedgerResponse } from "../../types/cashVoucher";
@@ -6,6 +6,8 @@ import { initCatalogCache, searchTaiKhoan } from "../../lib/catalogCache";
 import { formatCurrency, formatDate, getTodayDate } from "../../lib/format";
 import { Autocomplete, AutocompleteOption } from "../ui/Autocomplete";
 import { BaoCoImportModal } from "./BaoCoImportModal";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 
 const ACCOUNT_PRESETS = [
   { tk: "1111", label: "1111 · Tiền mặt VND" },
@@ -29,6 +31,21 @@ export const CashBankLedgerPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [ledger, setLedger] = useState<CashLedgerResponse | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [activeRow, setActiveRow] = useState<number>(0);
+  const ledgerScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const ledgerGrid = useVirtualExcelGrid({
+    totalRows: 1 + (ledger?.entries?.length ?? 0),
+    scrollContainerRef: ledgerScrollRef,
+    onSelectRow: setActiveRow,
+    onEnterRow: (rowIdx) => {
+      // Row 0 is opening balance; entries start at index 1
+      const entry = ledger?.entries?.[rowIdx - 1];
+      if (entry) {
+        handleOpenVoucher(entry.ma_ct, entry.stt);
+      }
+    },
+  });
 
   const fetchTkOptions = useCallback(async (q: string): Promise<AutocompleteOption[]> => {
     await initCatalogCache();
@@ -226,11 +243,15 @@ export const CashBankLedgerPage: React.FC = () => {
       </div>
 
       {/* Ledger Table */}
-      <main className="flex-1 min-h-0 overflow-auto bg-white">
-        <table className="w-full border-collapse xl-grid table-sticky-header text-xs">
+      <main
+        ref={ledgerScrollRef}
+        className="flex-1 min-h-0 overflow-auto table-sticky-header bg-white"
+      >
+        <table className="w-full dense-table border-collapse xl-grid text-xs">
           <thead>
             <tr>
-              <th className="vfp-header w-24">Ngày CT</th>
+              <th className="vfp-header w-10 text-center">#</th>
+              <th className="vfp-header w-24 text-center">Ngày CT</th>
               <th className="vfp-header w-14 text-center">Loại</th>
               <th className="vfp-header w-24">Số CT</th>
               <th className="vfp-header min-w-[180px]">Đối tượng / Khách hàng</th>
@@ -242,63 +263,245 @@ export const CashBankLedgerPage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            <tr className="bg-amber-50/60 font-semibold">
-              <td className="xl-ro px-2 font-mono text-neutral-500">—</td>
-              <td className="xl-ro px-2 text-center">—</td>
-              <td className="xl-ro px-2">—</td>
-              <td className="xl-ro px-2 text-amber-900" colSpan={3}>
-                SỐ DƯ ĐẦU KỲ ({formatDate(ngayBd)})
-              </td>
-              <td className="xl-ro px-2 text-right font-mono">—</td>
-              <td className="xl-ro px-2 text-right font-mono">—</td>
-              <td className="xl-ro px-2 text-right font-mono font-bold text-primary-900">
-                {formatCurrency(ledger?.du_dau || 0, "VND")}
-              </td>
-            </tr>
+            {ledgerGrid.topSpacerHeight > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={10}
+                  style={{ height: ledgerGrid.topSpacerHeight, padding: 0, border: 0 }}
+                />
+              </tr>
+            )}
+            {ledgerGrid.startIndex === 0 && (
+              <tr
+                data-vrow={0}
+                onClick={() => setActiveRow(0)}
+                className={activeRow === 0 ? "xl-row-active" : "xl-row-marked"}
+              >
+                <td className="xl-rowhead font-mono">—</td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value="—"
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input text-center font-mono text-neutral-500 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value="—"
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input text-center font-mono text-neutral-500 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value="—"
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input font-mono text-neutral-500 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value={`SỐ DƯ ĐẦU KỲ (${formatDate(ngayBd)})`}
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input font-semibold text-amber-900 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value=""
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value=""
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value="—"
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input text-right font-mono text-neutral-500 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value="—"
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input text-right font-mono text-neutral-500 grid-cell-input"
+                  />
+                </td>
+                <td className="xl-cell">
+                  <ReadOnlyGridInput
+                    value={formatCurrency(ledger?.du_dau || 0, "VND")}
+                    rowIndex={0}
+                    onSelectRow={setActiveRow}
+                    onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, 0)}
+                    onCopy={ledgerGrid.handleCellCopy}
+                    className="xl-input text-right font-mono font-bold text-primary-900 grid-cell-input"
+                  />
+                </td>
+              </tr>
+            )}
             {!ledger || ledger.entries.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-10 text-center text-neutral-400">
+                <td colSpan={10} className="py-10 text-center text-neutral-400">
                   {loading
                     ? "Đang truy vấn Sổ Cái..."
                     : "Không có phát sinh trong khoảng thời gian đã chọn."}
                 </td>
               </tr>
             ) : (
-              ledger.entries.map((row, idx) => {
-                const canOpen = Boolean(MA_CT_TO_ROUTE[row.ma_ct.toUpperCase()]);
-                return (
-                  <tr
-                    key={`${row.stt}-${idx}`}
-                    onDoubleClick={() => handleOpenVoucher(row.ma_ct, row.stt)}
-                    className={`${canOpen ? "cursor-pointer hover:bg-primary-50/40" : ""}`}
-                    title={canOpen ? "Click đúp để mở chứng từ gốc" : undefined}
-                  >
-                    <td className="xl-ro px-2 font-mono">{formatDate(row.ngay_ct)}</td>
-                    <td className="xl-ro px-2 text-center font-mono font-bold text-primary-800">
-                      {row.ma_ct}
-                    </td>
-                    <td className="xl-ro px-2 font-mono font-semibold">{row.so_ct}</td>
-                    <td className="xl-ro px-2 truncate max-w-[220px]" title={row.ten_dt || row.ma_dt}>
-                      {row.ten_dt || row.ma_dt}
-                    </td>
-                    <td className="xl-ro px-2 truncate max-w-[300px]" title={row.dien_giai}>
-                      {row.dien_giai}
-                    </td>
-                    <td className="xl-ro px-2 text-center font-mono text-neutral-700">
-                      {row.tk_doi_ung}
-                    </td>
-                    <td className="xl-ro px-2 text-right font-mono font-semibold text-emerald-700">
-                      {row.ps_thu > 0 ? formatCurrency(row.ps_thu, "VND") : ""}
-                    </td>
-                    <td className="xl-ro px-2 text-right font-mono font-semibold text-rose-700">
-                      {row.ps_chi > 0 ? formatCurrency(row.ps_chi, "VND") : ""}
-                    </td>
-                    <td className="xl-ro px-2 text-right font-mono font-bold text-neutral-900">
-                      {formatCurrency(row.luy_ke, "VND")}
-                    </td>
-                  </tr>
-                );
-              })
+              ledger.entries
+                .slice(
+                  Math.max(0, ledgerGrid.startIndex - 1),
+                  Math.max(0, ledgerGrid.endIndex - 1),
+                )
+                .map((row, sliceIdx) => {
+                  const idx = Math.max(0, ledgerGrid.startIndex - 1) + sliceIdx;
+                  const rowIndex = idx + 1;
+                  const canOpen = Boolean(MA_CT_TO_ROUTE[row.ma_ct.toUpperCase()]);
+                  const isRowActive = activeRow === rowIndex;
+                  return (
+                    <tr
+                      key={`${row.stt}-${idx}`}
+                      data-vrow={rowIndex}
+                      onClick={() => setActiveRow(rowIndex)}
+                      onDoubleClick={() => handleOpenVoucher(row.ma_ct, row.stt)}
+                      className={`${isRowActive ? "xl-row-active" : ""} ${canOpen ? "cursor-pointer" : ""}`}
+                      title={canOpen ? "Click đúp hoặc Enter để mở chứng từ gốc" : undefined}
+                    >
+                      <td className="xl-rowhead font-mono">{idx + 1}</td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={formatDate(row.ngay_ct)}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={row.ma_ct}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-center font-mono font-bold text-primary-800 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={row.so_ct}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input font-mono font-semibold text-primary-700 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell max-w-[220px]">
+                        <ReadOnlyGridInput
+                          value={row.ten_dt || row.ma_dt || ""}
+                          title={row.ten_dt || row.ma_dt}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-neutral-900 truncate grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell max-w-[300px]">
+                        <ReadOnlyGridInput
+                          value={row.dien_giai || ""}
+                          title={row.dien_giai}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-neutral-800 truncate grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={row.tk_doi_ung || ""}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={row.ps_thu > 0 ? formatCurrency(row.ps_thu, "VND") : ""}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-right font-mono font-semibold text-emerald-700 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={row.ps_chi > 0 ? formatCurrency(row.ps_chi, "VND") : ""}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-right font-mono font-semibold text-rose-700 grid-cell-input"
+                        />
+                      </td>
+                      <td className="xl-cell">
+                        <ReadOnlyGridInput
+                          value={formatCurrency(row.luy_ke, "VND")}
+                          rowIndex={rowIndex}
+                          onSelectRow={setActiveRow}
+                          onKeyDown={(e) => ledgerGrid.handleCellKeyDown(e, rowIndex)}
+                          onCopy={ledgerGrid.handleCellCopy}
+                          className="xl-input text-right font-mono font-bold text-neutral-900 grid-cell-input"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
+            )}
+            {ledgerGrid.bottomSpacerHeight > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={10}
+                  style={{ height: ledgerGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                />
+              </tr>
             )}
           </tbody>
         </table>

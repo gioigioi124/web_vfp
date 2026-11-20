@@ -9,6 +9,8 @@ import { CashVoucherModuleConfig } from "../../config/accountingModules";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { isModalOpen } from "../../lib/modalLock";
 import { CashDetailGrid } from "./CashDetailGrid";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useExcelGridNav } from "../ui/useExcelGridNav";
 import {
   ChevronLeft,
   ChevronRight,
@@ -147,6 +149,17 @@ export const CashVoucherList: React.FC<CashVoucherListProps> = React.memo(
     const allMarked =
       vouchers.length > 0 && vouchers.every((v) => markedStts?.has(v.stt));
 
+    const masterGridNav = useExcelGridNav({
+      onEnterRow: (idx) => {
+        const v = vouchers[idx];
+        if (v) onEditVoucher(v.stt);
+      },
+      onSpaceRow: (idx) => {
+        const v = vouchers[idx];
+        if (v) onToggleMark(v.stt);
+      },
+    });
+
     return (
       <div
         ref={rootRef}
@@ -202,18 +215,20 @@ export const CashVoucherList: React.FC<CashVoucherListProps> = React.memo(
                     </td>
                   </tr>
                 ) : (
-                  vouchers.map((v) => {
+                  vouchers.map((v, rowIdx) => {
                     const isSelected = v.stt === selectedStt;
                     const isMarked = markedStts?.has(v.stt) || false;
                     const isFlashing = v.stt === flashStt;
+                    const selectRow = () => onSelectStt(v.stt);
                     return (
                       <tr
                         key={v.stt}
                         ref={(el) => {
                           rowRefs.current[v.stt] = el;
                         }}
-                        onClick={() => onSelectStt(v.stt)}
+                        onClick={selectRow}
                         onDoubleClick={() => onEditVoucher(v.stt)}
+                        title="Nhấn đúp hoặc Enter để sửa · Space để đánh dấu"
                         className={`cursor-pointer transition-colors ${
                           isSelected
                             ? "xl-row-active"
@@ -223,62 +238,145 @@ export const CashVoucherList: React.FC<CashVoucherListProps> = React.memo(
                         } ${isFlashing ? "ring-2 ring-inset ring-emerald-500" : ""}`}
                       >
                         <td
-                          className="xl-ro text-center"
+                          className="xl-rowhead cursor-pointer"
                           onClick={(e) => {
                             e.stopPropagation();
                             onToggleMark(v.stt);
                           }}
+                          title="Nhấn để đánh dấu (Space)"
                         >
-                          <input
-                            type="checkbox"
-                            checked={isMarked}
-                            onChange={() => {}}
-                            className="w-3.5 h-3.5 accent-primary-700 cursor-pointer"
+                          <span
+                            className={`inline-block w-3 h-3 rounded border align-middle ${
+                              isMarked
+                                ? "bg-tertiary-500 border-tertiary-600"
+                                : "border-neutral-400 bg-white"
+                            }`}
                           />
                         </td>
-                        <td className="xl-ro px-1.5 text-center font-mono font-bold text-primary-800">
-                          {v.ma_ct}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.ma_ct || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-center font-mono font-bold text-primary-800 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 font-mono text-neutral-800">
-                          {formatDate(v.ngay_ct)}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={formatDate(v.ngay_ct)}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-center font-mono text-neutral-800 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 font-mono font-bold text-primary-800">
-                          {v.so_ct || "—"}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.so_ct || "—"}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input font-mono font-bold text-primary-800 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 font-mono text-neutral-700">
-                          {v.ma_dt0 || ""}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.ma_dt0 || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input font-mono text-neutral-700 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 truncate max-w-[240px]" title={v.ten_dt0}>
-                          {v.ten_dt0 || ""}
+                        <td className="xl-cell max-w-[240px]">
+                          <ReadOnlyGridInput
+                            value={v.ten_dt0 || ""}
+                            title={v.ten_dt0 || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-neutral-900 truncate grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 truncate max-w-[180px]" title={v.ong_ba}>
-                          {v.ong_ba || ""}
+                        <td className="xl-cell max-w-[180px]">
+                          <ReadOnlyGridInput
+                            value={v.ong_ba || ""}
+                            title={v.ong_ba || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-neutral-800 truncate grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 truncate max-w-[280px]" title={v.dien_giai0}>
-                          {v.dien_giai0 || ""}
+                        <td className="xl-cell max-w-[280px]">
+                          <ReadOnlyGridInput
+                            value={v.dien_giai0 || ""}
+                            title={v.dien_giai0 || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-neutral-900 truncate grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 text-center font-mono font-semibold text-emerald-800">
-                          {v.tk_chinh || ""}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.tk_chinh || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-center font-mono font-semibold text-emerald-800 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 text-center font-mono text-neutral-700">
-                          {v.tk_doi_ung || ""}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.tk_doi_ung || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 text-right font-mono font-bold text-neutral-900">
-                          {formatCurrency(v.ttien_nt0 ?? v.ttien_nt ?? 0, v.ma_tte || "VND")}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={formatCurrency(v.ttien_nt0 ?? v.ttien_nt ?? 0, v.ma_tte || "VND")}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-right font-mono font-bold text-neutral-900 grid-cell-input"
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 text-center">
-                          <span
-                            className={`inline-block px-1.5 py-0 rounded text-[10px] font-semibold ${
-                              v.posted
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.posted ? "Ghi sổ" : "Chưa GS"}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className={`xl-input text-center font-semibold grid-cell-input ${
+                              v.posted ? "text-emerald-700" : "text-amber-700"
                             }`}
-                          >
-                            {v.posted ? "Ghi sổ" : "Chưa GS"}
-                          </span>
+                          />
                         </td>
-                        <td className="xl-ro px-1.5 text-center font-mono text-neutral-600">
-                          {v.user_name || ""}
+                        <td className="xl-cell">
+                          <ReadOnlyGridInput
+                            value={v.user_name || ""}
+                            rowIndex={rowIdx}
+                            onSelectRow={selectRow}
+                            onKeyDown={(e) => masterGridNav.handleCellKeyDown(e, rowIdx)}
+                            onCopy={masterGridNav.handleCellCopy}
+                            className="xl-input text-center font-mono text-neutral-600 grid-cell-input"
+                          />
                         </td>
                       </tr>
                     );

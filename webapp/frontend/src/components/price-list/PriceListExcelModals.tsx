@@ -16,6 +16,8 @@ import {
 } from "../../types/priceList";
 import { formatCurrency, formatDate } from "../../lib/format";
 import { useModalLock } from "../../lib/modalLock";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 
 export type PriceListExcelModalMode = "import-new" | "import-update" | "delete-items";
 
@@ -84,6 +86,8 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const newPreviewScrollRef = useRef<HTMLDivElement | null>(null);
+  const updatePreviewScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [fileName, setFileName] = useState("");
   const [userName, setUserName] = useState("ADMIN");
@@ -98,6 +102,19 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
     useState<PriceListImportUpdatePreviewResponse | null>(null);
   const [deletePreview, setDeletePreview] =
     useState<PriceListDeleteItemsPreviewResponse | null>(null);
+  const [activePreviewRow, setActivePreviewRow] = useState(0);
+
+  const newPreviewGrid = useVirtualExcelGrid({
+    totalRows: newPreview?.groups.length ?? 0,
+    scrollContainerRef: newPreviewScrollRef,
+    onSelectRow: setActivePreviewRow,
+  });
+
+  const updatePreviewGrid = useVirtualExcelGrid({
+    totalRows: updatePreview?.items.length ?? 0,
+    scrollContainerRef: updatePreviewScrollRef,
+    onSelectRow: setActivePreviewRow,
+  });
 
   useModalLock(isOpen, containerRef);
 
@@ -108,6 +125,7 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
     setNewPreview(null);
     setUpdatePreview(null);
     setDeletePreview(null);
+    setActivePreviewRow(0);
     setParsing(false);
     setCommitting(false);
   }, [isOpen, mode]);
@@ -353,60 +371,128 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
                 </div>
               </div>
 
-              <div className="border border-slate-200 rounded-lg overflow-hidden max-h-[42vh] overflow-y-auto">
-                <table className="w-full text-left border-collapse text-[12px]">
-                  <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700">
+              <div
+                ref={newPreviewScrollRef}
+                className="border border-slate-200 rounded-lg overflow-auto max-h-[42vh] table-sticky-header"
+              >
+                <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+                  <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
                     <tr>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Ngày CT</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Số CT</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Đối tượng (Mã ĐT)</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Khu vực (Mã Vùng)</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200 text-right">
+                      <th className="w-10 text-center border-r border-neutral-200">#</th>
+                      <th className="w-28 text-center border-r border-neutral-200">Ngày CT</th>
+                      <th className="w-28 border-r border-neutral-200">Số CT</th>
+                      <th className="min-w-[180px] border-r border-neutral-200">Đối tượng (Mã ĐT)</th>
+                      <th className="w-28 text-center border-r border-neutral-200">Khu vực (Mã Vùng)</th>
+                      <th className="w-24 text-right border-r border-neutral-200">
                         Số mặt hàng
                       </th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">
+                      <th className="min-w-[220px]">
                         Ví dụ hàng hóa đầu tiên
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {newPreview.groups.map((grp, idx) => (
-                      <tr key={`${grp.so_ct}-${grp.ngay_ct}-${idx}`} className="hover:bg-slate-50">
-                        <td className="px-2.5 py-1.5 font-mono text-[11px]">
-                          {formatDate(grp.ngay_ct)}
-                        </td>
-                        <td className="px-2.5 py-1.5 font-semibold text-primary">
-                          {grp.so_ct}
-                        </td>
-                        <td className="px-2.5 py-1.5">
-                          {grp.ma_dt ? (
-                            <span className="font-mono font-semibold text-slate-800">
-                              {grp.ma_dt}
-                              {grp.ten_dt ? (
-                                <span className="font-sans font-normal text-slate-500 ml-1">
-                                  · {grp.ten_dt}
-                                </span>
-                              ) : null}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-2.5 py-1.5 font-mono">
-                          {grp.ma_vm || <span className="text-slate-400">—</span>}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-right font-semibold tabular-nums">
-                          {grp.items.length}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-[11px] text-slate-600 truncate max-w-[260px]">
-                          {grp.items
+                  <tbody className="divide-y divide-neutral-200 font-sans">
+                    {newPreviewGrid.topSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={7}
+                          style={{ height: newPreviewGrid.topSpacerHeight, padding: 0, border: 0 }}
+                        />
+                      </tr>
+                    )}
+                    {newPreview.groups
+                      .slice(newPreviewGrid.startIndex, newPreviewGrid.endIndex)
+                      .map((grp, sliceIdx) => {
+                        const idx = newPreviewGrid.startIndex + sliceIdx;
+                        const dtText = grp.ma_dt
+                          ? `${grp.ma_dt}${grp.ten_dt ? ` · ${grp.ten_dt}` : ""}`
+                          : "—";
+                        const sampleText =
+                          grp.items
                             .slice(0, 3)
                             .map((i) => `${i.ma_vt} (${formatCurrency(i.gia)})`)
-                            .join(", ")}
-                          {grp.items.length > 3 ? "..." : ""}
-                        </td>
+                            .join(", ") + (grp.items.length > 3 ? "..." : "");
+                        return (
+                          <tr
+                            key={`${grp.so_ct}-${grp.ngay_ct}-${idx}`}
+                            data-vrow={idx}
+                            onClick={() => setActivePreviewRow(idx)}
+                            className={idx === activePreviewRow ? "xl-row-active" : undefined}
+                          >
+                            <td className="xl-rowhead">{idx + 1}</td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={formatDate(grp.ngay_ct)}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={grp.so_ct}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input font-mono font-semibold text-primary-700 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell min-w-[180px]">
+                              <ReadOnlyGridInput
+                                value={dtText}
+                                title={dtText}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input text-neutral-900 truncate grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={grp.ma_vm || "—"}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input text-center font-mono text-neutral-800 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={String(grp.items.length)}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input text-right font-mono font-semibold text-neutral-900 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell min-w-[220px]">
+                              <ReadOnlyGridInput
+                                value={sampleText}
+                                title={sampleText}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => newPreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={newPreviewGrid.handleCellCopy}
+                                className="xl-input text-neutral-600 truncate grid-cell-input"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    {newPreviewGrid.bottomSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={7}
+                          style={{ height: newPreviewGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                        />
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -441,46 +527,110 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
                 </div>
               </div>
 
-              <div className="border border-slate-200 rounded-lg overflow-hidden max-h-[42vh] overflow-y-auto">
-                <table className="w-full text-left border-collapse text-[12px]">
-                  <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700">
+              <div
+                ref={updatePreviewScrollRef}
+                className="border border-slate-200 rounded-lg overflow-auto max-h-[42vh] table-sticky-header"
+              >
+                <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+                  <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
                     <tr>
-                      <th className="px-2.5 py-2 border-b border-slate-200 w-10">#</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Mã VT</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">Tên hàng hóa</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200">ĐVT</th>
-                      <th className="px-2.5 py-2 border-b border-slate-200 text-right">
+                      <th className="w-10 text-center border-r border-neutral-200">#</th>
+                      <th className="w-36 border-r border-neutral-200 font-mono">Mã VT</th>
+                      <th className="min-w-[220px] border-r border-neutral-200">Tên hàng hóa</th>
+                      <th className="w-20 text-center border-r border-neutral-200">ĐVT</th>
+                      <th className="w-32 text-right border-r border-neutral-200 font-mono">
                         Giá mới
                       </th>
-                      <th className="px-2.5 py-2 border-b border-slate-200 text-right">
+                      <th className="w-24 text-right font-mono">
                         % CK mới
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {updatePreview.items.slice(0, 300).map((it, idx) => (
-                      <tr key={it.ma_vt} className="hover:bg-slate-50">
-                        <td className="px-2.5 py-1.5 text-slate-400 text-[11px]">{idx + 1}</td>
-                        <td className="px-2.5 py-1.5 font-mono font-semibold text-slate-900">
-                          {it.ma_vt}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-slate-700">{it.ten_vt || "—"}</td>
-                        <td className="px-2.5 py-1.5 text-slate-500">{it.dvt || ""}</td>
-                        <td className="px-2.5 py-1.5 text-right font-semibold tabular-nums text-emerald-700">
-                          {formatCurrency(it.gia)}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-right tabular-nums text-slate-700">
-                          {it.ck}%
-                        </td>
+                  <tbody className="divide-y divide-neutral-200 font-sans">
+                    {updatePreviewGrid.topSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={6}
+                          style={{ height: updatePreviewGrid.topSpacerHeight, padding: 0, border: 0 }}
+                        />
                       </tr>
-                    ))}
+                    )}
+                    {updatePreview.items
+                      .slice(updatePreviewGrid.startIndex, updatePreviewGrid.endIndex)
+                      .map((it, sliceIdx) => {
+                        const idx = updatePreviewGrid.startIndex + sliceIdx;
+                        return (
+                          <tr
+                            key={it.ma_vt}
+                            data-vrow={idx}
+                            onClick={() => setActivePreviewRow(idx)}
+                            className={idx === activePreviewRow ? "xl-row-active" : undefined}
+                          >
+                            <td className="xl-rowhead">{idx + 1}</td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={it.ma_vt}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => updatePreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={updatePreviewGrid.handleCellCopy}
+                                className="xl-input font-mono font-semibold text-primary-800 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell min-w-[220px]">
+                              <ReadOnlyGridInput
+                                value={it.ten_vt || "—"}
+                                title={it.ten_vt || ""}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => updatePreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={updatePreviewGrid.handleCellCopy}
+                                className="xl-input text-neutral-800 truncate grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={it.dvt || ""}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => updatePreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={updatePreviewGrid.handleCellCopy}
+                                className="xl-input text-center text-neutral-600 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={formatCurrency(it.gia)}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => updatePreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={updatePreviewGrid.handleCellCopy}
+                                className="xl-input text-right font-mono font-semibold text-emerald-700 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={`${it.ck}%`}
+                                rowIndex={idx}
+                                onSelectRow={setActivePreviewRow}
+                                onKeyDown={(e) => updatePreviewGrid.handleCellKeyDown(e, idx)}
+                                onCopy={updatePreviewGrid.handleCellCopy}
+                                className="xl-input text-right font-mono text-neutral-700 grid-cell-input"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    {updatePreviewGrid.bottomSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={6}
+                          style={{ height: updatePreviewGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                        />
+                      </tr>
+                    )}
                   </tbody>
                 </table>
-                {updatePreview.items.length > 300 && (
-                  <div className="px-3 py-2 text-[11px] text-slate-500 bg-slate-50 border-t border-slate-200">
-                    Đang hiển thị 300 / {updatePreview.items.length} mặt hàng...
-                  </div>
-                )}
               </div>
             </div>
           )}

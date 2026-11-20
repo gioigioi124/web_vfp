@@ -21,7 +21,8 @@ import {
   PriceListHeader,
 } from "../../types/priceList";
 import { formatCurrency, formatDate, getTodayDate } from "../../lib/format";
-import { HighlightText } from "../ui/HighlightText";
+import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
+import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 import {
   PriceListExcelModal,
   PriceListExcelModalMode,
@@ -54,12 +55,15 @@ export const PriceListWorkspace: React.FC = () => {
   const [activeItems, setActiveItems] = useState<PriceListDetailItem[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailSearch, setDetailSearch] = useState("");
+  const [activeDetailRow, setActiveDetailRow] = useState(0);
 
   const [sortKey, setSortKey] = useState<SortKey>("so_ct");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
-  // Draggable split height ratio (%)
+  // Draggable split height ratio (%) & virtualized scroll containers
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const masterScrollRef = useRef<HTMLDivElement | null>(null);
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
   const [topPct, setTopPct] = useState(52);
   const [draggingSplit, setDraggingSplit] = useState(false);
 
@@ -269,6 +273,33 @@ export const PriceListWorkspace: React.FC = () => {
       return next;
     });
   };
+
+  useEffect(() => {
+    setActiveDetailRow(0);
+  }, [activeStt, detailSearch]);
+
+  const masterGrid = useVirtualExcelGrid({
+    totalRows: filteredHeaders.length,
+    scrollContainerRef: masterScrollRef,
+    onSelectRow: (idx) => {
+      const h = filteredHeaders[idx];
+      if (h) setActiveStt(h.stt);
+    },
+    onEnterRow: (idx) => {
+      const h = filteredHeaders[idx];
+      if (h) setFormModal({ open: true, stt: h.stt });
+    },
+    onSpaceRow: (idx) => {
+      const h = filteredHeaders[idx];
+      if (h) toggleRowCheck(h.stt);
+    },
+  });
+
+  const detailGrid = useVirtualExcelGrid({
+    totalRows: filteredDetailItems.length,
+    scrollContainerRef: detailScrollRef,
+    onSelectRow: setActiveDetailRow,
+  });
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -681,23 +712,28 @@ export const PriceListWorkspace: React.FC = () => {
       <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Top Pane: BG Headers */}
         <div
+          ref={masterScrollRef}
           style={{ height: `${topPct}%` }}
-          className="min-h-[140px] overflow-auto bg-white border-b border-slate-200"
+          className="min-h-[140px] overflow-auto table-sticky-header bg-white border-b border-slate-200"
         >
-          <table className="w-full text-left border-collapse text-[12px]">
-            <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700 border-b border-slate-200">
+          <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+            <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
               <tr>
-                <th className="w-9 px-2.5 py-2 text-center">
+                <th
+                  className="w-9 text-center border-r border-neutral-200"
+                  scope="col"
+                  title="Chọn tất cả dòng đang lọc (Space để đánh dấu từng dòng)"
+                >
                   <input
                     type="checkbox"
                     checked={allFilteredChecked}
                     onChange={toggleAllFiltered}
-                    title="Chọn tất cả dòng đang lọc"
+                    className="w-3.5 h-3.5 accent-tertiary-600 cursor-pointer align-middle"
                   />
                 </th>
                 <th
                   onClick={() => toggleSort("so_ct")}
-                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                  className="border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     Số CT {renderSortIcon("so_ct")}
@@ -705,16 +741,16 @@ export const PriceListWorkspace: React.FC = () => {
                 </th>
                 <th
                   onClick={() => toggleSort("ngay_ct")}
-                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                  className="w-28 text-center border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     Ngày CT {renderSortIcon("ngay_ct")}
                   </span>
                 </th>
-                <th className="px-2.5 py-2">Hết hạn (CT2)</th>
+                <th className="w-28 text-center border-r border-neutral-200">Hết hạn (CT2)</th>
                 <th
                   onClick={() => toggleSort("ma_dt")}
-                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                  className="min-w-[220px] border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     Khách hàng (Mã ĐT) {renderSortIcon("ma_dt")}
@@ -722,7 +758,7 @@ export const PriceListWorkspace: React.FC = () => {
                 </th>
                 <th
                   onClick={() => toggleSort("ma_vm")}
-                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                  className="w-28 text-center border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     Khu vực {renderSortIcon("ma_vm")}
@@ -730,7 +766,7 @@ export const PriceListWorkspace: React.FC = () => {
                 </th>
                 <th
                   onClick={() => toggleSort("item_count")}
-                  className="px-2.5 py-2 text-right cursor-pointer select-none hover:bg-slate-200/60"
+                  className="w-24 text-right border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     Số HH {renderSortIcon("item_count")}
@@ -738,17 +774,17 @@ export const PriceListWorkspace: React.FC = () => {
                 </th>
                 <th
                   onClick={() => toggleSort("user_name")}
-                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                  className="w-24 text-center border-r border-neutral-200 cursor-pointer select-none hover:bg-neutral-200/70"
                 >
                   <span className="inline-flex items-center gap-1">
                     User {renderSortIcon("user_name")}
                   </span>
                 </th>
-                <th className="px-2.5 py-2">Trạng thái</th>
-                <th className="px-2.5 py-2 text-right w-20">Thao tác</th>
+                <th className="w-28 text-center border-r border-neutral-200">Trạng thái</th>
+                <th className="text-center w-20">Thao tác</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-neutral-200 font-sans">
               {loadingList && headers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-10 text-center text-slate-400">
@@ -762,112 +798,186 @@ export const PriceListWorkspace: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredHeaders.map((h) => {
-                  const isActive = h.stt === activeStt;
-                  const isChecked = checkedStts.has(h.stt);
-                  const isClosed = h.closed === "1";
-                  const isExpired = Boolean(h.ngay_ct2 && h.ngay_ct2 < today);
-                  return (
-                    <tr
-                      key={h.stt}
-                      onClick={() => setActiveStt(h.stt)}
-                      className={`cursor-pointer transition-colors ${
-                        isActive
-                          ? "bg-sky-50/90"
-                          : isChecked
-                            ? "bg-emerald-50/40 hover:bg-slate-50"
-                            : "hover:bg-slate-50"
-                      }`}
-                    >
+                <>
+                  {masterGrid.topSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
                       <td
-                        className="px-2.5 py-1.5 text-center"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleRowCheck(h.stt)}
-                        />
-                      </td>
-                      <td className="px-2.5 py-1.5 font-semibold text-primary">
-                        {h.so_ct || <span className="text-slate-400 italic">(Trống)</span>}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-[11px]">
-                        {formatDate(h.ngay_ct)}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-[11px] text-slate-500">
-                        {h.ngay_ct2 ? formatDate(h.ngay_ct2) : "—"}
-                      </td>
-                      <td className="px-2.5 py-1.5 max-w-[260px] truncate">
-                        {h.ma_dt ? (
-                          <span>
-                            <span className="font-mono font-semibold text-slate-900">
-                              {h.ma_dt}
-                            </span>
-                            {h.ten_dt ? (
-                              <span className="text-slate-500 ml-1.5">· {h.ten_dt}</span>
-                            ) : null}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono">
-                        {h.ma_vm ? (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] font-semibold">
-                            {h.ma_vm}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right font-semibold tabular-nums">
-                        {h.item_count}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-[11px] text-slate-600">
-                        {h.user_name}
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        {isClosed ? (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10.5px] font-semibold">
-                            Đã đóng
-                          </span>
-                        ) : isExpired ? (
-                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10.5px] font-semibold">
-                            Hết hạn
-                          </span>
-                        ) : (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10.5px] font-semibold">
-                            Đang áp dụng
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        className="px-2.5 py-1.5 text-right"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setFormModal({ open: true, stt: h.stt })}
-                            className="p-1 rounded text-slate-500 hover:text-primary hover:bg-primary/10"
-                            title="Sửa bảng giá"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteOne(h)}
-                            className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50"
-                            title="Xóa bảng giá"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                        colSpan={10}
+                        style={{ height: masterGrid.topSpacerHeight, padding: 0, border: 0 }}
+                      />
                     </tr>
-                  );
-                })
+                  )}
+                  {filteredHeaders
+                    .slice(masterGrid.startIndex, masterGrid.endIndex)
+                    .map((h, sliceIdx) => {
+                      const rowIdx = masterGrid.startIndex + sliceIdx;
+                      const isActive = h.stt === activeStt;
+                      const isChecked = checkedStts.has(h.stt);
+                      const isClosed = h.closed === "1";
+                      const isExpired = Boolean(h.ngay_ct2 && h.ngay_ct2 < today);
+                      const statusLabel = isClosed
+                        ? "Đã đóng"
+                        : isExpired
+                          ? "Hết hạn"
+                          : "Đang áp dụng";
+                      const customerText = h.ma_dt
+                        ? `${h.ma_dt}${h.ten_dt ? ` · ${h.ten_dt}` : ""}`
+                        : "—";
+                      const selectMasterRow = () => setActiveStt(h.stt);
+
+                      return (
+                        <tr
+                          key={h.stt}
+                          data-vrow={rowIdx}
+                          onClick={selectMasterRow}
+                          onDoubleClick={() => setFormModal({ open: true, stt: h.stt })}
+                          title="Nhấn đúp hoặc Enter để sửa bảng giá · Space để đánh dấu"
+                          className={
+                            isActive
+                              ? "xl-row-active"
+                              : isChecked
+                                ? "xl-row-marked"
+                                : undefined
+                          }
+                        >
+                          <td
+                            className="xl-rowhead cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowCheck(h.stt);
+                            }}
+                            title="Nhấn để đánh dấu (Space)"
+                          >
+                            <span
+                              className={`inline-block w-3 h-3 rounded border align-middle ${
+                                isChecked
+                                  ? "bg-tertiary-500 border-tertiary-600"
+                                  : "border-neutral-400 bg-white"
+                              }`}
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={h.so_ct || "(Trống)"}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input font-mono font-semibold text-primary-700 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={formatDate(h.ngay_ct)}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-center font-mono text-neutral-700 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={h.ngay_ct2 ? formatDate(h.ngay_ct2) : "—"}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-center font-mono text-neutral-500 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell min-w-[220px]">
+                            <ReadOnlyGridInput
+                              value={customerText}
+                              title={customerText}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-neutral-900 truncate grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={h.ma_vm || "—"}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-center font-mono font-semibold text-neutral-800 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={String(h.item_count ?? 0)}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-right font-mono font-semibold text-neutral-900 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={h.user_name || ""}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className="xl-input text-center font-mono text-neutral-600 grid-cell-input"
+                            />
+                          </td>
+                          <td className="xl-cell">
+                            <ReadOnlyGridInput
+                              value={statusLabel}
+                              rowIndex={rowIdx}
+                              onSelectRow={selectMasterRow}
+                              onKeyDown={(e) => masterGrid.handleCellKeyDown(e, rowIdx)}
+                              onCopy={masterGrid.handleCellCopy}
+                              className={`xl-input text-center font-semibold grid-cell-input ${
+                                isClosed
+                                  ? "text-slate-600"
+                                  : isExpired
+                                    ? "text-amber-700"
+                                    : "text-emerald-700"
+                              }`}
+                            />
+                          </td>
+                          <td
+                            className="xl-ro px-1.5 text-center"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setFormModal({ open: true, stt: h.stt })}
+                                className="p-1 rounded text-slate-500 hover:text-primary hover:bg-primary/10"
+                                title="Sửa bảng giá"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteOne(h)}
+                                className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+                                title="Xóa bảng giá"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {masterGrid.bottomSpacerHeight > 0 && (
+                    <tr aria-hidden="true">
+                      <td
+                        colSpan={10}
+                        style={{ height: masterGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                      />
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>
@@ -929,19 +1039,19 @@ export const PriceListWorkspace: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto">
-            <table className="w-full text-left border-collapse text-[12px]">
-              <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700 border-b border-slate-200">
+          <div ref={detailScrollRef} className="flex-1 overflow-auto table-sticky-header">
+            <table className="w-full text-left dense-table border-collapse text-[12px] xl-grid">
+              <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
                 <tr>
-                  <th className="w-12 px-3 py-1.5 text-center">#</th>
-                  <th className="w-40 px-3 py-1.5">Mã vật tư</th>
-                  <th className="px-3 py-1.5">Tên hàng hóa</th>
-                  <th className="w-24 px-3 py-1.5 text-center">ĐVT</th>
-                  <th className="w-36 px-3 py-1.5 text-right">Đơn giá</th>
-                  <th className="w-24 px-3 py-1.5 text-right">% Chiết khấu</th>
+                  <th className="w-10 text-center border-r border-neutral-200">#</th>
+                  <th className="w-40 border-r border-neutral-200 font-mono">Mã vật tư</th>
+                  <th className="min-w-[260px] border-r border-neutral-200">Tên hàng hóa</th>
+                  <th className="w-20 text-center border-r border-neutral-200">ĐVT</th>
+                  <th className="w-36 text-right border-r border-neutral-200 font-mono">Đơn giá</th>
+                  <th className="w-28 text-right font-mono">% Chiết khấu</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-neutral-200 font-sans">
                 {loadingDetail ? (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400">
@@ -961,28 +1071,91 @@ export const PriceListWorkspace: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredDetailItems.map((it, idx) => (
-                    <tr key={`${it.ma_vt}-${idx}`} className="hover:bg-slate-50">
-                      <td className="px-3 py-1.5 text-center text-[11px] text-slate-400">
-                        {idx + 1}
-                      </td>
-                      <td className="px-3 py-1.5 font-mono font-semibold text-slate-900">
-                        <HighlightText text={it.ma_vt} query={detailSearch} />
-                      </td>
-                      <td className="px-3 py-1.5 text-slate-700">
-                        <HighlightText text={it.ten_vt || "—"} query={detailSearch} />
-                      </td>
-                      <td className="px-3 py-1.5 text-center text-slate-500">
-                        {it.dvt || ""}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-emerald-700">
-                        {formatCurrency(it.gia)}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">
-                        {it.ck ? `${it.ck}%` : "0%"}
-                      </td>
-                    </tr>
-                  ))
+                  <>
+                    {detailGrid.topSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={6}
+                          style={{ height: detailGrid.topSpacerHeight, padding: 0, border: 0 }}
+                        />
+                      </tr>
+                    )}
+                    {filteredDetailItems
+                      .slice(detailGrid.startIndex, detailGrid.endIndex)
+                      .map((it, sliceIdx) => {
+                        const idx = detailGrid.startIndex + sliceIdx;
+                        const isRowActive = idx === activeDetailRow;
+                        return (
+                          <tr
+                            key={`${it.ma_vt}-${idx}`}
+                            data-vrow={idx}
+                            onClick={() => setActiveDetailRow(idx)}
+                            className={isRowActive ? "xl-row-active" : undefined}
+                          >
+                            <td className="xl-rowhead">{idx + 1}</td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={it.ma_vt || ""}
+                                rowIndex={idx}
+                                onSelectRow={setActiveDetailRow}
+                                onKeyDown={(e) => detailGrid.handleCellKeyDown(e, idx)}
+                                onCopy={detailGrid.handleCellCopy}
+                                className="xl-input font-mono font-semibold text-primary-800 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell min-w-[260px]">
+                              <ReadOnlyGridInput
+                                value={it.ten_vt || ""}
+                                title={it.ten_vt || ""}
+                                rowIndex={idx}
+                                onSelectRow={setActiveDetailRow}
+                                onKeyDown={(e) => detailGrid.handleCellKeyDown(e, idx)}
+                                onCopy={detailGrid.handleCellCopy}
+                                className="xl-input text-neutral-900 truncate grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={it.dvt || ""}
+                                rowIndex={idx}
+                                onSelectRow={setActiveDetailRow}
+                                onKeyDown={(e) => detailGrid.handleCellKeyDown(e, idx)}
+                                onCopy={detailGrid.handleCellCopy}
+                                className="xl-input text-center text-neutral-600 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={formatCurrency(it.gia)}
+                                rowIndex={idx}
+                                onSelectRow={setActiveDetailRow}
+                                onKeyDown={(e) => detailGrid.handleCellKeyDown(e, idx)}
+                                onCopy={detailGrid.handleCellCopy}
+                                className="xl-input text-right font-mono font-semibold text-emerald-700 grid-cell-input"
+                              />
+                            </td>
+                            <td className="xl-cell">
+                              <ReadOnlyGridInput
+                                value={it.ck ? `${it.ck}%` : "0%"}
+                                rowIndex={idx}
+                                onSelectRow={setActiveDetailRow}
+                                onKeyDown={(e) => detailGrid.handleCellKeyDown(e, idx)}
+                                onCopy={detailGrid.handleCellCopy}
+                                className="xl-input text-right font-mono text-neutral-700 grid-cell-input"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    {detailGrid.bottomSpacerHeight > 0 && (
+                      <tr aria-hidden="true">
+                        <td
+                          colSpan={6}
+                          style={{ height: detailGrid.bottomSpacerHeight, padding: 0, border: 0 }}
+                        />
+                      </tr>
+                    )}
+                  </>
                 )}
               </tbody>
             </table>
