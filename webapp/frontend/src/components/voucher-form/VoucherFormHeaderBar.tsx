@@ -10,7 +10,7 @@ import {
 import { CURRENT_USER, VoucherDraftPayload } from "./types";
 
 export interface VoucherFormHeaderBarProps {
-  isWarehouse: boolean;
+  isWarehouse?: boolean;
   isReturn?: boolean;
   isCreate: boolean;
   isEdit: boolean;
@@ -20,8 +20,12 @@ export interface VoucherFormHeaderBarProps {
   voucherCreator: string;
   voucherStt?: string;
   maDt: string;
-  pendingDraft: VoucherDraftPayload | null;
+  pendingDraft: { savedAt: number; items: any[] } | null;
+  draftItemCount?: number;
   errorMessage: string | null;
+  customTitle?: string;
+  customSubtitle?: string;
+  headerClassName?: string;
   onPrint?: () => void;
   onViewDebt?: (maDt: string) => void;
   onRequestClose: () => void;
@@ -31,7 +35,7 @@ export interface VoucherFormHeaderBarProps {
 }
 
 export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
-  isWarehouse,
+  isWarehouse = false,
   isReturn = false,
   isCreate,
   isEdit,
@@ -42,7 +46,11 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
   voucherStt,
   maDt,
   pendingDraft,
+  draftItemCount,
   errorMessage,
+  customTitle,
+  customSubtitle,
+  headerClassName,
   onPrint,
   onViewDebt,
   onRequestClose,
@@ -51,14 +59,15 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
   onClearError,
 }) => (
   <>
-    {/* ===== Window Header (navy / emerald for warehouse / amber for N5 return) ===== */}
+    {/* ===== Window Header (navy / emerald / amber / custom) ===== */}
     <header
       className={`${
-        isWarehouse
+        headerClassName ||
+        (isWarehouse
           ? "bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-900 border-emerald-950"
           : isReturn
             ? "bg-gradient-to-r from-amber-900 via-amber-800 to-amber-900 border-amber-950"
-            : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900"
+            : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900")
       } text-white px-4 py-2 flex items-center justify-between shadow-md shrink-0 border-b`}
     >
       <div className="flex items-center gap-3">
@@ -67,38 +76,40 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <span className="font-bold text-sm tracking-wide uppercase text-white">
-            {isWarehouse
-              ? isReturn
-                ? isCreate
-                  ? "Thêm Mới Phiếu Nhập Lại Kho (N5)"
-                  : isEdit
-                    ? "Sửa Phiếu Nhập Lại Kho (N5)"
-                    : "Xem Phiếu Nhập Lại Kho (N5)"
-                : isCreate
-                  ? "Thêm Mới Phiếu Xuất Kho"
-                  : isEdit
-                    ? "Sửa Phiếu Xuất Kho"
-                    : "Xem Phiếu Xuất Kho"
-              : isReturn
-                ? isCreate
-                  ? "Thêm Mới Phiếu Nhập Lại (N5)"
-                  : isEdit
-                    ? "Sửa Phiếu Nhập Lại (N5)"
-                    : "Xem Phiếu Nhập Lại (N5)"
-                : isCreate
-                  ? "Thêm Mới Chứng Từ"
-                  : isEdit
-                    ? "Sửa Chứng Từ"
-                    : "Xem Chứng Từ"}
+            {customTitle ||
+              (isWarehouse
+                ? isReturn
+                  ? isCreate
+                    ? "Thêm Mới Phiếu Nhập Lại Kho (N5)"
+                    : isEdit
+                      ? "Sửa Phiếu Nhập Lại Kho (N5)"
+                      : "Xem Phiếu Nhập Lại Kho (N5)"
+                  : isCreate
+                    ? "Thêm Mới Phiếu Xuất Kho"
+                    : isEdit
+                      ? "Sửa Phiếu Xuất Kho"
+                      : "Xem Phiếu Xuất Kho"
+                : isReturn
+                  ? isCreate
+                    ? "Thêm Mới Phiếu Nhập Lại (N5)"
+                    : isEdit
+                      ? "Sửa Phiếu Nhập Lại (N5)"
+                      : "Xem Phiếu Nhập Lại (N5)"
+                  : isCreate
+                    ? "Thêm Mới Chứng Từ"
+                    : isEdit
+                      ? "Sửa Chứng Từ"
+                      : "Xem Chứng Từ")}
           </span>
-          <span className="text-primary-200 text-xs font-normal">
-            {isWarehouse
-              ? isReturn
-                ? "/ Phiếu nhập lại kho (N5)"
-                : "/ Phiếu xuất kho"
-              : isReturn
-                ? "/ Hàng bán bị trả lại (N5)"
-                : "/ Bán hàng công nợ"}
+          <span className="text-white/75 text-xs font-normal">
+            {customSubtitle ||
+              (isWarehouse
+                ? isReturn
+                  ? "/ Phiếu nhập lại kho (N5)"
+                  : "/ Phiếu xuất kho"
+                : isReturn
+                  ? "/ Hàng bán bị trả lại (N5)"
+                  : "/ Bán hàng công nợ")}
           </span>
           <span
             className={`ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
@@ -128,7 +139,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
 
       <div className="flex items-center gap-4 text-xs">
         <div className="flex items-center gap-1.5">
-          <span className="text-primary-200">Người lập:</span>
+          <span className="text-white/75">Người lập:</span>
           <span
             className={`font-semibold px-2 py-0.5 rounded border ${
               isDifferentCreator && hasVoucher
@@ -151,7 +162,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
         <div className="flex items-center gap-1 pl-2 border-l border-white/20">
           {!isWarehouse && voucherStt && onPrint && (
             <button
-              className="p-1 px-2 text-primary-200 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+              className="p-1 px-2 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
               title="In phiếu (F7)"
               onClick={onPrint}
               type="button"
@@ -161,7 +172,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
           )}
           {!isWarehouse && maDt && onViewDebt && (
             <button
-              className="p-1 px-2 text-primary-200 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+              className="p-1 px-2 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
               title="Chi tiết công nợ"
               onClick={() => onViewDebt(maDt)}
               type="button"
@@ -196,8 +207,10 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
               })}
             </b>{" "}
             (
-            {pendingDraft.items.filter((it) => Boolean(it.ma_vt?.trim())).length}{" "}
-            dòng hàng).
+            {draftItemCount ??
+              pendingDraft.items.filter((it) => Boolean(it?.ma_vt?.trim()))
+                .length}{" "}
+            dòng).
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

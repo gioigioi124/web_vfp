@@ -2,26 +2,26 @@ import React, { useCallback, useRef, useState } from "react";
 import { VoucherDetail } from "../../types/voucher";
 import { MAX_UNDO_STEPS } from "./types";
 
-interface UseVoucherHistoryParams {
-  itemsLatestRef: React.MutableRefObject<VoucherDetail[]>;
-  setItems: React.Dispatch<React.SetStateAction<VoucherDetail[]>>;
+interface UseVoucherHistoryParams<T extends object = VoucherDetail> {
+  itemsLatestRef: React.MutableRefObject<T[]>;
+  setItems: React.Dispatch<React.SetStateAction<T[]>>;
   setActiveRowIndex: React.Dispatch<React.SetStateAction<number>>;
 }
 
-export function useVoucherHistory({
+export function useVoucherHistory<T extends object = VoucherDetail>({
   itemsLatestRef,
   setItems,
   setActiveRowIndex,
-}: UseVoucherHistoryParams) {
-  // Undo/Redo history stacks (tối đa 20 bước cho lưới chi tiết hàng hóa)
-  const undoStackRef = useRef<VoucherDetail[][]>([]);
-  const redoStackRef = useRef<VoucherDetail[][]>([]);
+}: UseVoucherHistoryParams<T>) {
+  // Undo/Redo history stacks (tối đa 20 bước cho lưới chi tiết)
+  const undoStackRef = useRef<T[][]>([]);
+  const redoStackRef = useRef<T[][]>([]);
   const [historyCounts, setHistoryCounts] = useState<{
     undo: number;
     redo: number;
   }>({ undo: 0, redo: 0 });
 
-  const pushUndoSnapshot = useCallback((prevItems: VoucherDetail[]) => {
+  const pushUndoSnapshot = useCallback((prevItems: T[]) => {
     const cloned = prevItems.map((row) => ({ ...row }));
     const nextUndo = [...undoStackRef.current, cloned];
     if (nextUndo.length > MAX_UNDO_STEPS) {

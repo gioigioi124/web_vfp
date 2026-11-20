@@ -21,6 +21,8 @@ interface FilterDialogProps {
   onClose: () => void;
   filters: VoucherFilterParams;
   onApply: (newFilters: VoucherFilterParams) => void;
+  hideItemFilters?: boolean;
+  customTitle?: string;
 }
 
 /**
@@ -37,6 +39,8 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
   onClose,
   filters,
   onApply,
+  hideItemFilters = false,
+  customTitle,
 }) => {
   const [form, setForm] = useState<VoucherFilterParams>({ ...filters });
   const formRef = useRef<VoucherFilterParams>({ ...filters });
@@ -374,7 +378,7 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
           <div className="flex items-center gap-2 text-white">
             <Filter className="w-4 h-4" />
             <span className="text-xs font-bold tracking-wide uppercase">
-              Tìm kiếm đơn hàng (F9)
+              {customTitle || "Tìm kiếm đơn hàng (F9)"}
             </span>
           </div>
           <button
@@ -592,191 +596,196 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
             </div>
           </div>
 
-          {/* Row 3: Kho hàng (mặc định disable, tick mới bật) */}
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={enableKho}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    enableKhoRef.current = checked;
-                    setEnableKho(checked);
-                    if (checked) {
-                      window.setTimeout(
-                        () => focusControl(maKhoRef.current),
-                        0,
-                      );
-                    } else {
-                      handleChange("ma_kho", "");
-                      setTenKho("");
-                    }
-                  }}
-                  className="w-3.5 h-3.5 accent-primary-700 cursor-pointer"
-                />
-                <span>Lọc theo kho hàng:</span>
-              </label>
-              <span className="text-[11px] text-neutral-400">
-                {enableKho ? "Gõ mã hoặc tên kho" : "Tích để lọc theo kho"}
-              </span>
-            </div>
-            <div className="grid grid-cols-12 gap-1.5">
-              <div className="col-span-5">
-                <Autocomplete
-                  inputRef={maKhoRef}
-                  disabled={!enableKho}
-                  selectOnFocus
-                  openOnTypeOnly
-                  debounceMs={30}
-                  maxResults={30}
-                  dropdownMinWidth={420}
-                  placeholder="Nhập mã / tên kho..."
-                  value={form.ma_kho || ""}
-                  fetcher={fetchKhoOptionsLocal}
-                  className={`h-8 font-mono font-bold uppercase ${
-                    enableKho
-                      ? "text-primary-800"
-                      : "cursor-not-allowed opacity-75"
-                  }`}
-                  onChange={(v) => {
-                    handleChange("ma_kho", v);
-                    if (!v.trim()) setTenKho("");
-                  }}
-                  onSelect={(opt) => {
-                    handleChange("ma_kho", opt.value);
-                    setTenKho(opt.hint || "");
-                    window.setTimeout(() => {
-                      if (maKhoRef.current) focusRelative(maKhoRef.current, 1);
-                    }, 0);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
-                      if (e.defaultPrevented) return;
-                      e.preventDefault();
-                      const el = e.currentTarget;
-                      const raw = el.value;
-                      void resolveKhoValue(raw).then((res) => {
-                        handleChange("ma_kho", res.code);
-                        setTenKho(res.name);
-                        focusRelative(el, 1);
-                      });
-                      return;
-                    }
-                    handleFieldArrowNav(e);
-                  }}
-                />
+          {/* Row 3 & 4: Kho hàng & Mã hàng hóa (ẩn khi lọc chứng từ tiền/kế toán) */}
+          {!hideItemFilters && (
+            <>
+              {/* Row 3: Kho hàng (mặc định disable, tick mới bật) */}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={enableKho}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        enableKhoRef.current = checked;
+                        setEnableKho(checked);
+                        if (checked) {
+                          window.setTimeout(
+                            () => focusControl(maKhoRef.current),
+                            0,
+                          );
+                        } else {
+                          handleChange("ma_kho", "");
+                          setTenKho("");
+                        }
+                      }}
+                      className="w-3.5 h-3.5 accent-primary-700 cursor-pointer"
+                    />
+                    <span>Lọc theo kho hàng:</span>
+                  </label>
+                  <span className="text-[11px] text-neutral-400">
+                    {enableKho ? "Gõ mã hoặc tên kho" : "Tích để lọc theo kho"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-12 gap-1.5">
+                  <div className="col-span-5">
+                    <Autocomplete
+                      inputRef={maKhoRef}
+                      disabled={!enableKho}
+                      selectOnFocus
+                      openOnTypeOnly
+                      debounceMs={30}
+                      maxResults={30}
+                      dropdownMinWidth={420}
+                      placeholder="Nhập mã / tên kho..."
+                      value={form.ma_kho || ""}
+                      fetcher={fetchKhoOptionsLocal}
+                      className={`h-8 font-mono font-bold uppercase ${
+                        enableKho
+                          ? "text-primary-800"
+                          : "cursor-not-allowed opacity-75"
+                      }`}
+                      onChange={(v) => {
+                        handleChange("ma_kho", v);
+                        if (!v.trim()) setTenKho("");
+                      }}
+                      onSelect={(opt) => {
+                        handleChange("ma_kho", opt.value);
+                        setTenKho(opt.hint || "");
+                        window.setTimeout(() => {
+                          if (maKhoRef.current) focusRelative(maKhoRef.current, 1);
+                        }, 0);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                          if (e.defaultPrevented) return;
+                          e.preventDefault();
+                          const el = e.currentTarget;
+                          const raw = el.value;
+                          void resolveKhoValue(raw).then((res) => {
+                            handleChange("ma_kho", res.code);
+                            setTenKho(res.name);
+                            focusRelative(el, 1);
+                          });
+                          return;
+                        }
+                        handleFieldArrowNav(e);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-7">
+                    <input
+                      type="text"
+                      readOnly
+                      disabled={!enableKho}
+                      tabIndex={-1}
+                      value={tenKho}
+                      title={tenKho}
+                      placeholder="Tên kho hàng"
+                      className={`erp-input w-full h-8 bg-neutral-100 text-neutral-700 border-neutral-200 truncate ${
+                        enableKho ? "cursor-text select-text" : "cursor-not-allowed opacity-75"
+                      }`}
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="col-span-7">
-                <input
-                  type="text"
-                  readOnly
-                  disabled={!enableKho}
-                  tabIndex={-1}
-                  value={tenKho}
-                  title={tenKho}
-                  placeholder="Tên kho hàng"
-                  className={`erp-input w-full h-8 bg-neutral-100 text-neutral-700 border-neutral-200 truncate ${
-                    enableKho ? "cursor-text select-text" : "cursor-not-allowed opacity-75"
-                  }`}
-                />
-              </div>
-            </div>
-          </div>
 
-          {/* Row 4: Mã hàng hóa (mặc định disable, tick mới bật) */}
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={enableVt}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    enableVtRef.current = checked;
-                    setEnableVt(checked);
-                    if (checked) {
-                      window.setTimeout(
-                        () => focusControl(maVtRef.current),
-                        0,
-                      );
-                    } else {
-                      handleChange("ma_vt", "");
-                      setTenVt("");
-                    }
-                  }}
-                  className="w-3.5 h-3.5 accent-primary-700 cursor-pointer"
-                />
-                <span>Lọc theo mã hàng hóa:</span>
-              </label>
-              <span className="text-[11px] text-neutral-400">
-                {enableVt
-                  ? "Gõ mã hoặc tên để chọn"
-                  : "Tích để lọc theo hàng hóa"}
-              </span>
-            </div>
-            <div className="grid grid-cols-12 gap-1.5">
-              <div className="col-span-5">
-                <Autocomplete
-                  inputRef={maVtRef}
-                  disabled={!enableVt}
-                  selectOnFocus
-                  openOnTypeOnly
-                  debounceMs={30}
-                  maxResults={30}
-                  dropdownMinWidth={560}
-                  placeholder="Nhập mã / tên hàng..."
-                  value={form.ma_vt || ""}
-                  fetcher={fetchVatTuOptionsLocal}
-                  className={`h-8 font-mono font-bold uppercase ${
-                    enableVt
-                      ? "text-primary-800"
-                      : "cursor-not-allowed opacity-75"
-                  }`}
-                  onChange={(v) => {
-                    handleChange("ma_vt", v);
-                    if (!v.trim()) setTenVt("");
-                  }}
-                  onSelect={(opt) => {
-                    handleChange("ma_vt", opt.value);
-                    setTenVt(opt.hint || "");
-                    window.setTimeout(
-                      () => focusControl(submitBtnRef.current),
-                      0,
-                    );
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
-                      if (e.defaultPrevented) return;
-                      e.preventDefault();
-                      const raw = e.currentTarget.value;
-                      void resolveProductValue(raw).then((res) => {
-                        handleChange("ma_vt", res.code);
-                        setTenVt(res.name);
-                        focusControl(submitBtnRef.current);
-                      });
-                      return;
-                    }
-                    handleFieldArrowNav(e);
-                  }}
-                />
+              {/* Row 4: Mã hàng hóa (mặc định disable, tick mới bật) */}
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <label className="erp-label text-neutral-700 inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={enableVt}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        enableVtRef.current = checked;
+                        setEnableVt(checked);
+                        if (checked) {
+                          window.setTimeout(
+                            () => focusControl(maVtRef.current),
+                            0,
+                          );
+                        } else {
+                          handleChange("ma_vt", "");
+                          setTenVt("");
+                        }
+                      }}
+                      className="w-3.5 h-3.5 accent-primary-700 cursor-pointer"
+                    />
+                    <span>Lọc theo mã hàng hóa:</span>
+                  </label>
+                  <span className="text-[11px] text-neutral-400">
+                    {enableVt
+                      ? "Gõ mã hoặc tên để chọn"
+                      : "Tích để lọc theo hàng hóa"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-12 gap-1.5">
+                  <div className="col-span-5">
+                    <Autocomplete
+                      inputRef={maVtRef}
+                      disabled={!enableVt}
+                      selectOnFocus
+                      openOnTypeOnly
+                      debounceMs={30}
+                      maxResults={30}
+                      dropdownMinWidth={560}
+                      placeholder="Nhập mã / tên hàng..."
+                      value={form.ma_vt || ""}
+                      fetcher={fetchVatTuOptionsLocal}
+                      className={`h-8 font-mono font-bold uppercase ${
+                        enableVt
+                          ? "text-primary-800"
+                          : "cursor-not-allowed opacity-75"
+                      }`}
+                      onChange={(v) => {
+                        handleChange("ma_vt", v);
+                        if (!v.trim()) setTenVt("");
+                      }}
+                      onSelect={(opt) => {
+                        handleChange("ma_vt", opt.value);
+                        setTenVt(opt.hint || "");
+                        window.setTimeout(
+                          () => focusControl(submitBtnRef.current),
+                          0,
+                        );
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                          if (e.defaultPrevented) return;
+                          e.preventDefault();
+                          const raw = e.currentTarget.value;
+                          void resolveProductValue(raw).then((res) => {
+                            handleChange("ma_vt", res.code);
+                            setTenVt(res.name);
+                            focusControl(submitBtnRef.current);
+                          });
+                          return;
+                        }
+                        handleFieldArrowNav(e);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-7">
+                    <input
+                      type="text"
+                      readOnly
+                      disabled={!enableVt}
+                      tabIndex={-1}
+                      value={tenVt}
+                      title={tenVt}
+                      placeholder="Tên hàng hóa"
+                      className={`erp-input w-full h-8 bg-neutral-100 text-neutral-700 border-neutral-200 truncate ${
+                        enableVt ? "cursor-text select-text" : "cursor-not-allowed opacity-75"
+                      }`}
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="col-span-7">
-                <input
-                  type="text"
-                  readOnly
-                  disabled={!enableVt}
-                  tabIndex={-1}
-                  value={tenVt}
-                  title={tenVt}
-                  placeholder="Tên hàng hóa"
-                  className={`erp-input w-full h-8 bg-neutral-100 text-neutral-700 border-neutral-200 truncate ${
-                    enableVt ? "cursor-text select-text" : "cursor-not-allowed opacity-75"
-                  }`}
-                />
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </form>
 
         {/* Footer */}

@@ -7,7 +7,7 @@ from app.database import get_db_cursor
 from app.schemas.lookup import (
     VatTuLookup, KhachHangLookup, KhoLookup, ThueLookup,
     TaiKhoanLookup, NhapXuatLookup, XeLookup, BoPhanLookup,
-    HopDongLookup, TienTeLookup
+    HopDongLookup, TienTeLookup, KhoanMucLookup, SanPhamLookup
 )
 from app.utils.ttl_cache import TTLCache
 
@@ -308,6 +308,33 @@ class LookupRepository:
                     for r in cur.fetchall()
                 ]
         return self._cache.get_or_set("tien_te", _load, ttl=_STATIC_TTL, cache_empty=False)
+
+    def get_khoan_muc(self) -> List[KhoanMucLookup]:
+        def _load() -> List[KhoanMucLookup]:
+            sql = f"SELECT Ma_Km, {self.fn_uni}(Ten_Km) AS Ten_Km FROM {self.sys_db}.dbo.DmKm WITH (NOLOCK) ORDER BY Ma_Km"
+            with get_db_cursor(self.sys_db) as cur:
+                cur.execute(sql)
+                return [
+                    KhoanMucLookup(ma_km=(r[0] or "").strip(), ten_km=(r[1] or "").strip())
+                    for r in cur.fetchall()
+                ]
+        return self._cache.get_or_set("khoan_muc", _load, ttl=_STATIC_TTL, cache_empty=False)
+
+    def get_san_pham(self) -> List[SanPhamLookup]:
+        def _load() -> List[SanPhamLookup]:
+            sql = f"SELECT Ma_Sp, {self.fn_uni}(Ten_Sp) AS Ten_Sp, {self.fn_uni}(Dvt) AS Dvt, Loai_Sp FROM {self.sys_db}.dbo.DmSp WITH (NOLOCK) ORDER BY Ma_Sp"
+            with get_db_cursor(self.sys_db) as cur:
+                cur.execute(sql)
+                return [
+                    SanPhamLookup(
+                        ma_sp=(r[0] or "").strip(),
+                        ten_sp=(r[1] or "").strip(),
+                        dvt=(r[2] or "").strip(),
+                        loai_sp=(r[3] or "").strip(),
+                    )
+                    for r in cur.fetchall()
+                ]
+        return self._cache.get_or_set("san_pham", _load, ttl=_STATIC_TTL, cache_empty=False)
 
 
 lookup_repository = LookupRepository()

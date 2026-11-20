@@ -4,29 +4,33 @@ import { formatCurrency } from "../../lib/format";
 
 export interface VoucherFormFooterProps {
   isEditable: boolean;
-  isWarehouse: boolean;
+  isWarehouse?: boolean;
   isDifferentCreator: boolean;
   voucherCreator: string;
   saving: boolean;
   maTte: string;
   totals: {
     ttien_nt: number;
-    ttien_nt4: number;
+    ttien_nt4?: number;
     ttien_nt0: number;
   };
+  hidePriceCalc?: boolean;
+  customTotalsNode?: React.ReactNode;
   onSave: (bypassChecks: boolean) => void;
   onRequestClose: () => void;
-  onOpenPriceCalc: () => void;
+  onOpenPriceCalc?: () => void;
 }
 
 export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
   isEditable,
-  isWarehouse,
+  isWarehouse = false,
   isDifferentCreator,
   voucherCreator,
   saving,
   maTte,
   totals,
+  hidePriceCalc = false,
+  customTotalsNode,
   onSave,
   onRequestClose,
   onOpenPriceCalc,
@@ -89,7 +93,7 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
         <kbd className="ml-1.5 text-[10px]">Esc</kbd>
       </button>
 
-      {!isWarehouse && isEditable && (
+      {!isWarehouse && !hidePriceCalc && isEditable && onOpenPriceCalc && (
         <button
           className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-primary-50 text-neutral-700 hover:text-primary-800 text-xs font-medium rounded border border-neutral-300 hover:border-primary-300 transition-all cursor-pointer"
           type="button"
@@ -103,44 +107,48 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
       )}
     </div>
 
-    {!isWarehouse && (
-      <div className="flex items-center gap-2 text-neutral-600">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
-              Tiền hàng:
-            </span>
-            <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
-              <span className="font-mono font-bold text-neutral-900 text-xs">
-                {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9) từ calcVoucherTotals */}
-                {formatCurrency(totals.ttien_nt, maTte)}
+    {customTotalsNode ? (
+      customTotalsNode
+    ) : (
+      !isWarehouse && (
+        <div className="flex items-center gap-2 text-neutral-600">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
+                Tiền hàng:
               </span>
+              <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
+                <span className="font-mono font-bold text-neutral-900 text-xs">
+                  {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9) từ calcVoucherTotals */}
+                  {formatCurrency(totals.ttien_nt, maTte)}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
-              Tiền CK:
-            </span>
-            <div className="flex items-center bg-white border border-primary-200 rounded px-2 py-0.5 shadow-sm">
-              <span className="font-mono font-bold text-primary-900 text-xs">
-                {formatCurrency(totals.ttien_nt4, maTte)}
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
+                Tiền CK:
               </span>
+              <div className="flex items-center bg-white border border-primary-200 rounded px-2 py-0.5 shadow-sm">
+                <span className="font-mono font-bold text-primary-900 text-xs">
+                  {formatCurrency(totals.ttien_nt4 ?? 0, maTte)}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="h-4 w-px bg-neutral-300"></div>
-          <div className="flex items-center gap-1">
-            <span className="text-xs uppercase font-bold text-neutral-600 tracking-tight">
-              Tổng thanh toán:
-            </span>
-            <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-2 py-0.5 shadow-sm">
-              <span className="font-mono font-bold text-primary-900 tracking-tight text-xs">
-                {formatCurrency(totals.ttien_nt0, maTte)}
+            <div className="h-4 w-px bg-neutral-300"></div>
+            <div className="flex items-center gap-1">
+              <span className="text-xs uppercase font-bold text-neutral-600 tracking-tight">
+                Tổng thanh toán:
               </span>
-              <span className="text-xs font-bold text-primary-700">₫</span>
+              <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-2 py-0.5 shadow-sm">
+                <span className="font-mono font-bold text-primary-900 tracking-tight text-xs">
+                  {formatCurrency(totals.ttien_nt0, maTte)}
+                </span>
+                <span className="text-xs font-bold text-primary-700">₫</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )
     )}
   </footer>
 );

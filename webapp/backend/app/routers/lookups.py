@@ -129,3 +129,24 @@ def get_tien_te(response: Response):
         return {"success": True, "data": [item.model_dump() for item in items]}
     except Exception as exc:
         raise _handle_lookup_error("tiền tệ", exc)
+
+
+@router.get("/khoan-muc")
+def get_khoan_muc(response: Response):
+    try:
+        items = lookup_repository.get_khoan_muc()
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return {"success": True, "data": [item.model_dump() for item in items]}
+    except Exception as exc:
+        raise _handle_lookup_error("khoản mục", exc)
+
+
+@router.get("/san-pham")
+def get_san_pham(response: Response):
+    try:
+        items = lookup_repository.get_san_pham()
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return {"success": True, "data": [item.model_dump() for item in items]}
+    except Exception as exc:
+        raise _handle_lookup_error("sản phẩm", exc)
+

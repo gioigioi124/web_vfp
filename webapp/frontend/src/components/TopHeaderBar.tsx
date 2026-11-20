@@ -10,24 +10,37 @@ import { VoucherFilterParams, VoucherMode } from "../types/voucher";
 import { User, RefreshCw, X } from "lucide-react";
 
 interface TopHeaderBarProps {
-  voucherMode: VoucherMode;
-  onChangeVoucherMode: (mode: VoucherMode) => void;
-  filters: VoucherFilterParams;
+  voucherMode?: VoucherMode;
+  onChangeVoucherMode?: (mode: VoucherMode) => void;
+  filters: Pick<
+    VoucherFilterParams,
+    "ngay_ct1" | "ngay_ct2" | "ma_dt" | "dien_giai"
+  >;
   loading: boolean;
   onApplyFilter: (next: Partial<VoucherFilterParams>) => void;
   onRefresh: () => void;
   customerSearchInputRef?: React.MutableRefObject<HTMLInputElement | null>;
+  moduleBadge?: string;
+  moduleTitle?: string;
+  moduleAccentClass?: string;
+  hideModeSwitcher?: boolean;
+  extraRightActions?: React.ReactNode;
 }
 
 export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
   ({
-    voucherMode,
+    voucherMode = "sales",
     onChangeVoucherMode,
     filters,
     loading,
     onApplyFilter,
     onRefresh,
     customerSearchInputRef: externalCustomerInputRef,
+    moduleBadge,
+    moduleTitle,
+    moduleAccentClass,
+    hideModeSwitcher = false,
+    extraRightActions,
   }) => {
     const [headerNgayCt1, setHeaderNgayCt1] = useState<string>(
       filters?.ngay_ct1 || "",
@@ -109,67 +122,80 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
       [onApplyFilter, headerNgayCt1, headerNgayCt2, resolveHeaderCustomer],
     );
 
+    const badgeText =
+      moduleBadge ||
+      (voucherMode === "warehouse"
+        ? "KH"
+        : voucherMode === "return"
+          ? "NL"
+          : "PX");
+    const badgeBg =
+      moduleAccentClass ||
+      (voucherMode === "warehouse"
+        ? "bg-emerald-700"
+        : voucherMode === "return"
+          ? "bg-amber-700"
+          : "bg-primary-700");
+
     return (
       <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 flex-shrink-0 z-30">
         <div className="px-3.5 py-1.5 flex items-center justify-between gap-4">
           {/* Logo, Breadcrumb, Tiêu đề & Khung lọc nhanh */}
           <div className="flex items-center gap-3 flex-wrap">
             <div
-              className={`flex items-center justify-center w-7 h-7 rounded text-white font-bold text-sm shadow ${
-                voucherMode === "warehouse"
-                  ? "bg-emerald-700"
-                  : voucherMode === "return"
-                    ? "bg-amber-700"
-                    : "bg-primary-700"
-              }`}
+              className={`flex items-center justify-center w-7 h-7 rounded text-white font-bold text-xs font-mono shadow ${badgeBg}`}
             >
-              {voucherMode === "warehouse"
-                ? "KH"
-                : voucherMode === "return"
-                  ? "NL"
-                  : "PX"}
+              {badgeText}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-neutral-600">/</span>
-              {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Nhập lại N5 <-> Phiếu Kho (KH_2014) */}
-              <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded border border-neutral-700">
-                <button
-                  type="button"
-                  onClick={() => onChangeVoucherMode("sales")}
-                  className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
-                    voucherMode === "sales"
-                      ? "bg-primary-700 text-white shadow-sm"
-                      : "text-neutral-400 hover:text-neutral-200"
-                  }`}
-                  title="Quản lý Hóa đơn / Phiếu Xuất Bán (CSDL VP_2014)"
-                >
-                  Phiếu Xuất Bán
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeVoucherMode("return")}
-                  className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
-                    voucherMode === "return"
-                      ? "bg-amber-700 text-white shadow-sm"
-                      : "text-neutral-400 hover:text-neutral-200"
-                  }`}
-                  title="Quản lý Phiếu Nhập Lại Hàng Trả Lại N5 (CSDL VP_2014)"
-                >
-                  Nhập lại (N5)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeVoucherMode("warehouse")}
-                  className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
-                    voucherMode === "warehouse"
-                      ? "bg-emerald-700 text-white shadow-sm"
-                      : "text-neutral-400 hover:text-neutral-200"
-                  }`}
-                  title="Quản lý Phiếu Xuất Kho (CSDL KH_2014)"
-                >
-                  Phiếu Xuất Kho
-                </button>
-              </div>
+              {hideModeSwitcher && moduleTitle ? (
+                <span className="text-sm font-bold text-white tracking-tight">
+                  {moduleTitle}
+                </span>
+              ) : (
+                <>
+                  <span className="text-neutral-600">/</span>
+                  {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Nhập lại N5 <-> Phiếu Kho (KH_2014) */}
+                  <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded border border-neutral-700">
+                    <button
+                      type="button"
+                      onClick={() => onChangeVoucherMode?.("sales")}
+                      className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                        voucherMode === "sales"
+                          ? "bg-primary-700 text-white shadow-sm"
+                          : "text-neutral-400 hover:text-neutral-200"
+                      }`}
+                      title="Quản lý Hóa đơn / Phiếu Xuất Bán (CSDL VP_2014)"
+                    >
+                      Phiếu Xuất Bán
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeVoucherMode?.("return")}
+                      className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                        voucherMode === "return"
+                          ? "bg-amber-700 text-white shadow-sm"
+                          : "text-neutral-400 hover:text-neutral-200"
+                      }`}
+                      title="Quản lý Phiếu Nhập Lại Hàng Trả Lại N5 (CSDL VP_2014)"
+                    >
+                      Nhập lại (N5)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeVoucherMode?.("warehouse")}
+                      className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                        voucherMode === "warehouse"
+                          ? "bg-emerald-700 text-white shadow-sm"
+                          : "text-neutral-400 hover:text-neutral-200"
+                      }`}
+                      title="Quản lý Phiếu Xuất Kho (CSDL KH_2014)"
+                    >
+                      Phiếu Xuất Kho
+                    </button>
+                  </div>
+                </>
+              )}
               <Badge
                 variant={
                   voucherMode === "warehouse"
@@ -180,11 +206,13 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
                 }
                 className="ml-0.5 font-mono text-[10px]"
               >
-                {voucherMode === "warehouse"
-                  ? "CSDL: KH_2014"
-                  : voucherMode === "return"
-                    ? "CSDL: VP_2014 · N5"
-                    : "CSDL: VP_2014"}
+                {hideModeSwitcher
+                  ? "CSDL: VP_2014 · CtT"
+                  : voucherMode === "warehouse"
+                    ? "CSDL: KH_2014"
+                    : voucherMode === "return"
+                      ? "CSDL: VP_2014 · N5"
+                      : "CSDL: VP_2014"}
               </Badge>
             </div>
 
@@ -328,6 +356,7 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
 
           {/* Nút chức năng & thông tin người dùng */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            {extraRightActions}
             {/* Nút làm mới */}
             <button
               onClick={onRefresh}

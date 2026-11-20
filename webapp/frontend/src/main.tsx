@@ -1,7 +1,9 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import App from "./App";
+import { AppShell } from "./components/layout/AppShell";
+import { ComingSoonPage } from "./components/layout/ComingSoonPage";
 import {
   initCustomerIndex,
   refreshCustomerIndex,
@@ -13,6 +15,28 @@ import {
 import { initCatalogCache } from "./lib/catalogCache";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
+
+const CashVoucherWorkspace = lazy(() =>
+  import("./components/cash/CashVoucherWorkspace").then((m) => ({
+    default: m.CashVoucherWorkspace,
+  })),
+);
+const CashBankLedgerPage = lazy(() =>
+  import("./components/cash/CashBankLedgerPage").then((m) => ({
+    default: m.CashBankLedgerPage,
+  })),
+);
+const CatalogViewerPage = lazy(() =>
+  import("./components/catalog/CatalogViewerPage").then((m) => ({
+    default: m.CatalogViewerPage,
+  })),
+);
+
+const LazyFallback = (
+  <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
+    Đang tải phân hệ...
+  </div>
+);
 
 const INDEX_SYNC_INTERVAL_MS = 60_000;
 let indexSyncTimer: number | null = null;
@@ -57,10 +81,105 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
-          {/* Route nghiệp vụ (plan §1.4): danh sách + chi tiết/sửa phiếu */}
-          <Route path="/sales-invoices" element={<App />} />
-          <Route path="/sales-invoices/:stt" element={<App />} />
-          <Route path="*" element={<Navigate to="/sales-invoices" replace />} />
+          <Route element={<AppShell />}>
+            {/* Nhóm 1: Tiền mặt & Ngân hàng (CtT / CtT0) */}
+            <Route
+              path="/cash/receipts"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C1" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cash/receipts/:stt"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C1" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cash/payments"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C2" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cash/payments/:stt"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C2" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/bank/credits"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C3" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/bank/credits/:stt"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C3" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/bank/debits"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C4" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/bank/debits/:stt"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashVoucherWorkspace maCt="C4" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/cash/ledger"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CashBankLedgerPage />
+                </Suspense>
+              }
+            />
+
+            {/* Nhóm 2: Bán hàng & Kho (giữ nguyên toàn bộ route hiện hữu) */}
+            <Route path="/sales-invoices" element={<App initialVoucherMode="sales" />} />
+            <Route path="/sales-invoices/:stt" element={<App initialVoucherMode="sales" />} />
+            <Route path="/sales-returns" element={<App initialVoucherMode="return" />} />
+            <Route path="/sales-returns/:stt" element={<App initialVoucherMode="return" />} />
+            <Route path="/warehouse-slips" element={<App initialVoucherMode="warehouse" />} />
+            <Route path="/warehouse-slips/:stt" element={<App initialVoucherMode="warehouse" />} />
+
+            {/* Nhóm 6: Catalog danh mục (Chỉ xem) */}
+            <Route path="/catalogs" element={<Navigate to="/catalogs/khach-hang" replace />} />
+            <Route
+              path="/catalogs/:catalogId"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <CatalogViewerPage />
+                </Suspense>
+              }
+            />
+
+            {/* Các phần hành tiếp theo trên Sidebar */}
+            <Route path="/coming-soon/:moduleId" element={<ComingSoonPage />} />
+
+            <Route path="*" element={<Navigate to="/sales-invoices" replace />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

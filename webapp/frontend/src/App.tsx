@@ -120,7 +120,11 @@ function computeOptimisticNextSoCt(
   return "";
 }
 
-export function App() {
+export function App({
+  initialVoucherMode,
+}: {
+  initialVoucherMode?: VoucherMode;
+} = {}) {
   const {
     voucherMode,
     setVoucherMode,
@@ -159,6 +163,13 @@ export function App() {
     debtMaDt,
     handleOpenDebt,
   } = useVouchers();
+
+  useEffect(() => {
+    if (initialVoucherMode && initialVoucherMode !== voucherMode) {
+      setVoucherMode(initialVoucherMode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialVoucherMode]);
 
   const [toast, setToast] = useState<{
     message: string;
@@ -271,14 +282,21 @@ export function App() {
   const isNew = sttParam === "new";
   const isEditing = Boolean(sttParam && !isNew);
 
+  const routeBase =
+    initialVoucherMode === "return"
+      ? "/sales-returns"
+      : initialVoucherMode === "warehouse"
+        ? "/warehouse-slips"
+        : "/sales-invoices";
+
   const navToDetail = useCallback(
     (stt: string) => {
-      navigate(`/sales-invoices/${encodeURIComponent(stt)}`);
+      navigate(`${routeBase}/${encodeURIComponent(stt)}`);
     },
-    [navigate],
+    [navigate, routeBase],
   );
-  const navToNew = useCallback(() => navigate("/sales-invoices/new"), [navigate]);
-  const navToList = useCallback(() => navigate("/sales-invoices"), [navigate]);
+  const navToNew = useCallback(() => navigate(`${routeBase}/new`), [navigate, routeBase]);
+  const navToList = useCallback(() => navigate(routeBase), [navigate, routeBase]);
   const openFilterModal = useCallback(() => setIsFilterOpen(true), [setIsFilterOpen]);
 
   const apiDbMode: "sales" | "warehouse" =
@@ -1060,7 +1078,7 @@ export function App() {
 
   return (
     <>
-      <div className="flex flex-col h-screen w-screen overflow-hidden bg-surface print:hidden">
+      <div className="flex flex-col h-full w-full overflow-hidden bg-surface print:hidden">
         {/* Toast Notification */}
       {toast && (
         <div
@@ -1178,7 +1196,16 @@ export function App() {
         <>
           <TopHeaderBar
             voucherMode={voucherMode}
-            onChangeVoucherMode={setVoucherMode}
+            onChangeVoucherMode={(nextMode) => {
+              setVoucherMode(nextMode);
+              const nextPath =
+                nextMode === "return"
+                  ? "/sales-returns"
+                  : nextMode === "warehouse"
+                    ? "/warehouse-slips"
+                    : "/sales-invoices";
+              navigate(nextPath);
+            }}
             filters={filters}
             loading={loading}
             onApplyFilter={handleApplyFilter}

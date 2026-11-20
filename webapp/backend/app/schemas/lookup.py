@@ -70,3 +70,16 @@ class TienTeLookup(BaseModel):
     ma_tte: str
     ten_tte: Optional[str] = ""
     ty_gia: float = 1.0
+
+
+class KhoanMucLookup(BaseModel):
+    ma_km: str
+    ten_km: str
+
+
+class SanPhamLookup(BaseModel):
+    ma_sp: str
+    ten_sp: str
+    dvt: Optional[str] = ""
+    loai_sp: Optional[str] = ""
+

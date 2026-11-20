@@ -38,6 +38,7 @@ let khoByCode = new Map<string, KhoItem>();
 let xeByCode = new Map<string, XeItem>();
 let xeByName = new Map<string, XeItem>();
 let boPhanByCode = new Map<string, BoPhanItem>();
+let taiKhoanByCode = new Map<string, TaiKhoanItem>();
 
 let loaded = false;
 let loadPromise: Promise<void> | null = null;
@@ -124,6 +125,12 @@ export function initCatalogCache(): Promise<void> {
       if (key) boPhanByCode.set(key, i);
     }
 
+    taiKhoanByCode = new Map();
+    for (const i of tList) {
+      const key = (i.tk || "").trim().toUpperCase();
+      if (key) taiKhoanByCode.set(key, i);
+    }
+
     loaded = true;
   })();
   return loadPromise;
@@ -175,6 +182,12 @@ export function searchBoPhan(q: string): AutocompleteOption[] {
 
 export function searchTaiKhoan(q: string): AutocompleteOption[] {
   return filterIndexed(taiKhoan, q);
+}
+
+export function getTaiKhoan(tk: string): TaiKhoanItem | null {
+  const clean = (tk || "").trim().toUpperCase();
+  if (!clean) return null;
+  return taiKhoanByCode.get(clean) || null;
 }
 
 export function getXe(maXe: string): XeItem | null {
