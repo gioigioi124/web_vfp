@@ -1,7 +1,9 @@
 import base64
+from datetime import date
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.config import settings
@@ -277,6 +279,16 @@ def commit_delete_items(req: PriceListDeleteItemsCommitRequest):
 def export_price_lists(req: PriceListExportRequest):
     rows = price_list_repository.export_price_lists(req.stt_list)
     return {"success": True, "data": [r.model_dump() for r in rows]}
+
+
+@router.post("/export-csv")
+def export_price_lists_csv(req: PriceListExportRequest):
+    filename = f"bang_gia_{date.today().isoformat()}.csv"
+    return StreamingResponse(
+        price_list_repository.stream_export_csv_chunks(req.stt_list),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{stt}/items")

@@ -241,3 +241,126 @@ def test_list_price_lists_paged_and_items_paged():
         assert len(d["items"]) == 2
         assert d["items"][0]["ma_vt"] == "VT001"
 
+
+def test_phase3_tokenized_import_streaming_csv_and_diff_save():
+    from datetime import date
+
+    # 1) Tokenized preview + commit without sending items again
+    xlsx = _make_xlsx([
+        ["Mã hàng", "Giá", "CK"],
+        ["VT001", 210000, 3],
+        ["VT002", 95000, 0],
+    ])
+    mock_cur = MagicMock()
+    mock_cur.fetchall.return_value = [("VT001",)]
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = mock_cur
+    mock_ctx.__exit__.return_value = False
+
+    with (
+        patch("app.repositories.price_list_repo.get_db_cursor", return_value=mock_ctx),
+        patch.object(price_list_repository, "_lookup_vt_meta", return_value={}),
+    ):
+        b64 = base64.b64encode(xlsx).decode("ascii")
+        pv_resp = client.post(
+            "/api/price-lists/import-update/preview",
+            json={"filename": "u.xlsx", "content_base64": b64, "stt_list": ["S1_BG_1"]},
+        )
+        assert pv_resp.status_code == 200
+        token = pv_resp.json()["data"]["preview_token"]
+        assert token
+
+    tx_cur = MagicMock()
+    tx_cur.fetchone.return_value = ("S1",)
+    tx_cur.fetchall.return_value = [("VT001",)]
+    tx_conn = MagicMock()
+    tx_ctx = MagicMock()
+    tx_ctx.__enter__.return_value = (tx_conn, tx_cur)
+    tx_ctx.__exit__.return_value = False
+
+    with (
+        patch("app.repositories.price_list_repo.get_db_transaction", return_value=tx_ctx),
+        patch("app.repositories.price_list_repo.voucher_repository.generate_stts_batch", return_value=["S1_002"]),
+        patch("app.repositories.price_list_repo.price_repository.clear_cache"),
+    ):
+        commit_resp = client.post(
+            "/api/price-lists/import-update/commit",
+            json={"stt_list": ["S1_BG_1"], "preview_token": token},
+        )
+        assert commit_resp.status_code == 200
+        assert commit_resp.json()["data"]["updates_count"] == 1
+        assert commit_resp.json()["data"]["inserts_count"] == 1
+
+    # 2) Streaming CSV export
+    exp_cur = MagicMock()
+    exp_cur.fetchmany.side_effect = [
+        [
+            (
+                "S1_BG_1",
+                "BG01",
+                date(2026, 11, 20),
+                None,
+                "KV1",
+                "",
+                "",
+                "VT001",
+                "Ton lanh",
+                "Tam",
+                210000.0,
+                3.0,
+            )
+        ],
+        [],
+    ]
+    exp_ctx = MagicMock()
+    exp_ctx.__enter__.return_value = exp_cur
+    exp_ctx.__exit__.return_value = False
+
+    with patch("app.repositories.price_list_repo.get_db_cursor", return_value=exp_ctx):
+        csv_resp = client.post(
+            "/api/price-lists/export-csv", json={"stt_list": ["S1_BG_1"]}
+        )
+        assert csv_resp.status_code == 200
+        assert csv_resp.content.startswith(b"\xef\xbb\xbfStt_ID,So_Ct")
+        assert b"VT001,Ton lanh,Tam,210000.0,3.0" in csv_resp.content
+
+    # 3) Diff-Save on PUT /api/price-lists/{stt}
+    diff_cur = MagicMock()
+    # existing BG0: VT_SAME (unchanged), VT_CHANGED (price changed), VT_DEL (removed)
+    diff_cur.fetchall.return_value = [
+        ("VT_SAME", 100000.0, 0.0),
+        ("VT_CHANGED", 120000.0, 5.0),
+        ("VT_DEL", 50000.0, 0.0),
+    ]
+    diff_conn = MagicMock()
+    diff_ctx = MagicMock()
+    diff_ctx.__enter__.return_value = (diff_conn, diff_cur)
+    diff_ctx.__exit__.return_value = False
+
+    with (
+        patch("app.repositories.price_list_repo.get_db_transaction", return_value=diff_ctx),
+        patch("app.repositories.price_list_repo.voucher_repository.generate_stts_batch", return_value=["S1_NEW"]),
+        patch("app.repositories.price_list_repo.price_repository.clear_cache"),
+    ):
+        put_resp = client.put(
+            "/api/price-lists/S1_BG_1",
+            json={
+                "ma_dvcs": "S1",
+                "ngay_ct": "2026-11-20",
+                "so_ct": "BG01",
+                "ma_vm": "KV1",
+                "items": [
+                    {"ma_vt": "VT_SAME", "gia": 100000, "ck": 0},
+                    {"ma_vt": "VT_CHANGED", "gia": 135000, "ck": 5},
+                    {"ma_vt": "VT_NEW", "gia": 88000, "ck": 2},
+                ],
+            },
+        )
+        assert put_resp.status_code == 200
+        assert put_resp.json()["data"]["item_count"] == 3
+        # Verify executemany only updated VT_CHANGED (1 row)
+        diff_cur.executemany.assert_called_once()
+        update_args = diff_cur.executemany.call_args[0][1]
+        assert update_args == [(135000.0, 5.0, "S1_BG_1", "VT_CHANGED")]
+
+

@@ -197,21 +197,31 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
       if (mode === "import-new") {
         if (!newPreview || newPreview.groups.length === 0) return;
         endpoint = "/api/price-lists/import-new/commit";
-        payload = {
-          user_name: userName.trim().toUpperCase() || "ADMIN",
-          groups: newPreview.groups,
-        };
+        payload = newPreview.preview_token
+          ? {
+              user_name: userName.trim().toUpperCase() || "ADMIN",
+              preview_token: newPreview.preview_token,
+            }
+          : {
+              user_name: userName.trim().toUpperCase() || "ADMIN",
+              groups: newPreview.groups,
+            };
       } else if (mode === "import-update") {
         if (!updatePreview || updatePreview.items.length === 0) return;
         endpoint = "/api/price-lists/import-update/commit";
-        payload = {
-          stt_list,
-          items: updatePreview.items.map((it) => ({
-            ma_vt: it.ma_vt,
-            gia: it.gia,
-            ck: it.ck,
-          })),
-        };
+        payload = updatePreview.preview_token
+          ? {
+              stt_list,
+              preview_token: updatePreview.preview_token,
+            }
+          : {
+              stt_list,
+              items: updatePreview.items.map((it) => ({
+                ma_vt: it.ma_vt,
+                gia: it.gia,
+                ck: it.ck,
+              })),
+            };
       } else {
         if (!deletePreview || deletePreview.ma_vt_list.length === 0) return;
         endpoint = "/api/price-lists/delete-items/commit";
@@ -496,6 +506,11 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
                   </tbody>
                 </table>
               </div>
+              {newPreview.truncated_preview && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+                  Đang xem trước {newPreview.groups.length} / {newPreview.groups_count} bảng giá đầu tiên để giữ giao diện mượt. Toàn bộ {newPreview.details_count} dòng chi tiết đã lưu sẵn sàng trên server để ghi SQL.
+                </p>
+              )}
             </div>
           )}
 
@@ -632,6 +647,11 @@ export const PriceListExcelModal: React.FC<PriceListExcelModalProps> = ({
                   </tbody>
                 </table>
               </div>
+              {updatePreview.truncated_preview && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+                  Đang xem trước {updatePreview.items.length} / {updatePreview.unique_items} mã hàng đầu tiên. Toàn bộ {updatePreview.unique_items} mã hàng đã sẵn sàng trên server để cập nhật vào SQL.
+                </p>
+              )}
             </div>
           )}
 

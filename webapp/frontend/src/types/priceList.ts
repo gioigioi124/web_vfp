@@ -73,6 +73,8 @@ export interface PriceListImportNewPreviewResponse {
   duplicate_rows: number;
   groups_count: number;
   details_count: number;
+  preview_token?: string | null;
+  truncated_preview?: boolean;
   groups: PriceListImportNewGroupPreview[];
 }
 
@@ -91,6 +93,8 @@ export interface PriceListImportUpdatePreviewResponse {
   unique_items: number;
   existing_updates_estimate: number;
   new_inserts_estimate: number;
+  preview_token?: string | null;
+  truncated_preview?: boolean;
   items: PriceListUpdateItemPreview[];
 }
 

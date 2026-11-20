@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import {
   PriceListDetailItem,
-  PriceListExportRow,
   PriceListHeader,
   PriceListItemsPageResponse,
   PriceListPageResponse,
@@ -34,14 +33,6 @@ import {
 import { PriceListFormModal } from "./PriceListFormModal";
 
 type SortKey = "so_ct" | "ngay_ct" | "ma_dt" | "ma_vm" | "user_name" | "item_count";
-
-function csvEscape(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v);
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
 
 const DETAIL_CHUNK_SIZE = 500;
 
@@ -489,54 +480,16 @@ export const PriceListWorkspace: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch("/api/price-lists/export", {
+      const res = await fetch("/api/price-lists/export-csv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stt_list: targetStts }),
       });
-      const body = await res.json();
-      if (!res.ok || !body?.success) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
         throw new Error(body?.detail || "Không thể xuất dữ liệu bảng giá.");
       }
-      const rows: PriceListExportRow[] = body.data || [];
-      const headerCols = [
-        "Stt_ID",
-        "So_Ct",
-        "Ngay_Ct",
-        "Ngay_Ct2",
-        "Khu_Vuc",
-        "Doi_Tuong",
-        "Ten_Doi_Tuong",
-        "Ma_Vat_Tu",
-        "Ten_Vat_Tu",
-        "DVT",
-        "Gia_Ban",
-        "Chiet_Khau_%",
-      ];
-      const csvLines = [headerCols.join(",")];
-      for (const r of rows) {
-        csvLines.push(
-          [
-            r.stt_id,
-            r.so_ct,
-            r.ngay_ct,
-            r.ngay_ct2 || "",
-            r.khu_vuc,
-            r.doi_tuong,
-            r.ten_doi_tuong,
-            r.ma_vat_tu,
-            r.ten_vat_tu,
-            r.dvt,
-            r.gia_ban,
-            r.chiet_khau_phan_tram,
-          ]
-            .map(csvEscape)
-            .join(","),
-        );
-      }
-      const blob = new Blob(["\ufeff" + csvLines.join("\r\n")], {
-        type: "text/csv;charset=utf-8;",
-      });
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -545,7 +498,7 @@ export const PriceListWorkspace: React.FC = () => {
       URL.revokeObjectURL(url);
       showToast(
         "success",
-        `Đã xuất ${rows.length} dòng chi tiết từ ${targetStts.length} bảng giá ra CSV.`,
+        `Đã xuất CSV (Streaming) cho ${targetStts.length} bảng giá.`,
       );
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Lỗi xuất CSV.");

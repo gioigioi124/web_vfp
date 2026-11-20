@@ -1,7 +1,12 @@
 """Repository for managing Price Lists (VP_2014.dbo.BG & BG0), migrated from Import_BG/import_bang_gia_tool.py."""
 
+import csv
+import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+import time
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+import uuid
 
 from app.config import settings
 from app.database import get_db_cursor, get_db_transaction
@@ -36,6 +41,44 @@ logger = logging.getLogger("app.repositories.price_list")
 
 # Multi-row INSERT batch size for BG0 (5 params per row -> 350 * 5 = 1750 < 2100 SQL Server limit)
 _BG0_INSERT_BATCH_SIZE = 350
+_PREVIEW_IMPORT_NEW_CAP = 500
+_PREVIEW_IMPORT_UPDATE_CAP = 1000
+
+
+class _PreviewTokenStore:
+    """Thread-safe short-lived store so large parsed Excel payloads do not round-trip via browser."""
+
+    def __init__(self, ttl_seconds: float = 900.0, max_entries: int = 16):
+        self.ttl = ttl_seconds
+        self.max_entries = max_entries
+        self._lock = threading.Lock()
+        self._store: Dict[str, Tuple[float, Any]] = {}
+
+    def put(self, payload: Any) -> str:
+        token = uuid.uuid4().hex
+        now = time.monotonic()
+        with self._lock:
+            expired = [k for k, (exp, _) in self._store.items() if exp <= now]
+            for k in expired:
+                self._store.pop(k, None)
+            if len(self._store) >= self.max_entries:
+                oldest = min(self._store.items(), key=lambda kv: kv[1][0])[0]
+                self._store.pop(oldest, None)
+            self._store[token] = (now + self.ttl, payload)
+        return token
+
+    def pop(self, token: Optional[str]) -> Optional[Any]:
+        if not token:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            entry = self._store.pop(token, None)
+            if not entry:
+                return None
+            exp, payload = entry
+            if exp <= now:
+                return None
+            return payload
 
 
 def _escape_sql_like(value: str) -> str:
@@ -53,6 +96,7 @@ class PriceListRepository:
         self.vp_db = settings.DB_VP
         self.sys_db = settings.DB_SYS
         self.fn_uni = f"{self.vp_db}.dbo.fn_TCVNToUnicode"
+        self._preview_store = _PreviewTokenStore()
 
     def _get_ma_dvcs(self, cur: Any) -> str:
         cur.execute(f"SELECT TOP 1 Ma_DvCs FROM {self.sys_db}.dbo.DmDvCs WITH (NOLOCK)")
@@ -604,6 +648,9 @@ class PriceListRepository:
                         (data.closed or "0").strip() or "0",
                     ],
                 )
+                detail_rows = [(stt, code, gia, ck) for code, (gia, ck) in dedup_map.items()]
+                self._insert_bg0_rows(cur, ma_dvcs, detail_rows)
+                item_count = len(detail_rows)
             else:
                 if not stt_override or not stt_override.strip():
                     raise ValueError("Thiếu mã Stt để cập nhật bảng giá!")
@@ -628,13 +675,57 @@ class PriceListRepository:
                         stt,
                     ],
                 )
-                cur.execute(f"DELETE FROM {self.vp_db}.dbo.BG0 WHERE Stt = ?", [stt])
+                cur.execute(
+                    f"SELECT RTRIM(Ma_Vt), ISNULL(Gia, 0), ISNULL(CK, 0) "
+                    f"FROM {self.vp_db}.dbo.BG0 WITH (NOLOCK) WHERE Stt = ?",
+                    [stt],
+                )
+                existing_map: Dict[str, Tuple[float, float]] = {}
+                for er in cur.fetchall():
+                    ecode = (er[0] or "").strip().upper()
+                    if ecode:
+                        existing_map[ecode] = (float(er[1] or 0.0), float(er[2] or 0.0))
 
-            detail_rows = [(stt, code, gia, ck) for code, (gia, ck) in dedup_map.items()]
-            self._insert_bg0_rows(cur, ma_dvcs, detail_rows)
+                removed_codes = sorted(set(existing_map.keys()) - set(dedup_map.keys()))
+                for i in range(0, len(removed_codes), 500):
+                    chunk = removed_codes[i:i + 500]
+                    ph = ",".join(["?"] * len(chunk))
+                    cur.execute(
+                        f"DELETE FROM {self.vp_db}.dbo.BG0 WHERE Stt = ? AND Ma_Vt IN ({ph})",
+                        [stt, *chunk],
+                    )
+
+                to_update = [
+                    (gia, ck, stt, code)
+                    for code, (gia, ck) in dedup_map.items()
+                    if code in existing_map
+                    and (
+                        abs(existing_map[code][0] - gia) > 1e-6
+                        or abs(existing_map[code][1] - ck) > 1e-6
+                    )
+                ]
+                if to_update:
+                    try:
+                        cur.fast_executemany = True
+                    except Exception:
+                        pass
+                    cur.executemany(
+                        f"UPDATE {self.vp_db}.dbo.BG0 SET Gia = ?, CK = ? WHERE Stt = ? AND Ma_Vt = ?",
+                        to_update,
+                    )
+
+                to_insert = [
+                    (stt, code, gia, ck)
+                    for code, (gia, ck) in dedup_map.items()
+                    if code not in existing_map
+                ]
+                if to_insert:
+                    self._insert_bg0_rows(cur, ma_dvcs, to_insert)
+
+                item_count = len(dedup_map)
 
         price_repository.clear_cache()
-        return {"stt": stt, "so_ct": data.so_ct.strip().upper(), "item_count": len(detail_rows)}
+        return {"stt": stt, "so_ct": data.so_ct.strip().upper(), "item_count": item_count}
 
     def delete_price_list(self, stt: str) -> dict:
         clean_stt = (stt or "").strip()
@@ -811,17 +902,29 @@ class PriceListRepository:
             )
             for (ngay_ct, so_ct, ma_dt, ma_vm), items in grouped.items()
         ]
+        preview_token = self._preview_store.put(groups)
+        truncated_preview = len(groups) > _PREVIEW_IMPORT_NEW_CAP
         return PriceListImportNewPreviewResponse(
             total_rows=total_rows,
             skipped_rows=skipped_rows,
             duplicate_rows=duplicate_rows,
             groups_count=len(groups),
             details_count=len(deduped),
-            groups=groups,
+            preview_token=preview_token,
+            truncated_preview=truncated_preview,
+            groups=groups[:_PREVIEW_IMPORT_NEW_CAP],
         )
 
     def commit_import_new(self, req: PriceListImportNewCommitRequest) -> dict:
-        if not req.groups:
+        groups = req.groups
+        if req.preview_token:
+            cached = self._preview_store.pop(req.preview_token)
+            if cached is None and not groups:
+                raise ValueError("Phiên xem trước Excel đã hết hạn, vui lòng chọn lại file.")
+            if cached is not None:
+                groups = cached
+
+        if not groups:
             raise ValueError("Danh sách bảng giá cần import đang trống.")
 
         user_name = (req.user_name or "ADMIN").strip() or "ADMIN"
@@ -832,7 +935,7 @@ class PriceListRepository:
             ma_dvcs = self._get_ma_dvcs(cur)
             detail_rows: List[Tuple[str, str, float, float]] = []
 
-            for grp in req.groups:
+            for grp in groups:
                 if not grp.items:
                     continue
                 clean_dt = (grp.ma_dt or "").strip().upper()
@@ -945,6 +1048,8 @@ class PriceListRepository:
             except Exception as e:
                 logger.warning(f"Estimate update counts warning: {e}")
 
+        preview_token = self._preview_store.put(items)
+        truncated_preview = len(items) > _PREVIEW_IMPORT_UPDATE_CAP
         return PriceListImportUpdatePreviewResponse(
             total_rows=total_rows,
             skipped_rows=skipped_rows,
@@ -952,18 +1057,29 @@ class PriceListRepository:
             unique_items=len(items),
             existing_updates_estimate=existing_est,
             new_inserts_estimate=new_est,
-            items=items,
+            preview_token=preview_token,
+            truncated_preview=truncated_preview,
+            items=items[:_PREVIEW_IMPORT_UPDATE_CAP],
         )
 
     def commit_import_update(self, req: PriceListImportUpdateCommitRequest) -> dict:
         clean_stts = [s.strip() for s in req.stt_list if s and s.strip()]
         if not clean_stts:
             raise ValueError("Vui lòng chọn ít nhất 1 bảng giá để cập nhật.")
-        if not req.items:
+
+        items_src = req.items
+        if req.preview_token:
+            cached = self._preview_store.pop(req.preview_token)
+            if cached is None and not items_src:
+                raise ValueError("Phiên xem trước Excel đã hết hạn, vui lòng chọn lại file.")
+            if cached is not None:
+                items_src = cached
+
+        if not items_src:
             raise ValueError("Danh sách mặt hàng cập nhật đang trống.")
 
         deduped: Dict[str, Tuple[float, float]] = {}
-        for it in req.items:
+        for it in items_src:
             code = (it.ma_vt or "").strip().upper()
             if code:
                 deduped[code] = (float(it.gia or 0.0), float(it.ck or 0.0))
@@ -1154,6 +1270,80 @@ class PriceListRepository:
                         )
                     )
         return rows_out
+
+    def stream_export_csv_chunks(self, stt_list: List[str]) -> Iterator[bytes]:
+        clean_stts = [s.strip() for s in stt_list if s and s.strip()]
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Stt_ID",
+            "So_Ct",
+            "Ngay_Ct",
+            "Ngay_Ct2",
+            "Khu_Vuc",
+            "Doi_Tuong",
+            "Ten_Doi_Tuong",
+            "Ma_Vat_Tu",
+            "Ten_Vat_Tu",
+            "DVT",
+            "Gia_Ban",
+            "Chiet_Khau_%",
+        ])
+        yield ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+        if not clean_stts:
+            return
+
+        with get_db_cursor(self.vp_db) as cur:
+            for i in range(0, len(clean_stts), 400):
+                chunk = clean_stts[i:i + 400]
+                ph = ",".join(["?"] * len(chunk))
+                cur.execute(
+                    f"""
+                    SELECT
+                        RTRIM(b.Stt) AS Stt_ID,
+                        RTRIM(ISNULL(b.So_Ct, '')) AS So_Ct,
+                        b.Ngay_Ct,
+                        b.Ngay_Ct2,
+                        RTRIM(ISNULL(b.Ma_Vm, '')) AS Khu_Vuc,
+                        RTRIM(ISNULL(b.Ma_Dt, '')) AS Doi_Tuong,
+                        {self.fn_uni}(ISNULL(d.Ten_Dt, '')) AS Ten_Doi_Tuong,
+                        RTRIM(ISNULL(b0.Ma_Vt, '')) AS Ma_Vat_Tu,
+                        {self.fn_uni}(ISNULL(v.Ten_Vt, '')) AS Ten_Vat_Tu,
+                        {self.fn_uni}(ISNULL(b0.Dvt, '')) AS DVT,
+                        ISNULL(b0.Gia, 0) AS Gia_Ban,
+                        ISNULL(b0.CK, 0) AS Chiet_Khau_Phan_Tram
+                    FROM {self.vp_db}.dbo.BG b WITH (NOLOCK)
+                    JOIN {self.vp_db}.dbo.BG0 b0 WITH (NOLOCK) ON b.Stt = b0.Stt
+                    LEFT JOIN {self.sys_db}.dbo.DmDt d WITH (NOLOCK) ON d.Ma_Dt = b.Ma_Dt
+                    LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = b0.Ma_Vt
+                    WHERE b.Stt IN ({ph})
+                    ORDER BY b.Stt, RTRIM(b0.Ma_Vt) ASC
+                    """,
+                    chunk,
+                )
+                while True:
+                    rows = cur.fetchmany(1000)
+                    if not rows:
+                        break
+                    out = io.StringIO()
+                    w = csv.writer(out)
+                    for r in rows:
+                        w.writerow([
+                            (r[0] or "").strip(),
+                            (r[1] or "").strip(),
+                            r[2].strftime("%Y-%m-%d") if r[2] else "",
+                            r[3].strftime("%Y-%m-%d") if r[3] else "",
+                            (r[4] or "").strip(),
+                            (r[5] or "").strip(),
+                            (r[6] or "").strip(),
+                            (r[7] or "").strip(),
+                            (r[8] or "").strip(),
+                            (r[9] or "").strip(),
+                            float(r[10] or 0.0),
+                            float(r[11] or 0.0),
+                        ])
+                    yield out.getvalue().encode("utf-8")
 
 
 price_list_repository = PriceListRepository()

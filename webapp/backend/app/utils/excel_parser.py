@@ -100,19 +100,20 @@ def clean_upper_code(val: Any) -> str:
 
 
 def parse_xlsx_rows(content: bytes) -> List[List[str]]:
-    """Parse first worksheet of an .xlsx/.xlsm file using Python stdlib zipfile + xml."""
+    """Parse first worksheet of an .xlsx/.xlsm file via streaming ET.iterparse."""
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         shared_strings: List[str] = []
         if "xl/sharedStrings.xml" in zf.namelist():
-            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
-            for si in root.iter():
-                if si.tag.endswith("}si") or si.tag == "si":
-                    texts = [
-                        t.text or ""
-                        for t in si.iter()
-                        if t.tag.endswith("}t") or t.tag == "t"
-                    ]
-                    shared_strings.append("".join(texts))
+            with zf.open("xl/sharedStrings.xml") as ss_fp:
+                for _, elem in ET.iterparse(ss_fp, events=("end",)):
+                    if elem.tag.endswith("}si") or elem.tag == "si":
+                        texts = [
+                            t.text or ""
+                            for t in elem.iter()
+                            if t.tag.endswith("}t") or t.tag == "t"
+                        ]
+                        shared_strings.append("".join(texts))
+                        elem.clear()
 
         sheet_names = sorted(
             n
@@ -122,48 +123,49 @@ def parse_xlsx_rows(content: bytes) -> List[List[str]]:
         if not sheet_names:
             raise ValueError("Không tìm thấy worksheet nào trong file Excel.")
 
-        sheet_root = ET.fromstring(zf.read(sheet_names[0]))
         rows_out: List[List[str]] = []
-        for row_el in sheet_root.iter():
-            if not (row_el.tag.endswith("}row") or row_el.tag == "row"):
-                continue
-            row_map: Dict[int, str] = {}
-            max_col = -1
-            for c_el in row_el:
-                if not (c_el.tag.endswith("}c") or c_el.tag == "c"):
+        with zf.open(sheet_names[0]) as sheet_fp:
+            for _, row_el in ET.iterparse(sheet_fp, events=("end",)):
+                if not (row_el.tag.endswith("}row") or row_el.tag == "row"):
                     continue
-                ref = c_el.attrib.get("r", "")
-                col_idx = excel_col_index(ref) if ref else (max_col + 1)
-                max_col = max(max_col, col_idx)
-                cell_type = c_el.attrib.get("t", "")
+                row_map: Dict[int, str] = {}
+                max_col = -1
+                for c_el in row_el:
+                    if not (c_el.tag.endswith("}c") or c_el.tag == "c"):
+                        continue
+                    ref = c_el.attrib.get("r", "")
+                    col_idx = excel_col_index(ref) if ref else (max_col + 1)
+                    max_col = max(max_col, col_idx)
+                    cell_type = c_el.attrib.get("t", "")
 
-                val_str = ""
-                if cell_type == "inlineStr":
-                    val_str = "".join(
-                        t.text or ""
-                        for t in c_el.iter()
-                        if t.tag.endswith("}t") or t.tag == "t"
-                    )
-                else:
-                    v_el = next(
-                        (ch for ch in c_el if ch.tag.endswith("}v") or ch.tag == "v"),
-                        None,
-                    )
-                    if v_el is not None and v_el.text is not None:
-                        if cell_type == "s":
-                            idx = int(v_el.text)
-                            val_str = (
-                                shared_strings[idx]
-                                if 0 <= idx < len(shared_strings)
-                                else ""
-                            )
-                        else:
-                            val_str = v_el.text
-                row_map[col_idx] = val_str.strip()
+                    val_str = ""
+                    if cell_type == "inlineStr":
+                        val_str = "".join(
+                            t.text or ""
+                            for t in c_el.iter()
+                            if t.tag.endswith("}t") or t.tag == "t"
+                        )
+                    else:
+                        v_el = next(
+                            (ch for ch in c_el if ch.tag.endswith("}v") or ch.tag == "v"),
+                            None,
+                        )
+                        if v_el is not None and v_el.text is not None:
+                            if cell_type == "s":
+                                idx = int(v_el.text)
+                                val_str = (
+                                    shared_strings[idx]
+                                    if 0 <= idx < len(shared_strings)
+                                    else ""
+                                )
+                            else:
+                                val_str = v_el.text
+                    row_map[col_idx] = val_str.strip()
 
-            if row_map:
-                width = max(row_map.keys()) + 1
-                rows_out.append([row_map.get(i, "") for i in range(width)])
+                if row_map:
+                    width = max(row_map.keys()) + 1
+                    rows_out.append([row_map.get(i, "") for i in range(width)])
+                row_el.clear()
         return rows_out
 
 

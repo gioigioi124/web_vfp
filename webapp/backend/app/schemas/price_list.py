@@ -114,12 +114,15 @@ class PriceListImportNewPreviewResponse(BaseModel):
     duplicate_rows: int
     groups_count: int
     details_count: int
+    preview_token: Optional[str] = None
+    truncated_preview: bool = False
     groups: List[PriceListImportNewGroupPreview]
 
 
 class PriceListImportNewCommitRequest(BaseModel):
     user_name: Optional[str] = "ADMIN"
-    groups: List[PriceListImportNewGroupPreview]
+    preview_token: Optional[str] = None
+    groups: List[PriceListImportNewGroupPreview] = []
 
 
 class PriceListUpdateItemPreview(BaseModel):
@@ -137,12 +140,15 @@ class PriceListImportUpdatePreviewResponse(BaseModel):
     unique_items: int
     existing_updates_estimate: int = 0
     new_inserts_estimate: int = 0
+    preview_token: Optional[str] = None
+    truncated_preview: bool = False
     items: List[PriceListUpdateItemPreview]
 
 
 class PriceListImportUpdateCommitRequest(BaseModel):
     stt_list: List[str]
-    items: List[PriceListSaveItemInput]
+    preview_token: Optional[str] = None
+    items: List[PriceListSaveItemInput] = []
 
 
 class PriceListDeleteItemsPreviewResponse(BaseModel):
