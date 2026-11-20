@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover
 from app.config import settings
 from app.database import close_all_pools, test_db_connection
 from app.routers import lookups, vouchers, pickup, debt, print as print_router
-from app.routers import prices, products, customers, cash_vouchers, price_lists
+from app.routers import prices, products, customers, cash_vouchers, price_lists, general_modules
 from app.services.product_index_service import product_index_service, REFRESH_INTERVAL
 from app.services.customer_index_service import (
     customer_index_service,
@@ -147,6 +147,7 @@ app.include_router(products.router)
 app.include_router(customers.router)
 app.include_router(cash_vouchers.router)
 app.include_router(price_lists.router)
+app.include_router(general_modules.router)
 
 
 def _app_info_payload():

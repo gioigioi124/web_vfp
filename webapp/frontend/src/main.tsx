@@ -36,6 +36,21 @@ const PriceListWorkspace = lazy(() =>
     default: m.PriceListWorkspace,
   })),
 );
+const GenericVoucherWorkspace = lazy(() =>
+  import("./components/modules/GenericVoucherWorkspace").then((m) => ({
+    default: m.GenericVoucherWorkspace,
+  })),
+);
+const PartnerDebtPage = lazy(() =>
+  import("./components/modules/PartnerDebtPage").then((m) => ({
+    default: m.PartnerDebtPage,
+  })),
+);
+const GeneralLedgerReportPage = lazy(() =>
+  import("./components/modules/GeneralLedgerReportPage").then((m) => ({
+    default: m.GeneralLedgerReportPage,
+  })),
+);
 
 const LazyFallback = (
   <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
@@ -173,6 +188,64 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <Suspense fallback={LazyFallback}>
                   <PriceListWorkspace />
+                </Suspense>
+              }
+            />
+
+            {/* Nhóm 2-5: Công nợ 131/331, Mua hàng, Kho khác, Tổng hợp */}
+            <Route
+              path="/receivables"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <PartnerDebtPage tkPrefix="131" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/purchases"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <GenericVoucherWorkspace moduleKey="purchase" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/payables"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <PartnerDebtPage tkPrefix="331" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/inventory/other"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <GenericVoucherWorkspace moduleKey="inv-io" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/inventory/transfers"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <GenericVoucherWorkspace moduleKey="inv-transfer" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/gl/vouchers"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <GenericVoucherWorkspace moduleKey="gl-voucher" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/gl/reports"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <GeneralLedgerReportPage />
                 </Suspense>
               }
             />
