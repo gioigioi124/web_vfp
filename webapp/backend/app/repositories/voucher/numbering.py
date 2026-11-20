@@ -78,7 +78,27 @@ class VoucherNumberingMixin:
                 logger.warning(f"Error querying max So_Ct ({db_mode}): {e}")
                 return []
 
-        if is_wh:
+        if clean_ma_ct == "N5":
+            day_start, next_day_start, _ = self._day_date_bounds(ngay_ct)
+            rows = _query_rows(
+                f"""
+                SELECT RTRIM(So_Ct)
+                FROM {target_db}.dbo.CtBH {lock_hint}
+                WHERE Ma_Ct = ? AND Ngay_Ct >= ? AND Ngay_Ct < ?
+                """,
+                [clean_ma_ct, day_start, next_day_start],
+            )
+            max_num = 0
+            pad_len = 3
+            for s in rows:
+                m = re.match(r"^(\d+)$", s.strip())
+                if m:
+                    num = int(m.group(1))
+                    if num > max_num:
+                        max_num = num
+                        pad_len = max(3, len(m.group(1)))
+            candidate = str(max_num + 1).zfill(pad_len)
+        elif is_wh:
             prefix = ""
             pad_len = 3
             if prefix_so_ct:
@@ -200,7 +220,7 @@ class VoucherNumberingMixin:
         Ensure unique voucher number within the transaction:
         - Acquires sp_getapplock when inside a DB transaction so concurrent saves serialize cleanly.
         - If `prefer_month_max` is True (e.g. creating a voucher in save_voucher) or `so_ct` is empty:
-          allocates (max in month + 1) on the serialized cursor and verifies via ST_Check_Number.
+          allocates (max in month/day + 1) on the serialized cursor and verifies via ST_Check_Number.
         - Otherwise: checks ST_Check_Number on `so_ct` and auto-increments until unique.
         """
         target_db = self._get_target_db(db_mode)
@@ -208,7 +228,10 @@ class VoucherNumberingMixin:
         curr_so_ct = (so_ct or "").strip()
 
         if cur is not None:
-            _, _, ym_key = self._month_date_bounds(ngay_ct)
+            if clean_ma_ct == "N5":
+                _, _, lock_period = self._day_date_bounds(ngay_ct)
+            else:
+                _, _, lock_period = self._month_date_bounds(ngay_ct)
             try:
                 cur.execute(
                     """
@@ -218,7 +241,7 @@ class VoucherNumberingMixin:
                     IF @rc < 0
                         THROW 50001, 'Could not acquire voucher number lock (sp_getapplock timeout)', 1;
                     """,
-                    [f"web_vfp_soct:{target_db}:{clean_ma_ct}:{ym_key}"],
+                    [f"web_vfp_soct:{target_db}:{clean_ma_ct}:{lock_period}"],
                 )
             except Exception as e:
                 if "50001" in str(e) or "sp_getapplock timeout" in str(e):

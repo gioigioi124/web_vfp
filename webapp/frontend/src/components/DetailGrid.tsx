@@ -32,8 +32,10 @@ interface DetailGridProps {
   embedded?: boolean;
   /** 'list' (ctbhh) hoặc 'form' (ctbhd - thêm cột TK Có / CK / TT). */
   variant?: "list" | "form";
-  /** Chế độ nghiệp vụ: 'sales' (Phiếu bán VP_2014) hoặc 'warehouse' (Phiếu kho KH_2014). */
-  voucherMode?: "sales" | "warehouse";
+  /** Chế độ nghiệp vụ: 'sales' | 'return' (VP_2014) hoặc 'warehouse' (KH_2014). */
+  voucherMode?: "sales" | "return" | "warehouse";
+  /** Mã chứng từ ('X1' | 'N5') dùng để xác định nhãn, TK và cột TT = K khi nhập lại. */
+  maCt?: string;
   /** Chế độ sửa dữ liệu (Phase 2) */
   editable?: boolean;
   /** Bật/tắt tô đậm kích thước và độ dày trong cột Tên vật tư (biến thể form). */
@@ -64,6 +66,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
     embedded = false,
     variant = "list",
     voucherMode = "sales",
+    maCt,
     editable = false,
     highlightSpecs = false,
     activeRowIndex = 0,
@@ -77,6 +80,11 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
     onLookupPrice,
   }) => {
     const isWarehouse = voucherMode === "warehouse";
+    const isReturn =
+      (maCt || (voucherMode === "return" ? "N5" : "X1"))
+        .trim()
+        .toUpperCase() === "N5";
+    const defaultTt = isReturn ? "K" : "C";
 
     // Fetcher cho ô Mã vật tư: RAM-only (chờ lần nạp index đầu tiên rồi tra RAM).
     // Memo hóa để không tạo tham chiếu mới mỗi render (tránh Autocomplete fetch lặp).
@@ -575,7 +583,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
             ...immediate,
             ma_vt: cleanCode,
             ten_vt: hintTenVt ?? immediate.ten_vt,
-            gia_tb_tt: "C",
+            gia_tb_tt: defaultTt,
           },
           "MA_VT",
         );
@@ -608,6 +616,17 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
           const isLoai4 = nextLoaiVt === "4";
           const currentSl =
             latest.so_luong9 && latest.so_luong9 > 0 ? latest.so_luong9 : 1;
+          const nextAccounts = isReturn
+            ? {
+                tk: found.tk_vt || latest.tk || "1561",
+                tk_du: found.tk_gv || latest.tk_du || "632",
+                tk_du2: found.tk_hbtl || latest.tk_du2 || "5212",
+              }
+            : {
+                tk_du2: found.tk_dt || latest.tk_du2 || "5111",
+                tk_du: found.tk_vt || latest.tk_du || "1561",
+                tk: found.tk_gv || latest.tk || "632",
+              };
           applyRow(
             idx,
             {
@@ -620,9 +639,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
               ma_kho: (found.ma_kho || latest.ma_kho || "K0101")
                 .trim()
                 .toUpperCase(),
-              tk_du2: found.tk_dt || latest.tk_du2 || "5111",
-              tk_du: found.tk_vt || latest.tk_du || "1561",
-              tk: found.tk_gv || latest.tk || "632",
+              ...nextAccounts,
               tk_du4: found.tk_ck || latest.tk_du4 || undefined,
               he_so9: found.he_so0 || 1.0,
               so_luong9: currentSl,
@@ -638,7 +655,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
                     ? latest.he_so8!
                     : 1
                   : 1,
-              gia_tb_tt: "C",
+              gia_tb_tt: defaultTt,
             },
             "MA_VT_ENRICHED",
           );
@@ -670,12 +687,12 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
             ...afterPrice,
             gia_nt9: price.gia_nt9,
             chiet_khau: Math.round(price.chiet_khau || 0),
-            gia_tb_tt: "C",
+            gia_tb_tt: defaultTt,
           },
           "GIA_NT9",
         );
       },
-      [applyRow, isWarehouse, onLookupPrice],
+      [applyRow, defaultTt, isReturn, isWarehouse, onLookupPrice],
     );
 
     // Điều hướng NGANG trong cùng một dòng (← / → / Tab / Shift+Tab).
@@ -1019,7 +1036,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
                   </th>
                   {!isWarehouse && (
                     <th className="w-[46px] text-center" scope="col">
-                      TK Có
+                      {isReturn ? "TK Nợ" : "TK Có"}
                     </th>
                   )}
                   <th className="w-[56px] text-center" scope="col">
@@ -1032,7 +1049,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
                     Hệ số
                   </th>
                   <th className="w-[66px] text-right" scope="col">
-                    SL bán
+                    {isReturn ? "SL nhập" : "SL bán"}
                   </th>
                   {!isWarehouse && (
                     <>
@@ -1080,6 +1097,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
                       isActive={idx === currentActiveRow}
                       editable={editable}
                       isWarehouse={isWarehouse}
+                      isReturn={isReturn}
                       currency={currency}
                       highlightSpecs={highlightSpecs}
                       itemsRef={itemsRef}
@@ -1111,6 +1129,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
         currency={currency}
         embedded={embedded}
         isWarehouse={isWarehouse}
+        isReturn={isReturn}
         currentActiveRow={currentActiveRow}
         tableRef={tableRef}
         onSelectRow={handleSelectRow}

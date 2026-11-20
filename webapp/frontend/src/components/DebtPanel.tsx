@@ -659,19 +659,28 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
       {/* Mở hóa đơn/chứng từ toàn màn hình bằng chế độ sửa của VoucherForm */}
       {viewVoucher && (
         <div className="fixed inset-0 z-[75] bg-white flex flex-col overflow-hidden">
-          <VoucherForm
-            key={`debt-edit:${viewVoucher.stt}`}
-            stt={viewVoucher.stt}
-            voucher={viewVoucher}
-            mode="S"
-            voucherMode="sales"
-            onBack={() => setViewVoucher(null)}
-            onSaveSuccess={(savedStt, savedVoucher) => {
-              setViewVoucher(null);
-              void fetchLedger();
-              onVoucherSaved?.(savedStt, savedVoucher);
-            }}
-          />
+          {(() => {
+            const maCt: "X1" | "N5" =
+              (viewVoucher.ma_ct || "").trim().toUpperCase() === "N5"
+                ? "N5"
+                : "X1";
+            return (
+              <VoucherForm
+                key={`debt-edit:${viewVoucher.stt}`}
+                stt={viewVoucher.stt}
+                voucher={viewVoucher}
+                mode="S"
+                voucherMode={maCt === "N5" ? "return" : "sales"}
+                maCt={maCt}
+                onBack={() => setViewVoucher(null)}
+                onSaveSuccess={(savedStt, savedVoucher) => {
+                  setViewVoucher(null);
+                  void fetchLedger();
+                  onVoucherSaved?.(savedStt, savedVoucher);
+                }}
+              />
+            );
+          })()}
         </div>
       )}
     </div>

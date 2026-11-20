@@ -11,10 +11,12 @@ export interface PickupItem {
   so_luong8?: number;
   so_luong9?: number;
   loai_vt?: string;
+  tk_hbtl?: string;
 }
 
 export interface PickupSlip {
   stt: string;
+  ma_ct?: string;
   so_ct?: string;
   ngay_ct: string;
   ma_dt: string;

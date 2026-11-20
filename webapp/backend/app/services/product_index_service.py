@@ -133,8 +133,8 @@ class ProductIndexService:
             raw_snapshot = data["snapshot"]
             snapshot: Dict[int, dict] = {int(k): v for k, v in raw_snapshot.items()}
             sample = next(iter(snapshot.values()))
-            if not isinstance(sample, dict) or "ma_kho" not in sample:
-                logger.info("Product index disk cache missing 'ma_kho'; rebuilding from SQL.")
+            if not isinstance(sample, dict) or "ma_kho" not in sample or "tk_hbtl" not in sample:
+                logger.info("Product index disk cache missing 'ma_kho'/'tk_hbtl'; rebuilding from SQL.")
                 return
 
             version = max(1, int(data.get("version", 1)))
@@ -197,7 +197,7 @@ class ProductIndexService:
                         ISNULL(MAX(VTID), 0),
                         ISNULL(CHECKSUM_AGG(BINARY_CHECKSUM(
                             VTID, Ma_Vt, Ten_Vt, Dvt, Dvt_Ban, Loai_Vt,
-                            Tk_Gv, Tk_Vt, Tk_Dt, Tk_Ck, He_So0
+                            Tk_Gv, Tk_Vt, Tk_Dt, Tk_Ck, Tk_HBTL, He_So0
                         )), 0)
                     FROM {self.sys_db}.dbo.DmVt WITH (NOLOCK)
                     """
@@ -260,7 +260,8 @@ class ProductIndexService:
             SELECT VTID, RTRIM(Ma_Vt) AS Ma_Vt, {fn}(Ten_Vt) AS Ten_Vt,
                    {fn}(Dvt) AS Dvt, {fn}(Dvt_Ban) AS Dvt_Ban, Loai_Vt,
                    Tk_Gv, Tk_Vt, Tk_Dt, Tk_Ck,
-                   ISNULL(He_So0, 1) AS He_So0
+                   ISNULL(He_So0, 1) AS He_So0,
+                   ISNULL(Tk_HBTL, '') AS Tk_HBTL
             FROM {self.sys_db}.dbo.DmVt WITH (NOLOCK)
         """
         out: Dict[int, dict] = {}
@@ -278,6 +279,7 @@ class ProductIndexService:
                     "tk_vt": (r[7] or "1561").strip(),
                     "tk_dt": (r[8] or "5111").strip(),
                     "tk_ck": (r[9] or "").strip(),
+                    "tk_hbtl": (r[11] or "").strip(),
                     "he_so0": float(r[10] or 1.0),
                     "ma_kho": wh_map.get(ma.upper(), ""),
                 }
@@ -297,6 +299,7 @@ class ProductIndexService:
             "tk_vt": val["tk_vt"],
             "tk_dt": val["tk_dt"],
             "tk_ck": val["tk_ck"],
+            "tk_hbtl": val.get("tk_hbtl", ""),
             "he_so0": val["he_so0"],
             "ma_kho": val.get("ma_kho", ""),
             "k": chuan(f"{val['ma']} {val['ten']}"),
@@ -479,7 +482,8 @@ class ProductIndexService:
             SELECT TOP 1 VTID, RTRIM(Ma_Vt) AS Ma_Vt, {fn}(Ten_Vt) AS Ten_Vt,
                    {fn}(Dvt) AS Dvt, {fn}(Dvt_Ban) AS Dvt_Ban, Loai_Vt,
                    Tk_Gv, Tk_Vt, Tk_Dt, Tk_Ck,
-                   ISNULL(He_So0, 1) AS He_So0
+                   ISNULL(He_So0, 1) AS He_So0,
+                   ISNULL(Tk_HBTL, '') AS Tk_HBTL
             FROM {self.sys_db}.dbo.DmVt WITH (NOLOCK)
             WHERE Ma_Vt = ?
         """
@@ -524,6 +528,7 @@ class ProductIndexService:
             "tk_vt": (r[7] or "1561").strip(),
             "tk_dt": (r[8] or "5111").strip(),
             "tk_ck": (r[9] or "").strip(),
+            "tk_hbtl": (r[11] or "").strip(),
             "he_so0": float(r[10] or 1.0),
             "ma_kho": ma_kho,
         }

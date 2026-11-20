@@ -6,12 +6,12 @@ import {
   searchCustomers,
   getCustomer,
 } from "../lib/customerIndex";
-import { VoucherFilterParams } from "../types/voucher";
+import { VoucherFilterParams, VoucherMode } from "../types/voucher";
 import { User, RefreshCw, X } from "lucide-react";
 
 interface TopHeaderBarProps {
-  voucherMode: "sales" | "warehouse";
-  onChangeVoucherMode: (mode: "sales" | "warehouse") => void;
+  voucherMode: VoucherMode;
+  onChangeVoucherMode: (mode: VoucherMode) => void;
   filters: VoucherFilterParams;
   loading: boolean;
   onApplyFilter: (next: Partial<VoucherFilterParams>) => void;
@@ -118,14 +118,20 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
               className={`flex items-center justify-center w-7 h-7 rounded text-white font-bold text-sm shadow ${
                 voucherMode === "warehouse"
                   ? "bg-emerald-700"
-                  : "bg-primary-700"
+                  : voucherMode === "return"
+                    ? "bg-amber-700"
+                    : "bg-primary-700"
               }`}
             >
-              {voucherMode === "warehouse" ? "KH" : "PX"}
+              {voucherMode === "warehouse"
+                ? "KH"
+                : voucherMode === "return"
+                  ? "NL"
+                  : "PX"}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-neutral-600">/</span>
-              {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Phiếu Kho (KH_2014) */}
+              {/* Bộ chuyển đổi chế độ Phiếu Bán (VP_2014) <-> Nhập lại N5 <-> Phiếu Kho (KH_2014) */}
               <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded border border-neutral-700">
                 <button
                   type="button"
@@ -141,6 +147,18 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
                 </button>
                 <button
                   type="button"
+                  onClick={() => onChangeVoucherMode("return")}
+                  className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
+                    voucherMode === "return"
+                      ? "bg-amber-700 text-white shadow-sm"
+                      : "text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Quản lý Phiếu Nhập Lại Hàng Trả Lại N5 (CSDL VP_2014)"
+                >
+                  Nhập lại (N5)
+                </button>
+                <button
+                  type="button"
                   onClick={() => onChangeVoucherMode("warehouse")}
                   className={`px-2.5 py-0.5 rounded text-xs font-semibold transition cursor-pointer ${
                     voucherMode === "warehouse"
@@ -153,10 +171,20 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
                 </button>
               </div>
               <Badge
-                variant={voucherMode === "warehouse" ? "info" : "success"}
+                variant={
+                  voucherMode === "warehouse"
+                    ? "info"
+                    : voucherMode === "return"
+                      ? "warning"
+                      : "success"
+                }
                 className="ml-0.5 font-mono text-[10px]"
               >
-                {voucherMode === "warehouse" ? "CSDL: KH_2014" : "CSDL: VP_2014"}
+                {voucherMode === "warehouse"
+                  ? "CSDL: KH_2014"
+                  : voucherMode === "return"
+                    ? "CSDL: VP_2014 · N5"
+                    : "CSDL: VP_2014"}
               </Badge>
             </div>
 

@@ -11,6 +11,7 @@ class VatTuLookup(BaseModel):
     tk_vt: Optional[str] = "1561"
     tk_dt: Optional[str] = "5111"
     tk_ck: Optional[str] = "521"
+    tk_hbtl: Optional[str] = ""
     he_so0: Optional[float] = 1.0
     he_so1: Optional[float] = 1.0
     he_so2: Optional[float] = 1.0

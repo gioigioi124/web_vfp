@@ -4,7 +4,8 @@ export interface VoucherFormProps {
   stt?: string;
   voucher?: VoucherFullDetail | null;
   mode?: "M" | "S" | "VIEW";
-  voucherMode?: "sales" | "warehouse";
+  voucherMode?: "sales" | "return" | "warehouse";
+  maCt?: "X1" | "N5";
   isSuspended?: boolean;
   initialInherited?: Partial<VoucherFullDetail>;
   /** Gợi ý số chứng từ tức thì (0ms) tính từ danh sách đang mở khi tạo phiếu mới */
@@ -14,7 +15,12 @@ export interface VoucherFormProps {
   onViewDebt?: (maDt: string) => void;
   onOpenPickup?: (maDt?: string, ngayCt?: string) => void;
   onSaveSuccess?: (stt: string, savedVoucher?: VoucherFullDetail) => void;
-  pickupPayload?: { items: VoucherDetail[]; ma_xe?: string } | null;
+  pickupPayload?: {
+    items: VoucherDetail[];
+    ma_xe?: string;
+    ma_dt?: string;
+    ngay_ct?: string;
+  } | null;
   onClearPickupPayload?: () => void;
 }
 
@@ -54,7 +60,7 @@ export const CURRENT_USER = "KTCN3";
 export const MAX_UNDO_STEPS = 20;
 export const DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-export const emptyDetailRow = (): VoucherDetail => ({
+export const emptyDetailRow = (isReturn = false): VoucherDetail => ({
   stt0: Math.random().toString(36).substring(2, 9),
   ma_vt: "",
   ten_vt: "",
@@ -82,12 +88,12 @@ export const emptyDetailRow = (): VoucherDetail => ({
   tien2: 0,
   tien_nt3: 0,
   tien3: 0,
-  tk: "632",
-  tk_du: "1561",
-  tk_du2: "5111",
+  tk: isReturn ? "1561" : "632",
+  tk_du: isReturn ? "632" : "1561",
+  tk_du2: isReturn ? "5212" : "5111",
   tk_du4: "521",
   ma_kho: "K0101",
-  gia_tb_tt: "C",
+  gia_tb_tt: isReturn ? "K" : "C",
 });
 
 export const buildVoucherSnapshot = (params: {

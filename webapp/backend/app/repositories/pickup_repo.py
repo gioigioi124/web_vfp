@@ -22,6 +22,7 @@ class PickupRepository:
         ma_dt: Optional[str] = None,
         ngay_ct1: Optional[str] = None,
         ngay_ct2: Optional[str] = None,
+        ma_ct: Optional[str] = None,
         limit: int = 500,
     ) -> List[PickupSlipSchema]:
         """
@@ -29,8 +30,13 @@ class PickupRepository:
         Cross-checks: NOT EXISTS (SELECT 1 FROM VP_2014.dbo.CtBH0 vp WHERE vp.Stt_PX = h.Stt).
         100% READ-ONLY (SELECT only).
         """
-        where_clauses = ["h.Confirmed = 1", "h.Ma_Ct IN ('X1', 'N5')"]
-        params: List[Any] = []
+        clean_ma_ct = (ma_ct or "").strip().upper()
+        if clean_ma_ct in ("X1", "N5"):
+            where_clauses = ["h.Confirmed = 1", "h.Ma_Ct = ?"]
+            params: List[Any] = [clean_ma_ct]
+        else:
+            where_clauses = ["h.Confirmed = 1", "h.Ma_Ct IN ('X1', 'N5')"]
+            params = []
 
         if ma_dt and ma_dt.strip():
             where_clauses.append("h.Ma_Dt = ?")
@@ -57,7 +63,7 @@ class PickupRepository:
         sql = f"""
             WITH ReadyHeaders AS (
                 SELECT TOP ({safe_limit})
-                    h.Stt, h.So_Ct, h.Ngay_Ct, h.Ma_Dt, h.Dia_Chi, h.Ma_Xe
+                    h.Stt, h.So_Ct, h.Ngay_Ct, h.Ma_Dt, h.Dia_Chi, h.Ma_Xe, h.Ma_Ct
                 FROM {self.kh_db}.dbo.CtBH h WITH (NOLOCK)
                 WHERE {where_sql}
                   AND EXISTS (SELECT 1 FROM {self.kh_db}.dbo.CtBH0 d0 WITH (NOLOCK) WHERE d0.Stt = h.Stt)
@@ -70,7 +76,8 @@ class PickupRepository:
                 {self.fn_uni}(c.Ten_Dt) AS Ten_Dt,
                 agg.total_items,
                 agg.total_so_tam,
-                agg.total_so_luong9
+                agg.total_so_luong9,
+                h.Ma_Ct
             FROM ReadyHeaders h
             LEFT JOIN {self.sys_db}.dbo.DmDt c WITH (NOLOCK) ON c.Ma_Dt = h.Ma_Dt
             CROSS APPLY (
@@ -100,7 +107,8 @@ class PickupRepository:
                         ten_dt=(r[6] or "").strip(),
                         total_items=int(r[7] or 0),
                         total_so_tam=float(r[8] or 0.0),
-                        total_so_luong9=float(r[9] or 0.0)
+                        total_so_luong9=float(r[9] or 0.0),
+                        ma_ct=(r[10] or "X1").strip(),
                     ))
         except Exception as e:
             logger.error(f"Error querying pickup slips from {self.kh_db}: {e}")
@@ -135,7 +143,7 @@ class PickupRepository:
 
                     cur.execute(
                         f"""
-                        SELECT h.Stt, h.Ma_Xe, h.Ma_Dt, h.Ngay_Ct
+                        SELECT h.Stt, h.Ma_Xe, h.Ma_Dt, h.Ngay_Ct, h.Ma_Ct
                         FROM {self.kh_db}.dbo.CtBH h WITH (NOLOCK)
                         WHERE h.Stt IN ({ph})
                         """,
@@ -148,6 +156,7 @@ class PickupRepository:
                             "ma_xe": (r[1] or "").strip(),
                             "ma_dt": (r[2] or "").strip(),
                             "ngay_ct": r[3].strftime("%Y-%m-%d") if r[3] else "",
+                            "ma_ct": (r[4] or "X1").strip(),
                         }
 
                     cur.execute(
@@ -166,7 +175,8 @@ class PickupRepository:
                             ISNULL(v.Tk_Gv, '632') AS Tk_Gv,
                             ISNULL(v.Tk_Vt, '1561') AS Tk_Vt,
                             ISNULL(v.Tk_Dt, '5111') AS Tk_Dt,
-                            ISNULL(v.Tk_Ck, '521') AS Tk_Ck
+                            ISNULL(v.Tk_Ck, '521') AS Tk_Ck,
+                            ISNULL(v.Tk_HBTL, '') AS Tk_HBTL
                         FROM {self.kh_db}.dbo.CtBH0 d WITH (NOLOCK)
                         LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = d.Ma_Vt
                         WHERE d.Stt IN ({ph})
@@ -193,6 +203,7 @@ class PickupRepository:
                             tk_vt=(r[13] or "1561").strip(),
                             tk_dt=(r[14] or "5111").strip(),
                             tk_ck=(r[15] or "521").strip(),
+                            tk_hbtl=(r[16] or "").strip(),
                         ))
         except Exception as e:
             logger.error(f"Error batch querying pickup slips from {self.kh_db}: {e}")
@@ -218,7 +229,8 @@ class PickupRepository:
                 ISNULL(v.Tk_Gv, '632') AS Tk_Gv,
                 ISNULL(v.Tk_Vt, '1561') AS Tk_Vt,
                 ISNULL(v.Tk_Dt, '5111') AS Tk_Dt,
-                ISNULL(v.Tk_Ck, '521') AS Tk_Ck
+                ISNULL(v.Tk_Ck, '521') AS Tk_Ck,
+                ISNULL(v.Tk_HBTL, '') AS Tk_HBTL
             FROM {self.kh_db}.dbo.CtBH0 d WITH (NOLOCK)
             LEFT JOIN {self.sys_db}.dbo.DmVt v WITH (NOLOCK) ON v.Ma_Vt = d.Ma_Vt
             WHERE d.Stt = ?
@@ -247,7 +259,8 @@ class PickupRepository:
                         tk_gv=(r[12] or "632").strip(),
                         tk_vt=(r[13] or "1561").strip(),
                         tk_dt=(r[14] or "5111").strip(),
-                        tk_ck=(r[15] or "521").strip()
+                        tk_ck=(r[15] or "521").strip(),
+                        tk_hbtl=(r[16] or "").strip(),
                     ))
             return PickupDetailResponse(stt=stt, items=items)
         except Exception as e:

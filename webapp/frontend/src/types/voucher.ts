@@ -143,3 +143,5 @@ export interface VoucherFilterParams {
   page?: number;
   page_size?: number;
 }
+
+export type VoucherMode = "sales" | "return" | "warehouse";

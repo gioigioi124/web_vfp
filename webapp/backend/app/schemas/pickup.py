@@ -19,9 +19,11 @@ class PickupItemSchema(BaseModel):
     tk_vt: Optional[str] = "1561"
     tk_dt: Optional[str] = "5111"
     tk_ck: Optional[str] = "521"
+    tk_hbtl: Optional[str] = ""
 
 class PickupSlipSchema(BaseModel):
     stt: str
+    ma_ct: Optional[str] = "X1"
     so_ct: Optional[str] = ""
     ngay_ct: str
     ma_dt: str
@@ -37,12 +39,13 @@ class PickupDetailResponse(BaseModel):
     items: List[PickupItemSchema]
 
 class PickupAcceptRequest(BaseModel):
-    """Danh sách Stt phiếu xuất kho người dùng đã chọn (nút Chấp nhận - ctbhch)."""
+    """Danh sách Stt phiếu kho người dùng đã chọn (nút Chấp nhận - ctbhch)."""
     stts: List[str]
     ma_dt: Optional[str] = None
     ngay_ct: Optional[str] = None
     ty_gia: Optional[float] = 1.0
     ma_tte: Optional[str] = "VND"
+    ma_ct: Optional[str] = "X1"
 
 class PickupAcceptRow(BaseModel):
     """Dòng dữ liệu ánh xạ sang K_CtTemp (dòng chi tiết chứng từ) — chỉ trả về, KHÔNG ghi."""

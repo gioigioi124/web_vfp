@@ -6,6 +6,7 @@ import {
   VoucherFilterParams,
   VoucherPagination,
   VoucherSummaryTotals,
+  VoucherMode,
 } from "../types/voucher";
 import { getTodayDate } from "../lib/format";
 import {
@@ -26,19 +27,22 @@ import {
   subscribeVoucherMutations,
 } from "../lib/syncChannel";
 
+const toDbMode = (mode: VoucherMode): "sales" | "warehouse" =>
+  mode === "warehouse" ? "warehouse" : "sales";
+
 /**
  * Khóa cache cho từng loại tài nguyên.
  * Nhờ khóa tách biệt, khi mở form (1 phiếu) chỉ cần làm mới đúng phiếu đó,
  * KHÔNG phải tải lại toàn bộ danh sách (list).
  */
-const listKey = (mode: "sales" | "warehouse", f: VoucherFilterParams) =>
+const listKey = (mode: VoucherMode, f: VoucherFilterParams) =>
   `list:${mode}:${f.ma_ct || ""}:${f.ngay_ct1 || ""}:${f.ngay_ct2 || ""}:${f.so_ct1 || ""}:${
     f.so_ct2 || ""
   }:${f.ma_dt || ""}:${f.ma_kho || ""}:${f.ma_vt || ""}:${f.ma_tte || ""}:${
     f.dien_giai || ""
   }:${f.page || 1}:${f.page_size || 50}`;
-const voucherKey = (mode: "sales" | "warehouse", stt: string) =>
-  `voucher:${mode}:${stt}`;
+const voucherKey = (mode: VoucherMode, stt: string) =>
+  `voucher:${toDbMode(mode)}:${stt}`;
 const debtKey = (maDt: string) => `debt:${maDt}`;
 
 function toHeaderRow(v: VoucherFullDetail): VoucherHeader {
@@ -104,9 +108,7 @@ function matchesActiveFilters(
 }
 
 export function useVouchers() {
-  const [voucherMode, setVoucherModeState] = useState<"sales" | "warehouse">(
-    "sales",
-  );
+  const [voucherMode, setVoucherModeState] = useState<VoucherMode>("sales");
   const [vouchers, setVouchers] = useState<VoucherHeader[]>([]);
   const [pagination, setPagination] = useState<VoucherPagination>({
     page: 1,
@@ -189,6 +191,7 @@ export function useVouchers() {
 
   const fetchVouchers = useCallback(
     async (opts: { force?: boolean; silent?: boolean } = {}) => {
+      const dbMode = toDbMode(voucherMode);
       const key = listKey(voucherMode, filters);
       const cached = peek<any>(key);
       // SWR: có cache → hiển thị ngay.
@@ -213,7 +216,7 @@ export function useVouchers() {
         if (filters.dien_giai) q.append("dien_giai", filters.dien_giai);
         q.append("page", String(filters.page || 1));
         q.append("page_size", String(filters.page_size || 50));
-        q.append("db_mode", voucherMode);
+        q.append("db_mode", dbMode);
 
         const data = await cachedFetch<any>(
           key,
@@ -327,6 +330,7 @@ export function useVouchers() {
 
     let cancelled = false;
     const controller = new AbortController();
+    const dbMode = toDbMode(voucherMode);
     const vKey = voucherKey(voucherMode, selectedStt);
 
     // 1) Đọc ma_dt tức thì từ danh sách header hiện có để gọi detail + debt SONG SONG
@@ -340,12 +344,12 @@ export function useVouchers() {
       setListDetail(cachedDetail.data.items || []);
     }
     const maDtForCache = knownMaDt || (cachedDetail?.data?.ma_dt || "").trim();
-    if (maDtForCache && voucherMode === "sales") {
+    if (maDtForCache && voucherMode !== "warehouse") {
       const cachedDebt = peek<any>(debtKey(maDtForCache));
       if (cachedDebt?.success && cachedDebt.data) {
         setDebtAmount(cachedDebt.data.du_cuoi ?? null);
       }
-    } else if (voucherMode !== "sales") {
+    } else if (voucherMode === "warehouse") {
       setDebtAmount(null);
     }
 
@@ -356,19 +360,19 @@ export function useVouchers() {
 
       // Nạp ngầm bản in & logo sau khi người dùng dừng ở dòng này (dùng TTL 15s, không force)
       preloadPrintLogo();
-      prefetchPrintPayload(voucherMode, selectedStt, false);
+      prefetchPrintPayload(dbMode, selectedStt, false);
 
       const loadDetail = async () => {
         if (!hasCachedDetail) setListDetailLoading(true);
         try {
           const detailPromise = cachedFetch<any>(
             vKey,
-            `/api/vouchers/${encodeURIComponent(selectedStt)}?db_mode=${encodeURIComponent(voucherMode)}`,
+            `/api/vouchers/${encodeURIComponent(selectedStt)}?db_mode=${encodeURIComponent(dbMode)}`,
             { ttl: 10_000, signal: controller.signal },
           );
 
           const debtPromise =
-            knownMaDt && voucherMode === "sales"
+            knownMaDt && voucherMode !== "warehouse"
               ? cachedFetch<any>(
                   debtKey(knownMaDt),
                   `/api/debt/customer?ma_dt=${encodeURIComponent(knownMaDt)}`,
@@ -385,7 +389,7 @@ export function useVouchers() {
           if (detailData?.success && detailData.data) {
             setListDetail(detailData.data.items || []);
             const resolvedMaDt = (detailData.data.ma_dt || "").trim();
-            if (voucherMode !== "sales" || !resolvedMaDt) {
+            if (voucherMode === "warehouse" || !resolvedMaDt) {
               setDebtAmount(null);
             } else if (debtData?.success && debtData.data) {
               setDebtAmount(debtData.data.du_cuoi ?? null);
@@ -444,9 +448,10 @@ export function useVouchers() {
   ): Promise<boolean> => {
     if (!opts?.silent) setLoadingDetail(true);
     try {
+      const dbMode = toDbMode(voucherMode);
       const data = await cachedFetch<any>(
         voucherKey(voucherMode, stt),
-        `/api/vouchers/${encodeURIComponent(stt)}?db_mode=${encodeURIComponent(voucherMode)}`,
+        `/api/vouchers/${encodeURIComponent(stt)}?db_mode=${encodeURIComponent(dbMode)}`,
         { force: true },
       );
       if (data.success && data.data) {
@@ -559,7 +564,7 @@ export function useVouchers() {
         invalidate(`debt:${prevRow.ma_dt.trim().toUpperCase()}`);
       }
       invalidatePrintCache(saved.stt);
-      prefetchPrintPayload(mode, saved.stt, true);
+      prefetchPrintPayload(toDbMode(mode), saved.stt, true);
 
       // 4) Thông báo tab khác & đồng bộ ngầm với SQL Server
       broadcastVoucherMutation({
@@ -707,13 +712,18 @@ export function useVouchers() {
   };
 
   const setVoucherMode = useCallback(
-    (mode: "sales" | "warehouse") => {
+    (mode: VoucherMode) => {
       if (mode === voucherMode) return;
       setActiveVoucher(null);
       setSelectedStt(null);
       setListDetail([]);
       setDebtAmount(null);
       setVoucherModeState(mode);
+      setFilters((prev) => ({
+        ...prev,
+        ma_ct: mode === "return" ? "N5" : "X1",
+        page: 1,
+      }));
     },
     [voucherMode],
   );

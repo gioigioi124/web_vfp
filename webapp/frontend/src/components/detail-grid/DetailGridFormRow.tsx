@@ -19,6 +19,7 @@ export interface DetailGridFormRowProps {
   isActive: boolean;
   editable: boolean;
   isWarehouse: boolean;
+  isReturn?: boolean;
   currency: string;
   highlightSpecs: boolean;
   itemsRef: React.MutableRefObject<VoucherDetail[]>;
@@ -50,6 +51,7 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
     isActive,
     editable,
     isWarehouse,
+    isReturn = false,
     currency,
     highlightSpecs,
     itemsRef,
@@ -65,13 +67,16 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
     onReadOnlyKeyDown,
     onReadOnlyCopy,
   }) => {
+    const fixedTt = isReturn ? "K" : "C";
     const isManualRow = !(it.stt_px && it.stt_px.trim());
     const rowClassName =
       [isActive ? "xl-row-active" : "", isManualRow ? "xl-row-manual" : ""]
         .filter(Boolean)
         .join(" ") || undefined;
     const rowTitle = isManualRow
-      ? "Dòng nhập trực tiếp (không lấy từ Chọn phiếu xuất)"
+      ? isReturn
+        ? "Dòng nhập trực tiếp (không lấy từ Chọn phiếu nhập lại)"
+        : "Dòng nhập trực tiếp (không lấy từ Chọn phiếu xuất)"
       : undefined;
 
     if (editable) {
@@ -171,12 +176,12 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
               className="xl-ro-input text-right font-mono font-bold text-primary-900 tabular-nums"
             />
           </td>
-          {/* TK Có (chỉ đọc — click chọn/copy được) */}
+          {/* TK Có / TK Nợ (chỉ đọc — click chọn/copy được) */}
           {!isWarehouse && (
             <td className="xl-ro">
               <ReadOnlyGridInput
                 isFormReadOnlyColumn
-                value={it.tk_du2 || it.tk_du || "5111"}
+                value={it.tk_du2 || it.tk_du || (isReturn ? "5212" : "5111")}
                 rowIndex={idx}
                 onSelectRow={onSelectRow}
                 onKeyDown={onReadOnlyKeyDown}
@@ -376,11 +381,11 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
               </td>
             </>
           )}
-          {/* TT: luôn cố định là "C" (ô chỉ-chọn), bấm Enter tại ô này sẽ kiểm tra dòng và tạo dòng mới */}
+          {/* TT: cố định là "C" (X1) hoặc "K" (N5) (ô chỉ-chọn), bấm Enter tại ô này sẽ kiểm tra dòng và tạo dòng mới */}
           <td className="xl-cell">
             <input
               type="text"
-              value="C"
+              value={fixedTt}
               readOnly
               data-mode="select"
               onMouseDown={(e) => handleExcelMouseDown(e, "select")}
@@ -390,7 +395,7 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
               }}
               onKeyDown={(e) => onCellKeyDown(e, idx, true)}
               onCopy={onReadOnlyCopy}
-              title="Cố định là C — Bấm Enter để tạo dòng mới"
+              title={`Cố định là ${fixedTt} — Bấm Enter để tạo dòng mới`}
               className="xl-input text-center font-semibold text-neutral-600 uppercase grid-cell-input"
             />
           </td>
@@ -464,7 +469,7 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
         {!isWarehouse && (
           <td className="xl-cell">
             <ReadOnlyGridInput
-              value={it.tk_du || it.tk_du2 || ""}
+              value={it.tk_du2 || it.tk_du || ""}
               placeholder="—"
               rowIndex={idx}
               onSelectRow={onSelectRow}
@@ -555,7 +560,7 @@ export const DetailGridFormRow: React.FC<DetailGridFormRowProps> = React.memo(
         )}
         <td className="xl-cell">
           <ReadOnlyGridInput
-            value="C"
+            value={fixedTt}
             rowIndex={idx}
             onSelectRow={onSelectRow}
             onKeyDown={onReadOnlyKeyDown}

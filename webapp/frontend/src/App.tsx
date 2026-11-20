@@ -21,6 +21,7 @@ import {
   VoucherFullDetail,
   VoucherDetail,
   VoucherHeader,
+  VoucherMode,
 } from "./types/voucher";
 import { PickupSlip, PickupItem } from "./types/pickup";
 import {
@@ -55,13 +56,34 @@ const ShortcutsDialog = lazy(() =>
   })),
 );
 
-/** Ước tính nhanh (0ms) số chứng từ tiếp theo trong tháng hiện tại từ danh sách đang có. */
+/** Ước tính nhanh (0ms) số chứng từ tiếp theo (theo tháng cho X1, theo ngày cho N5) từ danh sách đang có. */
 function computeOptimisticNextSoCt(
   vouchers: VoucherHeader[],
-  mode: "sales" | "warehouse",
+  mode: VoucherMode,
   targetDate: string,
 ): string {
-  const ym = (targetDate || "").slice(0, 7);
+  const cleanDate = (targetDate || "").slice(0, 10);
+  if (mode === "return") {
+    let maxNum = 0;
+    let padLen = 3;
+    for (const v of vouchers) {
+      if (cleanDate && (v.ngay_ct || "").slice(0, 10) !== cleanDate) continue;
+      if ((v.ma_ct || "").trim().toUpperCase() !== "N5") continue;
+      const raw = (v.so_ct || "").trim().toUpperCase();
+      if (!raw) continue;
+      const m = /^(\d+)$/.exec(raw);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num > maxNum) {
+          maxNum = num;
+          padLen = Math.max(3, m[1].length);
+        }
+      }
+    }
+    return String(maxNum + 1).padStart(padLen, "0");
+  }
+
+  const ym = cleanDate.slice(0, 7);
   let maxNum = 0;
   let bestPrefix = mode === "sales" ? "HD" : "";
   let padLen = 4;
@@ -151,7 +173,7 @@ export function App() {
   const [marked, setMarked] = useState<Set<string>>(new Set());
   const pendingClearMarkedRef = useRef<boolean>(false);
 
-  // Idle-prefetch VoucherForm chunk để bấm F2/F3 mở tức thì mà không làm nặng initial bundle
+  // Idle-prefetch VoucherForm chunk để bấm F2/F3 mở tức thì
   useEffect(() => {
     const w = window as Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
@@ -185,6 +207,8 @@ export function App() {
   const [pickupPayload, setPickupPayload] = useState<{
     items: VoucherDetail[];
     ma_xe?: string;
+    ma_dt?: string;
+    ngay_ct?: string;
   } | null>(null);
 
   const dismissToast = useCallback(() => {
@@ -257,12 +281,15 @@ export function App() {
   const navToList = useCallback(() => navigate("/sales-invoices"), [navigate]);
   const openFilterModal = useCallback(() => setIsFilterOpen(true), [setIsFilterOpen]);
 
+  const apiDbMode: "sales" | "warehouse" =
+    voucherMode === "warehouse" ? "warehouse" : "sales";
+
   // Lấy dữ liệu phiếu tức thì (từ state activeVoucher, cache RAM, hoặc ghép từ dòng đang chọn)
   // để mở form Sửa (mode="S") không bị trống ở render đầu tiên trước khi useEffect chạy.
   const editingVoucher = useMemo<VoucherFullDetail | null>(() => {
     if (!sttParam || isNew) return null;
     if (activeVoucher?.stt === sttParam) return activeVoucher;
-    const cached = peek<any>(`voucher:${voucherMode}:${sttParam}`);
+    const cached = peek<any>(`voucher:${apiDbMode}:${sttParam}`);
     if (cached?.success && cached.data?.stt === sttParam) {
       return cached.data as VoucherFullDetail;
     }
@@ -274,7 +301,14 @@ export function App() {
       };
     }
     return null;
-  }, [sttParam, isNew, activeVoucher, voucherMode, vouchers, selectedStt, listDetail]);
+  }, [sttParam, isNew, activeVoucher, apiDbMode, vouchers, selectedStt, listDetail]);
+
+  const activeMaCt: "X1" | "N5" =
+    voucherMode === "return" ||
+    (!isNew &&
+      (editingVoucher?.ma_ct || "").trim().toUpperCase() === "N5")
+      ? "N5"
+      : "X1";
 
   useEffect(() => {
     if (sttParam && !isNew) {
@@ -300,10 +334,11 @@ export function App() {
     ngayCt?: string;
   }>({});
 
-  // Overlay Thêm mới (F2) / Sửa (F3) phiếu xuất kho trực tiếp từ PickupDialog
+  // Overlay Thêm mới (F2) / Sửa (F3) phiếu kho trực tiếp từ PickupDialog
   const [warehouseOverlay, setWarehouseOverlay] = useState<{
     mode: "M" | "S";
     stt?: string;
+    maCt?: "X1" | "N5";
     voucher?: VoucherFullDetail | null;
     initialInherited?: Partial<VoucherFullDetail>;
   } | null>(null);
@@ -372,14 +407,18 @@ export function App() {
       }
     }
 
+    const targetMaCt: "X1" | "N5" = activeMaCt;
+    const isReturnSlip = targetMaCt === "N5";
     setWarehouseOverlay({
       mode: "M",
+      maCt: targetMaCt,
       voucher: null,
       initialInherited: {
         ...custInfo,
         ngay_ct: ngayCtVal,
-        dien_giai0: "xuất bán",
-        ma_ct: "X1",
+        dien_giai0: isReturnSlip ? "nhập lại" : "xuất bán",
+        ma_ct: targetMaCt,
+        nh_ct: isReturnSlip ? "1" : "2",
       },
     });
   };
@@ -390,6 +429,11 @@ export function App() {
   ) => {
     // Mở overlay tức thì (0ms) từ cache RAM hoặc dữ liệu slip/items đã nạp sẵn trong PickupDialog,
     // sau đó đồng bộ ngầm bản đầy đủ từ SQL mà không chặn màn hình.
+    const slipMaCt: "X1" | "N5" =
+      (preview?.slip?.ma_ct || activeMaCt).trim().toUpperCase() === "N5"
+        ? "N5"
+        : "X1";
+    const isReturnSlip = slipMaCt === "N5";
     const cached = peek<any>(`voucher:warehouse:${stt}`);
     let previewVoucher: VoucherFullDetail | null = null;
     if (cached?.success && cached.data?.stt === stt) {
@@ -399,8 +443,8 @@ export function App() {
       previewVoucher = {
         stt: s.stt,
         ma_dvcs: "S1",
-        ma_ct: "X1",
-        nh_ct: "2",
+        ma_ct: slipMaCt,
+        nh_ct: isReturnSlip ? "1" : "2",
         ma_tte: "VND",
         ty_gia: 1,
         ngay_ct: s.ngay_ct,
@@ -410,7 +454,7 @@ export function App() {
         ten_dt: s.ten_dt || "",
         ong_ba: s.ten_dt || "",
         dia_chi: s.dia_chi || "",
-        dien_giai0: "xuất bán",
+        dien_giai0: isReturnSlip ? "nhập lại" : "xuất bán",
         ma_xe: s.ma_xe || "",
         ten_xe: "",
         ttien_nt: 0,
@@ -441,7 +485,7 @@ export function App() {
           he_so9: 1,
           so_luong9: it.so_luong9 ?? 0,
           so_luong: it.so_luong9 ?? it.so_luong8 ?? 0,
-          gia_tb_tt: "C",
+          gia_tb_tt: isReturnSlip ? "K" : "C",
         })),
       };
     }
@@ -450,6 +494,10 @@ export function App() {
       setWarehouseOverlay({
         mode: "S",
         stt,
+        maCt:
+          (previewVoucher.ma_ct || slipMaCt).trim().toUpperCase() === "N5"
+            ? "N5"
+            : "X1",
         voucher: previewVoucher,
       });
     }
@@ -460,13 +508,19 @@ export function App() {
       );
       const data = await res.json();
       if (res.ok && data?.success && data?.data) {
+        const fetched = data.data as VoucherFullDetail;
+        const fetchedMaCt: "X1" | "N5" =
+          (fetched.ma_ct || slipMaCt).trim().toUpperCase() === "N5"
+            ? "N5"
+            : "X1";
         setWarehouseOverlay((prev) => {
           // Nếu người dùng đã đóng overlay trong lúc tải ngầm thì không mở lại
           if (previewVoucher && (!prev || prev.stt !== stt)) return prev;
           return {
             mode: "S",
             stt,
-            voucher: data.data as VoucherFullDetail,
+            maCt: fetchedMaCt,
+            voucher: fetched,
           };
         });
       } else if (!previewVoucher) {
@@ -484,6 +538,7 @@ export function App() {
 
   // Handler for F2 (New Voucher)
   const handleActionNew = () => {
+    const defaultMaCt = voucherMode === "return" ? "N5" : "X1";
     if (currentSelectedVoucher) {
       setInheritedData({
         ma_dt: currentSelectedVoucher.ma_dt,
@@ -495,7 +550,10 @@ export function App() {
         ten_xe: currentSelectedVoucher.ten_xe,
         ma_bp: currentSelectedVoucher.ma_bp,
         ten_bp: currentSelectedVoucher.ten_bp,
-        ma_ct: currentSelectedVoucher.ma_ct || "X1",
+        ma_ct:
+          voucherMode === "return"
+            ? "N5"
+            : currentSelectedVoucher.ma_ct || defaultMaCt,
       });
     } else {
       setInheritedData(null);
@@ -560,7 +618,7 @@ export function App() {
         ma_dt: currentSelectedVoucher.ma_dt,
         ten_dt: currentSelectedVoucher.ten_dt,
         ngay_ct: currentSelectedVoucher.ngay_ct,
-        dbMode: voucherMode,
+        dbMode: apiDbMode,
         fromPickup: false,
       });
     } else {
@@ -1176,10 +1234,11 @@ export function App() {
             }
           >
             <VoucherForm
-              key={`${voucherMode}:${isNew ? "new" : sttParam}`}
+              key={`${voucherMode}:${activeMaCt}:${isNew ? "new" : sttParam}`}
               stt={isNew ? undefined : sttParam}
               mode={isNew ? "M" : "S"}
               voucherMode={voucherMode}
+              maCt={activeMaCt}
               isSuspended={!!warehouseOverlay || isDebtOpen}
               voucher={isNew ? null : editingVoucher}
               initialInherited={inheritedData || undefined}
@@ -1375,6 +1434,7 @@ export function App() {
           <PickupDialog
             isOpen={isPickupOpen}
             isSuspended={!!warehouseOverlay || !!deleteTarget}
+            maCt={activeMaCt}
             onClose={() => setIsPickupOpen(false)}
             maDt={
               pickupParams.maDt ||
@@ -1409,8 +1469,16 @@ export function App() {
                 fromPickup: true,
               });
             }}
-            onAccept={(_slips, items, maXe) => {
-              setPickupPayload({ items, ma_xe: maXe });
+            onAccept={(selectedSlips, items, maXe) => {
+              const primarySlip = selectedSlips[0];
+              setPickupPayload({
+                items,
+                ma_xe: maXe,
+                ma_dt: primarySlip?.ma_dt?.trim() || undefined,
+                ngay_ct: primarySlip?.ngay_ct
+                  ? primarySlip.ngay_ct.slice(0, 10)
+                  : undefined,
+              });
               if (!sttParam) {
                 // If currently on list view, open new voucher form with pickup items
                 navToNew();
@@ -1421,85 +1489,105 @@ export function App() {
         </Suspense>
       )}
 
-      {/* Overlay Thêm / Sửa Phiếu Xuất Kho (KH_2014) mở trực tiếp từ PickupDialog */}
+      {/* Overlay Thêm / Sửa Phiếu Kho (KH_2014: X1 hoặc N5) mở trực tiếp từ PickupDialog */}
       {warehouseOverlay && (
         <div className="fixed inset-0 z-[60] bg-white flex flex-col overflow-hidden shadow-2xl">
           <Suspense
             fallback={
               <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500 gap-2">
                 <RefreshCw className="w-4 h-4 animate-spin text-primary-600" />
-                <span>Đang tải phiếu xuất kho...</span>
+                <span>Đang tải phiếu kho...</span>
               </div>
             }
           >
-            <VoucherForm
-              key={`wh-overlay:${warehouseOverlay.mode}:${warehouseOverlay.stt || "new"}`}
-              stt={warehouseOverlay.stt}
-              mode={warehouseOverlay.mode}
-              voucherMode="warehouse"
-              voucher={warehouseOverlay.voucher || null}
-              initialInherited={warehouseOverlay.initialInherited}
-              onBack={() => {
-                setWarehouseOverlay(null);
-              }}
-              onPrint={() => {}}
-              onViewDebt={(dt) => handleOpenDebt(dt)}
-              onOpenPickup={() => {}}
-              onSaveSuccess={(savedStt, savedVoucher) => {
-                const wasCreate = warehouseOverlay.mode === "M";
-                setWarehouseOverlay(null);
-                setPickupFocusStt(savedStt);
-                if (savedVoucher) {
-                  // 0ms: cập nhật phiếu xuất kho ngay trên bảng PickupDialog trước khi đồng bộ nền
-                  const optSlip: PickupSlip = {
-                    stt: savedStt,
-                    so_ct: savedVoucher.so_ct,
-                    ngay_ct: savedVoucher.ngay_ct,
-                    ma_dt: savedVoucher.ma_dt,
-                    ten_dt: savedVoucher.ten_dt || "",
-                    dia_chi: savedVoucher.dia_chi || "",
-                    ma_xe: savedVoucher.ma_xe || "",
-                    total_items: savedVoucher.items.length,
-                    total_so_tam: savedVoucher.items.reduce(
-                      (s, it) => s + (Number(it.so_tam) || 0),
-                      0,
-                    ),
-                    total_so_luong9: savedVoucher.items.reduce(
-                      (s, it) => s + (Number(it.so_luong9) || 0),
-                      0,
-                    ),
-                  };
-                  const optItems: PickupItem[] = savedVoucher.items.map(
-                    (it, i) => ({
-                      stt: savedStt,
-                      stt0: it.stt0 || String(i),
-                      ma_kho: it.ma_kho || "K0101",
-                      ma_vt: (it.ma_vt || "").trim(),
-                      ten_vt: it.ten_vt || "",
-                      dvt: it.dvt || "",
-                      dvt_ban: it.dvt_ban || "",
-                      loai_vt: it.loai_vt || "1",
-                      so_tam: Number(it.so_tam) || 0,
-                      he_so8: Number(it.he_so8) || 1,
-                      so_luong8: Number(it.so_luong8) || 0,
-                      so_luong9: Number(it.so_luong9) || 0,
-                    }),
-                  );
-                  setPickupOptimisticSlip({
-                    slip: optSlip,
-                    items: optItems,
-                    version: Date.now(),
-                  });
-                }
-                setPickupRefreshTrigger((prev) => prev + 1);
-                showToast(
-                  wasCreate
-                    ? `Đã tạo mới phiếu xuất kho ${savedVoucher?.so_ct || ""} thành công.`
-                    : `Đã cập nhật phiếu xuất kho ${savedVoucher?.so_ct || ""} thành công.`,
-                  "success",
-                );
-              }}
-            />
+            {(() => {
+              const overlayMaCt: "X1" | "N5" =
+                (
+                  warehouseOverlay.voucher?.ma_ct ||
+                  warehouseOverlay.maCt ||
+                  activeMaCt
+                )
+                  .trim()
+                  .toUpperCase() === "N5"
+                  ? "N5"
+                  : "X1";
+              return (
+                <VoucherForm
+                  key={`wh-overlay:${overlayMaCt}:${warehouseOverlay.mode}:${warehouseOverlay.stt || "new"}`}
+                  stt={warehouseOverlay.stt}
+                  mode={warehouseOverlay.mode}
+                  voucherMode="warehouse"
+                  maCt={overlayMaCt}
+                  voucher={warehouseOverlay.voucher || null}
+                  initialInherited={warehouseOverlay.initialInherited}
+                  onBack={() => {
+                    setWarehouseOverlay(null);
+                  }}
+                  onPrint={() => {}}
+                  onViewDebt={(dt) => handleOpenDebt(dt)}
+                  onOpenPickup={() => {}}
+                  onSaveSuccess={(savedStt, savedVoucher) => {
+                    const wasCreate = warehouseOverlay.mode === "M";
+                    setWarehouseOverlay(null);
+                    setPickupFocusStt(savedStt);
+                    if (savedVoucher) {
+                      // 0ms: cập nhật phiếu kho ngay trên bảng PickupDialog trước khi đồng bộ nền
+                      const optSlip: PickupSlip = {
+                        stt: savedStt,
+                        ma_ct: savedVoucher.ma_ct || overlayMaCt,
+                        so_ct: savedVoucher.so_ct,
+                        ngay_ct: savedVoucher.ngay_ct,
+                        ma_dt: savedVoucher.ma_dt,
+                        ten_dt: savedVoucher.ten_dt || "",
+                        dia_chi: savedVoucher.dia_chi || "",
+                        ma_xe: savedVoucher.ma_xe || "",
+                        total_items: savedVoucher.items.length,
+                        total_so_tam: savedVoucher.items.reduce(
+                          (s, it) => s + (Number(it.so_tam) || 0),
+                          0,
+                        ),
+                        total_so_luong9: savedVoucher.items.reduce(
+                          (s, it) => s + (Number(it.so_luong9) || 0),
+                          0,
+                        ),
+                      };
+                      const optItems: PickupItem[] = savedVoucher.items.map(
+                        (it, i) => ({
+                          stt: savedStt,
+                          stt0: it.stt0 || String(i),
+                          ma_kho: it.ma_kho || "K0101",
+                          ma_vt: (it.ma_vt || "").trim(),
+                          ten_vt: it.ten_vt || "",
+                          dvt: it.dvt || "",
+                          dvt_ban: it.dvt_ban || "",
+                          loai_vt: it.loai_vt || "1",
+                          so_tam: Number(it.so_tam) || 0,
+                          he_so8: Number(it.he_so8) || 1,
+                          so_luong8: Number(it.so_luong8) || 0,
+                          so_luong9: Number(it.so_luong9) || 0,
+                        }),
+                      );
+                      setPickupOptimisticSlip({
+                        slip: optSlip,
+                        items: optItems,
+                        version: Date.now(),
+                      });
+                    }
+                    setPickupRefreshTrigger((prev) => prev + 1);
+                    const slipLabel =
+                      overlayMaCt === "N5"
+                        ? "phiếu nhập lại kho"
+                        : "phiếu xuất kho";
+                    showToast(
+                      wasCreate
+                        ? `Đã tạo mới ${slipLabel} ${savedVoucher?.so_ct || ""} thành công.`
+                        : `Đã cập nhật ${slipLabel} ${savedVoucher?.so_ct || ""} thành công.`,
+                      "success",
+                    );
+                  }}
+                />
+              );
+            })()}
           </Suspense>
         </div>
       )}
@@ -1511,7 +1599,7 @@ export function App() {
             onClose={() => setIsDebtOpen(false)}
             maDt={debtMaDt}
             onVoucherSaved={(savedStt, savedVoucher) => {
-              if (savedVoucher && voucherMode === "sales") {
+              if (savedVoucher && voucherMode !== "warehouse") {
                 optimisticUpsertVoucher(savedVoucher, false);
               } else {
                 if (savedStt) invalidatePrintCache(savedStt);
@@ -1552,7 +1640,7 @@ export function App() {
             inGia={printInGia ?? printPrice}
             copies={printCopies}
             mode={printMode}
-            dbMode={voucherMode}
+            dbMode={apiDbMode}
           />
         </Suspense>
       )}

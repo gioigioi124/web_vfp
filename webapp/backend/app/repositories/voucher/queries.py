@@ -249,10 +249,11 @@ class VoucherQueryMixin:
                     return None
 
                 header_data = self._row_to_header_schema(h_row).model_dump()
+                default_tt = "K" if (header_data.get("ma_ct") or "").strip().upper() == "N5" else "C"
 
                 cur.execute(detail_sql, [stt])
                 d_rows = cur.fetchall()
-                items = [self._row_to_detail_schema(dr) for dr in d_rows]
+                items = [self._row_to_detail_schema(dr, default_gia_tb_tt=default_tt) for dr in d_rows]
 
                 return VoucherDetailResponse(**header_data, items=items)
         except Exception as e:

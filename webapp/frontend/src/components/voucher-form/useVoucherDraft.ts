@@ -7,7 +7,8 @@ import {
 } from "./types";
 
 interface UseVoucherDraftParams {
-  voucherMode: "sales" | "warehouse";
+  voucherMode: "sales" | "return" | "warehouse";
+  maCt: string;
   isCreate: boolean;
   isEditable: boolean;
   voucherStt: string;
@@ -25,6 +26,7 @@ interface UseVoucherDraftParams {
 
 export function useVoucherDraft({
   voucherMode,
+  maCt,
   isCreate,
   isEditable,
   voucherStt,
@@ -39,7 +41,8 @@ export function useVoucherDraft({
   userEditedSoCtRef,
   tenDtEditedRef,
 }: UseVoucherDraftParams) {
-  const draftStorageKey = `draft:${voucherMode}:${isCreate ? "new" : voucherStt || "edit"}`;
+  const dbKey = voucherMode === "warehouse" ? "warehouse" : "sales";
+  const draftStorageKey = `draft:${dbKey}:${maCt || "X1"}:${isCreate ? "new" : voucherStt || "edit"}`;
   const [pendingDraft, setPendingDraft] = useState<VoucherDraftPayload | null>(
     null,
   );

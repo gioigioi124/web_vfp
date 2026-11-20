@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PickupSlip, PickupItem } from "../types/pickup";
+import { getTodayDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
 import { cachedFetch, peek, prime, invalidate } from "../lib/apiCache";
 import { arrowDir } from "./ui/excelCell";
@@ -8,9 +9,30 @@ import { PickupMasterTable } from "./pickup/PickupMasterTable";
 import { PickupDetailTable } from "./pickup/PickupDetailTable";
 import { PickupFooter } from "./pickup/PickupFooter";
 
+function getMonthBounds(dateStr?: string): {
+  start: string;
+  end: string;
+  label: string;
+} {
+  const base =
+    dateStr && /^\d{4}-\d{2}-\d{2}/.test(dateStr.trim())
+      ? dateStr.trim().slice(0, 10)
+      : getTodayDate();
+  const [yStr, mStr] = base.split("-");
+  const year = parseInt(yStr, 10);
+  const month = parseInt(mStr, 10);
+  const lastDay = new Date(year, month, 0).getDate();
+  return {
+    start: `${yStr}-${mStr}-01`,
+    end: `${yStr}-${mStr}-${String(lastDay).padStart(2, "0")}`,
+    label: `${mStr}/${yStr}`,
+  };
+}
+
 interface PickupDialogProps {
   isOpen: boolean;
   isSuspended?: boolean;
+  maCt?: "X1" | "N5";
   onClose: () => void;
   maDt?: string;
   ngayCt?: string;
@@ -30,15 +52,16 @@ interface PickupDialogProps {
 }
 
 /**
- * Chọn Phiếu Xuất Kho (ctbhch — KH_2014).
- * Giao diện Master/Detail theo mẫu Pickup.html: header navy gradient,
- * bảng phiếu xuất (Grid1 - K_DsPx) + chi tiết vật tư (Grid2 - K_CtPx),
+ * Chọn Phiếu Xuất / Nhập Lại Kho (ctbhch — KH_2014).
+ * Giao diện Master/Detail theo mẫu Pickup.html: header navy/amber gradient,
+ * bảng phiếu kho (Grid1 - K_DsPx) + chi tiết vật tư (Grid2 - K_CtPx),
  * footer đếm "Số phiếu đã chọn [ n ] / [ total ]".
  * Hotkey khớp VFP (plan §7.2.3): Space, Ctrl+A, Ctrl+U, Ctrl+Home/End, Enter, Esc, F2, F3, F8.
  */
 export const PickupDialog: React.FC<PickupDialogProps> = ({
   isOpen,
   isSuspended = false,
+  maCt = "X1",
   onClose,
   maDt,
   ngayCt,
@@ -51,6 +74,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   refreshTrigger = 0,
   focusStt = null,
 }) => {
+  const effectiveMaCt: "X1" | "N5" = maCt === "N5" ? "N5" : "X1";
+  const isReturn = effectiveMaCt === "N5";
   const [rawSlips, setRawSlips] = useState<PickupSlip[]>([]);
   const slips = useMemo(
     () =>
@@ -209,16 +234,26 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     });
   }, [activeStt, hiddenStts, slips]);
 
+  const monthBounds = useMemo(() => getMonthBounds(ngayCt), [ngayCt]);
+
   // Fetch slips (SWR: hiển thị tức thì từ cache RAM nếu có, đồng bộ ngầm với SQL)
   const loadSlips = useCallback(
     async (preferredStt?: string | null, opts?: { force?: boolean }) => {
       const q = new URLSearchParams();
-      if (maDt) q.append("ma_dt", maDt);
-      if (ngayCt) {
-        q.append("ngay_ct1", ngayCt);
-        q.append("ngay_ct2", ngayCt);
+      q.append("ma_ct", effectiveMaCt);
+      if (isReturn) {
+        q.append("ngay_ct1", monthBounds.start);
+        q.append("ngay_ct2", monthBounds.end);
+      } else {
+        if (maDt) q.append("ma_dt", maDt);
+        if (ngayCt) {
+          q.append("ngay_ct1", ngayCt);
+          q.append("ngay_ct2", ngayCt);
+        }
       }
-      const listCacheKey = `pickup:list:${maDt || ""}:${ngayCt || ""}`;
+      const listCacheKey = isReturn
+        ? `pickup:list:N5:${monthBounds.start}:${monthBounds.end}`
+        : `pickup:list:X1:${maDt || ""}:${ngayCt || ""}`;
       const url = `/api/pickup/list?${q.toString()}`;
       const cached = peek<any>(listCacheKey);
       const hasCached = Boolean(cached?.success && Array.isArray(cached.data?.items));
@@ -271,7 +306,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             setErrorMsg(
               data?.detail?.message ||
                 data?.message ||
-                "Không tải được danh sách phiếu xuất kho.",
+                `Không tải được danh sách ${isReturn ? "phiếu nhập lại" : "phiếu xuất kho"}.`,
             );
             setRawSlips([]);
             setActiveStt(null);
@@ -283,8 +318,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         if (!hasCached) {
           setErrorMsg(
             e?.status
-              ? `Không tải được danh sách phiếu xuất kho (HTTP ${e.status}).`
-              : "Lỗi kết nối khi tải danh sách phiếu xuất kho.",
+              ? `Không tải được danh sách ${isReturn ? "phiếu nhập lại" : "phiếu xuất kho"} (HTTP ${e.status}).`
+              : `Lỗi kết nối khi tải danh sách ${isReturn ? "phiếu nhập lại" : "phiếu xuất kho"}.`,
           );
         }
       } finally {
@@ -294,8 +329,12 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
         setListFetchSeq(listFetchSeqRef.current);
       }
     },
-    [maDt, ngayCt],
+    [effectiveMaCt, isReturn, maDt, ngayCt, monthBounds.start, monthBounds.end],
   );
+
+  useEffect(() => {
+    setSelectedStts(new Set());
+  }, [effectiveMaCt, isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -427,40 +466,53 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     if (selectedStts.size === 0) return;
     setLoading(true);
     setErrorMsg(null);
+    const selected = slips.filter((s) => selectedStts.has(s.stt));
+    const primarySlip = selected.find((s) => s.stt === activeStt) || selected[0];
+    const orderedSelected = primarySlip
+      ? [primarySlip, ...selected.filter((s) => s.stt !== primarySlip.stt)]
+      : selected;
+    const acceptMaDt = isReturn
+      ? (primarySlip?.ma_dt || maDt || "").trim()
+      : maDt;
+    const acceptNgayCt = isReturn
+      ? primarySlip?.ngay_ct?.slice(0, 10) || ngayCt
+      : ngayCt;
     try {
       const res = await fetch("/api/pickup/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           stts: Array.from(selectedStts),
-          ma_dt: maDt,
-          ngay_ct: ngayCt,
+          ma_dt: acceptMaDt,
+          ngay_ct: acceptNgayCt,
+          ma_ct: effectiveMaCt,
         }),
       });
       const json = await res.json();
       if (res.ok && json.success && json.data) {
-        const selected = slips.filter((s) => selectedStts.has(s.stt));
         const rows = json.data.rows || [];
         if (rows.length > 0) {
           // Chấp nhận xong thì không trả focus về nút mở dialog, để VoucherForm focus xuống dòng cuối grid.
           prevFocusRef.current = null;
         }
-        onAccept(selected, rows, json.data.ma_xe || "");
+        onAccept(orderedSelected, rows, json.data.ma_xe || "");
         onClose();
       } else {
         setErrorMsg(
           json?.detail?.message ||
             json?.message ||
-            "Không thể lấy dòng hàng từ phiếu xuất kho.",
+            `Không thể lấy dòng hàng từ ${isReturn ? "phiếu nhập lại" : "phiếu xuất kho"}.`,
         );
       }
     } catch (err) {
       console.error("Error accepting pickup slips:", err);
-      setErrorMsg("Lỗi kết nối khi lấy dữ liệu phiếu xuất kho.");
+      setErrorMsg(
+        `Lỗi kết nối khi lấy dữ liệu ${isReturn ? "phiếu nhập lại" : "phiếu xuất kho"}.`,
+      );
     } finally {
       setLoading(false);
     }
-  }, [selectedStts, slips, maDt, ngayCt, onAccept, onClose]);
+  }, [selectedStts, slips, activeStt, maDt, ngayCt, effectiveMaCt, isReturn, onAccept, onClose]);
 
   // Điều hướng bàn phím trên Grid 1 (Danh sách phiếu xuất kho)
   const handleMasterCellKeyDown = useCallback(
@@ -768,7 +820,9 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
-      aria-label="Chọn phiếu xuất kho"
+      aria-label={
+        isReturn ? "Chọn phiếu nhập lại kho" : "Chọn phiếu xuất kho"
+      }
     >
       <div
         ref={containerRef}
@@ -778,13 +832,26 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             : "max-w-6xl h-full max-h-[92vh]"
         }`}
       >
-        {/* ===== Modal Header (navy gradient) ===== */}
-        <header className="flex items-center justify-between gap-3 px-4 py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0">
+        {/* ===== Modal Header (navy / amber gradient) ===== */}
+        <header
+          className={`flex items-center justify-between gap-3 px-4 py-2 text-white border-b shrink-0 ${
+            isReturn
+              ? "bg-gradient-to-r from-amber-900 via-amber-800 to-neutral-900 border-amber-900"
+              : "bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 border-primary-900"
+          }`}
+        >
           <div className="flex items-center space-x-2.5 shrink-0">
             <div className="w-2 h-2 rounded-full bg-secondary-300" />
             <h1 className="text-sm font-bold tracking-wide uppercase text-white">
-              Chọn Phiếu Xuất Kho
+              {isReturn
+                ? "Chọn Phiếu Nhập Lại Kho (N5)"
+                : "Chọn Phiếu Xuất Kho"}
             </h1>
+            {isReturn && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-white/15 text-amber-100 border border-white/20">
+                Tháng {monthBounds.label} · Tất cả KH
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 min-w-0">
             <div className="relative">
@@ -794,7 +861,11 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Lọc số phiếu / KH..."
-                aria-label="Lọc nhanh phiếu xuất kho"
+                aria-label={
+                  isReturn
+                    ? "Lọc nhanh phiếu nhập lại kho"
+                    : "Lọc nhanh phiếu xuất kho"
+                }
                 className="h-6 w-44 sm:w-56 pl-7 pr-6 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-xs outline-none focus:bg-white/20 focus:border-white/50"
               />
               {searchQuery && (
@@ -877,7 +948,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               </div>
             </div>
           )}
-          {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU XUẤT KHO */}
+          {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU KHO */}
           <PickupMasterTable
             filteredSlips={filteredSlips}
             totalSlipsCount={slips.length}
@@ -885,6 +956,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             activeStt={activeStt}
             allSelected={allSelected}
             loading={loading}
+            isReturn={isReturn}
             searchQuery={searchQuery}
             masterScrollRef={masterScrollRef}
             masterHeadRef={masterHeadRef}
@@ -923,6 +995,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
           activeStt={activeStt}
           slips={slips}
           activeItems={activeItems}
+          isReturn={isReturn}
           cancelBtnRef={cancelBtnRef}
           onCreateWarehouseSlip={onCreateWarehouseSlip}
           onEditWarehouseSlip={onEditWarehouseSlip}

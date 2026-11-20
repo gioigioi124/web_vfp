@@ -24,8 +24,13 @@ class VoucherMutationMixin:
         is_wh: bool,
         safe_ty_gia: float,
         safe_ma_tte: str,
+        is_return: bool = False,
     ) -> None:
         """CHỐT 4 & 5: Chuẩn hóa dòng hàng, chiết khấu = 0 & hàng KM."""
+        default_tk = ("155" if is_wh else "1561") if is_return else ("6322" if is_wh else "632")
+        default_tk_du = ("6322" if is_wh else "632") if is_return else ("155" if is_wh else "1561")
+        default_tk_du2 = "5212" if is_return else ("5112" if is_wh else "5111")
+        fixed_gia_tb_tt = "K" if is_return else "C"
         for it in data.items:
             loai_vt = (it.loai_vt or "1").strip()
             so_tam = float(it.so_tam or 0.0)
@@ -34,6 +39,11 @@ class VoucherMutationMixin:
             so_luong9 = float(it.so_luong9 or 0.0)
             gia_nt9 = float(it.gia_nt9 or 0.0)
             chiet_khau = float(it.chiet_khau or 0.0)
+
+            it.tk = (it.tk or "").strip() or default_tk
+            it.tk_du = (it.tk_du or "").strip() or default_tk_du
+            it.tk_du2 = (it.tk_du2 or "").strip() or default_tk_du2
+            it.gia_tb_tt = fixed_gia_tb_tt
 
             # Tất cả loại vật tư trên Grid đều tính So_Luong8 = So_Luong9 = So_Tam * He_So8 (khớp dữ liệu VFP thật)
             if so_tam > 0:
@@ -96,13 +106,13 @@ class VoucherMutationMixin:
 
                 it.chiet_khau = chiet_khau
 
-                # Fix #21 (mở rộng): 4 cột GIÁ VỐN bên phiếu bán hàng LUÔN để NULL.
+                # Fix #21 (mở rộng): 4 cột GIÁ VỐN bên phiếu bán hàng / nhập lại LUÔN để NULL.
                 it.gia_nt = None
                 it.gia = None
                 it.tien_nt = None
                 it.tien = None
 
-                # NULL-policy khớp VFP (Ma_Ct='X1'): chiết khấu 0 -> Chiet_Khau/Tien_Nt4/Tien4 = NULL
+                # NULL-policy khớp VFP (Ma_Ct='X1'/'N5'): chiết khấu 0 -> Chiet_Khau/Tien_Nt4/Tien4 = NULL
                 if chiet_khau <= 0:
                     it.chiet_khau = None
                     it.tien_nt4 = None
@@ -151,6 +161,11 @@ class VoucherMutationMixin:
         user_name: str,
     ) -> None:
         """1. Ghi Header dbo.CtBH."""
+        clean_ma_ct = (data.ma_ct or "X1").strip().upper()
+        is_return = clean_ma_ct == "N5"
+        clean_nh_ct = "1" if is_return else (data.nh_ct or "2")
+        default_dg = ("nhập lại" if is_return else "xuất bán") if is_wh else ""
+
         if mode == "M":
             insert_header_sql = f"""
                 INSERT INTO {target_db}.dbo.CtBH (
@@ -176,10 +191,10 @@ class VoucherMutationMixin:
                 )
             """
             cur.execute(insert_header_sql, [
-                stt, data.ma_dvcs or "S1", data.ma_ct or "X1", data.nh_ct or "2", data.ma_tte or "VND", safe_ty_gia,
+                stt, data.ma_dvcs or "S1", clean_ma_ct, clean_nh_ct, data.ma_tte or "VND", safe_ty_gia,
                 data.ngay_ps or data.ngay_ct, data.ngay_ct, final_so_ct, data.ma_xe or None, data.ma_bp or "", data.ma_hd or None,
                 data.ma_dt, data.ma_nx or "131", data.tk2 or "1311", None, None, None,
-                data.ong_ba or "", data.dia_chi or "", data.dien_giai0 or ("xuất bán" if is_wh else ""), data.desc_en0 or None,
+                data.ong_ba or "", data.dia_chi or "", data.dien_giai0 or default_dg, data.desc_en0 or None,
                 data.ttien_nt, data.ttien_nt0, data.ttien_nt2, data.ttien_nt3, data.ttien_nt4,
                 data.ttien, data.ttien0, data.ttien3, data.ttien2, data.ttien4,
                 data.loai_ck or "2", None, None, data.ma_thue, data.thue_gtgt,
@@ -202,10 +217,10 @@ class VoucherMutationMixin:
                 WHERE Stt = ?
             """
             cur.execute(update_header_sql, [
-                data.ma_dvcs or "S1", data.ma_ct or "X1", data.nh_ct or "2", data.ma_tte or "VND", safe_ty_gia,
+                data.ma_dvcs or "S1", clean_ma_ct, clean_nh_ct, data.ma_tte or "VND", safe_ty_gia,
                 data.ngay_ps or data.ngay_ct, data.ngay_ct, final_so_ct, data.ma_xe or None, data.ma_bp or "", data.ma_hd or None,
                 data.ma_dt, data.ma_nx or "131", data.tk2 or "1311", None, None, None,
-                data.ong_ba or "", data.dia_chi or "", data.dien_giai0 or ("xuất bán" if is_wh else ""), data.desc_en0 or None,
+                data.ong_ba or "", data.dia_chi or "", data.dien_giai0 or default_dg, data.desc_en0 or None,
                 data.ttien_nt, data.ttien_nt0, data.ttien_nt2, data.ttien_nt3, data.ttien_nt4,
                 data.ttien, data.ttien0, data.ttien3, data.ttien2, data.ttien4,
                 data.loai_ck or "2", None, None, data.ma_thue, data.thue_gtgt,
@@ -226,6 +241,12 @@ class VoucherMutationMixin:
         """2. Ghi Detail dbo.CtBH0 (Delete cũ nếu 'S' + Batch cấp Stt0 & Multi-row INSERT)."""
         if mode == "S":
             cur.execute(f"DELETE FROM {target_db}.dbo.CtBH0 WHERE Stt = ?", [stt])
+
+        is_return = (data.ma_ct or "X1").strip().upper() == "N5"
+        default_tk = ("155" if is_wh else "1561") if is_return else ("6322" if is_wh else "632")
+        default_tk_du = ("6322" if is_wh else "632") if is_return else ("155" if is_wh else "1561")
+        default_tk_du2 = "5212" if is_return else ("5112" if is_wh else "5111")
+        fixed_gia_tb_tt = "K" if is_return else "C"
 
         stt0_list = self.generate_stts_batch(data.ma_dvcs or "S1", len(data.items), cur)
         row_placeholder = (
@@ -255,9 +276,9 @@ class VoucherMutationMixin:
                     None if is_wh else (it.stt_px or None),
                     stt0,
                     stt,
-                    it.tk or ("6322" if is_wh else "632"),
-                    it.tk_du or ("155" if is_wh else "1561"),
-                    it.tk_du2 or ("5112" if is_wh else "5111"),
+                    it.tk or default_tk,
+                    it.tk_du or default_tk_du,
+                    it.tk_du2 or default_tk_du2,
                     it.tk_du4 or None,
                     it.ma_kho or "",
                     it.ma_vt,
@@ -286,7 +307,7 @@ class VoucherMutationMixin:
                     it.chiet_khau,
                     it.tien_nt4,
                     it.tien4,
-                    "C",
+                    fixed_gia_tb_tt,
                 ])
             values_sql = ",\n".join([row_placeholder] * len(batch_items))
             cur.execute(insert_detail_prefix + values_sql, batch_params)
@@ -305,6 +326,10 @@ class VoucherMutationMixin:
         db_mode: Optional[str],
     ) -> None:
         """2b & 3. Xóa sổ cái cũ (nếu S), chạy CtBH_Post, CtBH_SoCai, CtBH_SoCaiVT_Save, ST_Save_Number."""
+        clean_ma_ct = (data.ma_ct or "X1").strip().upper()
+        is_return = clean_ma_ct == "N5"
+        clean_nh_ct = "1" if is_return else (data.nh_ct or "2")
+
         # 2b. Chế độ Sửa 'S': xóa sổ cái cũ của chứng từ TRONG transaction trước khi post lại.
         if mode == "S":
             cur.execute(f"DELETE FROM {target_db}.dbo.SoCai WHERE Stt = ?", [stt])
@@ -322,20 +347,20 @@ class VoucherMutationMixin:
             if mode == "S":
                 raise
 
-        # 3b. Ghi SỔ CÁI TÀI KHOẢN (SoCai) — bút toán DOANH THU (chỉ ghi trên VP_2014):
+        # 3b. Ghi SỔ CÁI TÀI KHOẢN (SoCai) — bút toán DOANH THU (X1) hoặc HÀNG BÁN TRẢ LẠI (N5) (chỉ ghi trên VP_2014):
         if not is_wh:
             revenue_groups: Dict[str, float] = {}
             for it in data.items:
-                tk_co = (it.tk_du2 or "").strip()
-                if not tk_co:
+                tk_item = (it.tk_du2 or "").strip()
+                if not tk_item:
                     continue
-                revenue_groups[tk_co] = revenue_groups.get(tk_co, 0.0) + float(it.tien_nt2 or 0.0)
+                revenue_groups[tk_item] = revenue_groups.get(tk_item, 0.0) + float(it.tien_nt2 or 0.0)
 
             if revenue_groups:
-                tk_no = (data.tk2 or "1311").strip() or "1311"
+                tk2_val = (data.tk2 or "1311").strip() or "1311"
                 safe_ccy = (data.ma_tte or "VND").strip().upper()
                 fn = self.fn_tcvn
-                for tk_co, group_amount_nt in revenue_groups.items():
+                for tk_item, group_amount_nt in revenue_groups.items():
                     amount_nt = round_amount(group_amount_nt, 2)
                     if abs(amount_nt) < 0.005:
                         continue
@@ -343,6 +368,18 @@ class VoucherMutationMixin:
                     tien_vnd = amount_vnd
                     tien_nt = None if safe_ccy == "VND" else amount_nt
                     so_ct_line = (final_so_ct or "").strip() or None
+                    if is_return:
+                        # N5 (Hàng bán bị trả lại): Nợ TK_HBTL (5212/531) / Có TK phải thu (1311, Ma_Dt_Co = Ma_Dt) -> giảm công nợ
+                        tk_no = tk_item
+                        ma_dt_no = ""
+                        tk_co = tk2_val
+                        ma_dt_co = data.ma_dt
+                    else:
+                        # X1 (Xuất bán): Nợ TK phải thu (1311, Ma_Dt_No = Ma_Dt) / Có TK doanh thu (5111/5112) -> tăng công nợ
+                        tk_no = tk2_val
+                        ma_dt_no = data.ma_dt
+                        tk_co = tk_item
+                        ma_dt_co = ""
                     try:
                         cur.execute(f"""
                             SET NOCOUNT ON;
@@ -363,9 +400,9 @@ class VoucherMutationMixin:
                             data.dien_giai0 or "",
                             data.dien_giai0 or "",
                             data.dien_giai0 or "",
-                            data.ma_dvcs or "S1", stt, stt, data.ma_ct or "X1", data.nh_ct or "2",
+                            data.ma_dvcs or "S1", stt, stt, clean_ma_ct, clean_nh_ct,
                             data.ngay_ct, so_ct_line, data.ma_dt,
-                            tk_no, data.ma_dt, tk_co, "",
+                            tk_no, ma_dt_no, tk_co, ma_dt_co,
                             data.ma_tte or "VND", safe_ty_gia, data.ma_hd or None, data.ma_bp or None,
                             tien_nt, tien_vnd, "2",
                         ])
@@ -383,7 +420,7 @@ class VoucherMutationMixin:
         try:
             cur.execute(
                 f"SET NOCOUNT ON; EXEC {self.sys_db}.dbo.ST_Save_Number @p_Ma_DvCs=?, @p_Ma_Ct=?, @p_So_Ct=?",
-                [data.ma_dvcs or "S1", data.ma_ct or "X1", final_so_ct],
+                [data.ma_dvcs or "S1", clean_ma_ct, final_so_ct],
             )
         except Exception as e:
             logger.warning(f"ST_Save_Number warning: {e}")
@@ -397,10 +434,14 @@ class VoucherMutationMixin:
         db_mode: Optional[str] = "sales",
     ) -> VoucherSaveResponse:
         """
-        Save sales invoice (VP_2014) or warehouse slip (KH_2014) with Pre-Save checks & ACID transaction.
+        Save sales/return invoice (VP_2014) or warehouse slip (KH_2014) with Pre-Save checks & ACID transaction.
         """
         is_wh = self._is_warehouse(db_mode)
         target_db = self._get_target_db(db_mode)
+        clean_ma_ct = (data.ma_ct or "X1").strip().upper()
+        is_return = clean_ma_ct == "N5"
+        data.ma_ct = clean_ma_ct
+        data.nh_ct = "1" if is_return else (data.nh_ct or "2")
 
         # ===== CHỐT 1: KIỂM TRA NGÀY KHÓA SỔ =====
         ngay_kt_ht = self.get_closing_date(data.ma_dvcs or "S1")
@@ -415,8 +456,8 @@ class VoucherMutationMixin:
         if not data.items or len(data.items) == 0:
             raise ValueError("Chứng từ phải có ít nhất 1 dòng chi tiết hàng hóa!")
 
-        # ===== CHỐT 3: KIỂM TRA HẠN MỨC CÔNG NỢ REALTIME (CHỈ ÁP DỤNG CHO PHIẾU BÁN VP_2014) =====
-        if not is_wh and not getattr(data, "skip_debt_check", False):
+        # ===== CHỐT 3: KIỂM TRA HẠN MỨC CÔNG NỢ REALTIME (CHỈ ÁP DỤNG CHO PHIẾU XUẤT BÁN X1 TRÊN VP_2014) =====
+        if not is_wh and not is_return and not getattr(data, "skip_debt_check", False):
             # Khi sửa phiếu (mode == "S"), loại trừ chính stt của phiếu đang sửa khỏi dư nợ
             # (check_only=True chỉ chạy 1 lần SP thay vì 2 lần).
             exclude_stt = (stt_override or "").strip() if mode == "S" else ""
@@ -436,7 +477,7 @@ class VoucherMutationMixin:
         # ===== CHỐT 4 & 5: CHUẨN HÓA DÒNG HÀNG & CHIẾT KHẤU = 0 & HÀNG KM =====
         safe_ty_gia = float(data.ty_gia) if data.ty_gia and data.ty_gia > 0 else 1.0
         safe_ma_tte = (data.ma_tte or "VND").strip().upper()
-        self._normalize_voucher_items(data, is_wh, safe_ty_gia, safe_ma_tte)
+        self._normalize_voucher_items(data, is_wh, safe_ty_gia, safe_ma_tte, is_return=is_return)
 
         # ===== CHỐT 6: ĐỒNG BỘ TỔNG HEADER & THUẾ GTGT =====
         self._sync_header_totals(data, is_wh)
@@ -459,18 +500,24 @@ class VoucherMutationMixin:
 
             raw_so_ct = (data.so_ct or "").strip()
             is_custom_so_ct = bool(getattr(data, "custom_so_ct", False))
-            looks_non_standard_custom = (
-                bool(raw_so_ct)
-                and not is_wh
-                and not re.match(r"^HD\d+$", raw_so_ct, re.IGNORECASE)
-            )
+            if is_return:
+                looks_non_standard_custom = (
+                    bool(raw_so_ct)
+                    and not re.match(r"^\d+$", raw_so_ct)
+                )
+            else:
+                looks_non_standard_custom = (
+                    bool(raw_so_ct)
+                    and not is_wh
+                    and not re.match(r"^HD\d+$", raw_so_ct, re.IGNORECASE)
+                )
             use_month_max = (mode == "M") and not is_custom_so_ct and not looks_non_standard_custom
 
             is_dup, final_so_ct = self.check_duplicate_number(
                 ma_dvcs=data.ma_dvcs or "S1",
                 moi_sua=mode,
                 stt=stt_override or "",
-                ma_ct=data.ma_ct or "X1",
+                ma_ct=clean_ma_ct,
                 ngay_ct=data.ngay_ct,
                 so_ct=raw_so_ct,
                 cur=cur,
@@ -506,7 +553,11 @@ class VoucherMutationMixin:
         return VoucherSaveResponse(
             stt=stt,
             so_ct=final_so_ct,
-            message="Lưu phiếu xuất kho thành công." if is_wh else "Lưu chứng từ thành công.",
+            message=(
+                ("Lưu phiếu nhập lại kho thành công." if is_return else "Lưu phiếu xuất kho thành công.")
+                if is_wh
+                else ("Lưu phiếu nhập hàng trả lại thành công." if is_return else "Lưu chứng từ thành công.")
+            ),
         )
 
     def delete_voucher(

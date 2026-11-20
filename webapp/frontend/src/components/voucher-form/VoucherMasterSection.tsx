@@ -10,6 +10,7 @@ import {
 
 export interface VoucherMasterSectionProps {
   isWarehouse: boolean;
+  isReturn?: boolean;
   isEditable: boolean;
   invalidField: InvalidVoucherField;
   setInvalidField: React.Dispatch<React.SetStateAction<InvalidVoucherField>>;
@@ -70,6 +71,7 @@ export interface VoucherMasterSectionProps {
 
 export const VoucherMasterSection: React.FC<VoucherMasterSectionProps> = ({
   isWarehouse,
+  isReturn = false,
   isEditable,
   invalidField,
   setInvalidField,
@@ -666,10 +668,14 @@ export const VoucherMasterSection: React.FC<VoucherMasterSectionProps> = ({
                     }
                   }}
                   className="inline-flex items-center px-2.5 py-0.5 rounded bg-secondary-50 hover:bg-secondary-100 focus:ring-2 focus:ring-primary-600 focus:outline-none text-secondary-700 border border-secondary-300 shadow-sm font-semibold text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
-                  title="Chọn phiếu xuất từ kho"
+                  title={
+                    isReturn
+                      ? "Chọn phiếu nhập lại từ kho"
+                      : "Chọn phiếu xuất từ kho"
+                  }
                 >
                   <FileText className="w-3.5 h-3.5 mr-1.5 text-secondary-600" />
-                  Chọn phiếu xuất
+                  {isReturn ? "Chọn phiếu nhập lại" : "Chọn phiếu xuất"}
                 </button>
               )}
             </div>
@@ -697,14 +703,14 @@ export const VoucherMasterSection: React.FC<VoucherMasterSectionProps> = ({
               </div>
               <div className="flex items-center justify-between gap-2">
                 <label className="erp-label shrink-0 text-neutral-600">
-                  TK Nợ:
+                  {isReturn ? "TK Có:" : "TK Nợ:"}
                 </label>
                 <input
                   className="erp-input !w-16 shrink-0 text-center font-mono font-bold text-xs py-0.5 bg-neutral-100 border-neutral-200 text-primary-900 cursor-text select-text"
                   value={tk2}
                   onFocus={(e) => e.currentTarget.select()}
                   readOnly
-                  title="Tài khoản Nợ cố định (1311)"
+                  title={`Tài khoản ${isReturn ? "Có" : "Nợ"} cố định (${tk2})`}
                 />
               </div>
             </div>

@@ -6,7 +6,7 @@
 export type SyncEvent = {
   type: "voucher_mutated";
   action: "create" | "update" | "delete";
-  mode: "sales" | "warehouse";
+  mode: "sales" | "return" | "warehouse";
   stt: string;
   ma_dt?: string;
   ts: number;

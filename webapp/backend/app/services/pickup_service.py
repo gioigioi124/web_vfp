@@ -20,9 +20,12 @@ class PickupService:
         self,
         ma_dt: Optional[str] = None,
         ngay_ct1: Optional[str] = None,
-        ngay_ct2: Optional[str] = None
+        ngay_ct2: Optional[str] = None,
+        ma_ct: Optional[str] = None,
     ) -> List[PickupSlipSchema]:
-        return self.repo.list_ready_to_pickup(ma_dt=ma_dt, ngay_ct1=ngay_ct1, ngay_ct2=ngay_ct2)
+        return self.repo.list_ready_to_pickup(
+            ma_dt=ma_dt, ngay_ct1=ngay_ct1, ngay_ct2=ngay_ct2, ma_ct=ma_ct
+        )
 
     def get_pickup_detail(self, stt: str) -> Optional[PickupDetailResponse]:
         return self.repo.get_pickup_detail(stt=stt)
@@ -33,7 +36,8 @@ class PickupService:
         ma_dt: Optional[str] = None,
         ngay_ct: Optional[str] = None,
         ty_gia: Optional[float] = 1.0,
-        ma_tte: Optional[str] = "VND"
+        ma_tte: Optional[str] = "VND",
+        ma_ct: Optional[str] = "X1",
     ) -> PickupAcceptResponse:
         """
         Accept warehouse slips and transform items into detail rows for K_CtTemp.
@@ -42,10 +46,13 @@ class PickupService:
         - Preserves each distinct row per slip (no grouping).
         - Assigns stt_px = slip.stt (Header Stt of KH_2014.dbo.CtBH).
         - Inherits vehicle code (ma_xe) from warehouse slips.
+        - Supports both X1 (sales issue, Gia_Tb_TT='C') and N5 (sales return, Gia_Tb_TT='K').
         100% READ-ONLY: purely computes and returns rows, never writes to DB.
         """
         safe_ty_gia = float(ty_gia) if ty_gia and ty_gia > 0 else 1.0
         safe_ma_tte = (ma_tte or "VND").strip().upper()
+        clean_ma_ct = (ma_ct or "X1").strip().upper()
+        is_return = clean_ma_ct == "N5"
         inherited_ma_xe = ""
 
         clean_stts = [s.strip() for s in (stts or []) if s and s.strip()]
@@ -61,10 +68,9 @@ class PickupService:
         seen_codes = set()
 
         for clean_stt in clean_stts:
-            if not inherited_ma_xe:
-                slip_hdr = headers_by_stt.get(clean_stt)
-                if slip_hdr and slip_hdr.get("ma_xe"):
-                    inherited_ma_xe = slip_hdr["ma_xe"]
+            slip_hdr = headers_by_stt.get(clean_stt)
+            if not inherited_ma_xe and slip_hdr and slip_hdr.get("ma_xe"):
+                inherited_ma_xe = slip_hdr["ma_xe"]
 
             slip_items = items_by_stt.get(clean_stt) or []
             for it in slip_items:
@@ -145,14 +151,19 @@ class PickupService:
                 gia_nt2 = gia_nt9
                 gia2 = gia9
 
+            slip_hdr = headers_by_stt.get(clean_stt)
+            slip_ma_ct = ((slip_hdr or {}).get("ma_ct") or clean_ma_ct).strip().upper()
+            row_is_return = is_return or slip_ma_ct == "N5"
+            tk_hbtl = (getattr(it, "tk_hbtl", None) or "").strip()
+
             rows.append(PickupAcceptRow(
                 stt_px=clean_stt,
                 stt0_px=it.stt0,
                 stt0=None,
                 stt=None,
-                tk=it.tk_gv or "632",
-                tk_du=it.tk_vt or "1561",
-                tk_du2=it.tk_dt or "5111",
+                tk=(it.tk_vt or "1561") if row_is_return else (it.tk_gv or "632"),
+                tk_du=(it.tk_gv or "632") if row_is_return else (it.tk_vt or "1561"),
+                tk_du2=(tk_hbtl or "5212") if row_is_return else (it.tk_dt or "5111"),
                 tk_du4=it.tk_ck or "521",
                 ma_kho=it.ma_kho or "",
                 ma_vt=it.ma_vt,
@@ -182,7 +193,7 @@ class PickupService:
                 chiet_khau=chiet_khau,
                 tien_nt4=tien_nt4,
                 tien4=tien4,
-                gia_tb_tt="C",
+                gia_tb_tt="K" if row_is_return else "C",
                 loai_vt=loai_vt
             ))
 

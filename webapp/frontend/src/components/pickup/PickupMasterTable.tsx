@@ -10,6 +10,7 @@ export interface PickupMasterTableProps {
   activeStt: string | null;
   allSelected: boolean;
   loading: boolean;
+  isReturn?: boolean;
   searchQuery: string;
   masterScrollRef: React.MutableRefObject<HTMLDivElement | null>;
   masterHeadRef: React.MutableRefObject<HTMLTableSectionElement | null>;
@@ -36,6 +37,7 @@ export const PickupMasterTable: React.FC<PickupMasterTableProps> = ({
   activeStt,
   allSelected,
   loading,
+  isReturn = false,
   searchQuery,
   masterScrollRef,
   masterHeadRef,
@@ -95,8 +97,10 @@ export const PickupMasterTable: React.FC<PickupMasterTableProps> = ({
                 {loading
                   ? "Đang tải dữ liệu từ CSDL Kho..."
                   : searchQuery.trim()
-                    ? `Không tìm thấy phiếu xuất phù hợp "${searchQuery.trim()}"`
-                    : "Không có phiếu xuất nào sẵn sàng"}
+                    ? `Không tìm thấy ${isReturn ? "phiếu nhập lại" : "phiếu xuất"} phù hợp "${searchQuery.trim()}"`
+                    : isReturn
+                      ? "Không có phiếu nhập lại nào sẵn sàng"
+                      : "Không có phiếu xuất nào sẵn sàng"}
               </td>
             </tr>
           ) : (

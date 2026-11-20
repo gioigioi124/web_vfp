@@ -8,9 +8,9 @@ class VoucherDetailSchema(BaseModel):
     stt_px: Optional[str] = None
     stt0: Optional[str] = None
     stt: Optional[str] = None
-    tk: Optional[str] = "632"
-    tk_du: Optional[str] = "1561"
-    tk_du2: Optional[str] = "5111"
+    tk: Optional[str] = None
+    tk_du: Optional[str] = None
+    tk_du2: Optional[str] = None
     tk_du4: Optional[str] = "521"
     ma_kho: Optional[str] = None
     ma_vt: Optional[str] = None
@@ -39,7 +39,7 @@ class VoucherDetailSchema(BaseModel):
     chiet_khau: Optional[float] = 0.0
     tien_nt4: Optional[float] = 0.0
     tien4: Optional[float] = 0.0
-    gia_tb_tt: Optional[str] = "C"
+    gia_tb_tt: Optional[str] = None
 
     # Display / Joined fields
     ten_vt: Optional[str] = ""

@@ -48,7 +48,8 @@ class LookupRepository:
                 ISNULL(He_So0, 1) AS He_So0,
                 ISNULL(He_So1, 1) AS He_So1,
                 ISNULL(He_So2, 1) AS He_So2,
-                {fn}(Dvt0) AS Dvt0, {fn}(Dvt1) AS Dvt1, {fn}(Dvt2) AS Dvt2
+                {fn}(Dvt0) AS Dvt0, {fn}(Dvt1) AS Dvt1, {fn}(Dvt2) AS Dvt2,
+                ISNULL(Tk_HBTL, '') AS Tk_HBTL
             FROM {self.sys_db}.dbo.DmVt WITH (NOLOCK)
         """
         params = []
@@ -77,7 +78,8 @@ class LookupRepository:
                     he_so2=float(r[11] or 1.0),
                     dvt0=(r[12] or "").strip(),
                     dvt1=(r[13] or "").strip(),
-                    dvt2=(r[14] or "").strip()
+                    dvt2=(r[14] or "").strip(),
+                    tk_hbtl=(r[15] or "").strip(),
                 ))
         return results
 

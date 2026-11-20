@@ -24,6 +24,7 @@ export function calcLoai2Item(
   tyGia: number = 1.0,
   varRead: string = "",
   maTte: string = "VND",
+  defaultGiaTbTt?: "C" | "K",
 ): VoucherDetail {
   const safeTyGia = tyGia > 0 ? tyGia : 1.0;
   const isVnd = maTte.toUpperCase() === "VND";
@@ -132,7 +133,7 @@ export function calcLoai2Item(
     tien2: tien2,
     gia_nt2: giaNt2,
     gia2: gia2,
-    gia_tb_tt: "C",
+    gia_tb_tt: defaultGiaTbTt ?? (item.gia_tb_tt === "K" ? "K" : "C"),
   };
 }
 

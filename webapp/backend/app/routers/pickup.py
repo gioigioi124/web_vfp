@@ -7,15 +7,18 @@ router = APIRouter(prefix="/api/pickup", tags=["Pickup"])
 
 @router.get("/list")
 def list_pickup_slips(
-    ma_dt: Optional[str] = Query(None, description="Mã khách hàng cần lấy phiếu xuất"),
+    ma_dt: Optional[str] = Query(None, description="Mã khách hàng cần lấy phiếu"),
     ngay_ct1: Optional[str] = Query(None, description="Từ ngày"),
-    ngay_ct2: Optional[str] = Query(None, description="Đến ngày")
+    ngay_ct2: Optional[str] = Query(None, description="Đến ngày"),
+    ma_ct: Optional[str] = Query(None, description="Loại chứng từ ('X1' hoặc 'N5')"),
 ):
     """
-    Danh sách phiếu xuất kho chưa lập hóa đơn từ CSDL KH_2014 (ListReadyToPickup / ctbhch.scx).
+    Danh sách phiếu xuất/nhập lại kho chưa lập hóa đơn từ CSDL KH_2014 (ListReadyToPickup / ctbhch.scx).
     100% READ-ONLY.
     """
-    slips = pickup_service.list_ready_to_pickup(ma_dt=ma_dt, ngay_ct1=ngay_ct1, ngay_ct2=ngay_ct2)
+    slips = pickup_service.list_ready_to_pickup(
+        ma_dt=ma_dt, ngay_ct1=ngay_ct1, ngay_ct2=ngay_ct2, ma_ct=ma_ct
+    )
     return {
         "success": True,
         "data": {
@@ -43,7 +46,7 @@ def get_pickup_detail(stt: str):
 @router.post("/accept")
 def accept_pickup_slips(req: PickupAcceptRequest):
     """
-    Nhận các phiếu xuất kho đã chọn và trả về danh sách dòng hàng đã ánh xạ
+    Nhận các phiếu kho đã chọn và trả về danh sách dòng hàng đã ánh xạ
     sang K_CtTemp (chi tiết chứng từ). 100% READ-ONLY — KHÔNG ghi CSDL.
     Tự động tra cứu giá bán, chiết khấu và tính toán theo Loại vật tư.
     """
@@ -52,7 +55,8 @@ def accept_pickup_slips(req: PickupAcceptRequest):
         ma_dt=req.ma_dt,
         ngay_ct=req.ngay_ct,
         ty_gia=req.ty_gia,
-        ma_tte=req.ma_tte
+        ma_tte=req.ma_tte,
+        ma_ct=req.ma_ct,
     )
     return {
         "success": True,

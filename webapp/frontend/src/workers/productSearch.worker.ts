@@ -30,6 +30,7 @@ interface IndexItem {
   tk_vt: string;
   tk_dt: string;
   tk_ck: string;
+  tk_hbtl?: string;
   he_so0: number;
   ma_kho?: string;
   k: string;
@@ -244,11 +245,17 @@ ctx.onmessage = async (e: MessageEvent) => {
     const loaded = await loadFromIdb();
     const hasWarehouseField =
       items.length > 0 && Object.prototype.hasOwnProperty.call(items[0], "ma_kho");
+    const hasHbtlField =
+      items.length > 0 && Object.prototype.hasOwnProperty.call(items[0], "tk_hbtl");
+    const cacheUpToDate = hasWarehouseField && hasHbtlField;
     let notifiedReady = false;
-    if (loaded && map.size > 0 && hasWarehouseField) {
+    if (loaded && map.size > 0 && cacheUpToDate) {
       // Báo sẵn sàng ngay lập tức từ IndexedDB để người dùng tra cứu không cần chờ mạng.
       ctx.postMessage({ type: "ready", count: map.size });
       notifiedReady = true;
+    } else if (items.length > 0 && !cacheUpToDate) {
+      since = 0;
+      epoch = 0;
     }
     let changed = false;
     try {

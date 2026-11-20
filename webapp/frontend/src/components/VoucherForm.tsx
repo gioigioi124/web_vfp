@@ -57,6 +57,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   voucher,
   mode = voucher?.stt || sttProp ? "S" : "M",
   voucherMode = "sales",
+  maCt: maCtProp,
   isSuspended = false,
   initialInherited,
   suggestedSoCt,
@@ -69,6 +70,18 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   onClearPickupPayload,
 }) => {
   const isWarehouse = voucherMode === "warehouse";
+  const apiDbMode: "sales" | "warehouse" = isWarehouse ? "warehouse" : "sales";
+  const resolvedInitialMaCt: "X1" | "N5" =
+    (
+      maCtProp ||
+      voucher?.ma_ct ||
+      initialInherited?.ma_ct ||
+      (voucherMode === "return" ? "N5" : "X1")
+    )
+      .trim()
+      .toUpperCase() === "N5"
+      ? "N5"
+      : "X1";
   const isCreate = mode === "M";
   const isEdit = mode === "S";
   const isEditable = isCreate || isEdit;
@@ -98,6 +111,8 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     : "";
   const autoSuggestedSoCtRef = useRef<string>(initialSuggested);
   const userEditedSoCtRef = useRef<boolean>(false);
+  const forceRefreshSoCtRef = useRef<boolean>(false);
+  const [pickupSoCtTrigger, setPickupSoCtTrigger] = useState<number>(0);
 
   // Header State
   const [ngayCt, setNgayCt] = useState<string>(
@@ -130,7 +145,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     clampField(
       voucher?.dien_giai0 ??
         initialInherited?.dien_giai0 ??
-        (isWarehouse ? "xuất bán" : "Mua hàng"),
+        (isWarehouse
+          ? resolvedInitialMaCt === "N5"
+            ? "nhập lại"
+            : "xuất bán"
+          : resolvedInitialMaCt === "N5"
+            ? "Hàng bán bị trả lại"
+            : "Mua hàng"),
       128,
     ),
   );
@@ -170,9 +191,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   const [loaiCk, setLoaiCk] = useState<string>(
     voucher?.loai_ck || initialInherited?.loai_ck || "2",
   );
-  const [maCt, setMaCt] = useState<string>(
-    voucher?.ma_ct || initialInherited?.ma_ct || "X1",
-  );
+  const [maCt, setMaCt] = useState<string>(resolvedInitialMaCt);
+  const effectiveMaCt: "X1" | "N5" =
+    (maCt || resolvedInitialMaCt).trim().toUpperCase() === "N5" ? "N5" : "X1";
+  const isReturn = effectiveMaCt === "N5";
+  const fixedTt: "C" | "K" = isReturn ? "K" : "C";
   const [maDtGtGt, setMaDtGtGt] = useState<string>(
     voucher?.ma_dtgtgt || initialInherited?.ma_dtgtgt || "",
   );
@@ -183,27 +206,30 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
   // Detail Items State
   const [items, setItems] = useState<VoucherDetail[]>(() => {
+    const initialTt: "C" | "K" = resolvedInitialMaCt === "N5" ? "K" : "C";
     if (voucher?.items && voucher.items.length > 0) {
       return voucher.items.map((it) =>
         calcLoai2Item(
-          { ...it, gia_tb_tt: "C" },
+          { ...it, gia_tb_tt: initialTt },
           voucher.ty_gia || 1.0,
           "",
           voucher.ma_tte || "VND",
+          initialTt,
         ),
       );
     }
     if (initialInherited?.items && initialInherited.items.length > 0) {
       return initialInherited.items.map((it) =>
         calcLoai2Item(
-          { ...it, gia_tb_tt: "C" },
+          { ...it, gia_tb_tt: initialTt },
           initialInherited.ty_gia || 1.0,
           "",
           initialInherited.ma_tte || "VND",
+          initialTt,
         ),
       );
     }
-    return [emptyDetailRow()];
+    return [emptyDetailRow(initialTt === "K")];
   });
 
   const [activeRowIndex, setActiveRowIndex] = useState<number>(0);
@@ -265,6 +291,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     isDirtyRef,
   } = useVoucherDraft({
     voucherMode,
+    maCt: effectiveMaCt,
     isCreate,
     isEditable,
     voucherStt,
@@ -430,20 +457,28 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     setTk3(voucher.tk3 || "33311");
     setThueGtgt(voucher.thue_gtgt ?? 0);
     setLoaiCk(voucher.loai_ck || "2");
-    setMaCt(voucher.ma_ct || "X1");
+    const syncedMaCt =
+      (voucher.ma_ct || (voucherMode === "return" ? "N5" : "X1"))
+        .trim()
+        .toUpperCase() === "N5"
+        ? "N5"
+        : "X1";
+    const rowTt: "C" | "K" = syncedMaCt === "N5" ? "K" : "C";
+    setMaCt(syncedMaCt);
     setMaDtGtGt(voucher.ma_dtgtgt || "");
 
     const syncedItems =
       voucher.items && voucher.items.length > 0
         ? voucher.items.map((it) =>
             calcLoai2Item(
-              { ...it, gia_tb_tt: "C" },
+              { ...it, gia_tb_tt: rowTt },
               voucher.ty_gia || 1.0,
               "",
               voucher.ma_tte || "VND",
+              rowTt,
             ),
           )
-        : [emptyDetailRow()];
+        : [emptyDetailRow(rowTt === "K")];
     if (voucher.items && voucher.items.length > 0) {
       setItems(syncedItems);
       setActiveRowIndex(0);
@@ -468,7 +503,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         }
       });
     }
-  }, [isCreate, voucher, isDirtyRef, savedSnapshotRef, resetHistory]);
+  }, [isCreate, voucher, voucherMode, isDirtyRef, savedSnapshotRef, resetHistory]);
 
   const initialFocusedKeyRef = useRef<string>("");
   const pendingFocusLastRowAfterPickupRef = useRef<boolean>(false);
@@ -488,17 +523,19 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 ...calculatedItems,
               ]
             : calculatedItems;
-        const safeNext = nextItems.length > 0 ? nextItems : [emptyDetailRow()];
+        const safeNext =
+          nextItems.length > 0 ? nextItems : [emptyDetailRow(isReturn)];
         setActiveRowIndex(safeNext.length - 1);
         return safeNext;
       });
       pendingFocusLastRowAfterPickupRef.current = true;
       initialFocusedKeyRef.current = isCreate ? "NEW" : voucherStt || "EDIT";
-      if (pickupMaXe && !maXe.trim()) {
+      if (pickupMaXe && (isReturn || !maXe.trim())) {
         setMaXe(pickupMaXe);
+        setTenXe("");
       }
     },
-    [pushUndoSnapshot, isCreate, voucherStt, maXe],
+    [pushUndoSnapshot, isCreate, isReturn, voucherStt, maXe],
   );
 
   const handleRestoreDraft = useCallback(() => {
@@ -529,7 +566,13 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     if (Array.isArray(pendingDraft.items) && pendingDraft.items.length > 0) {
       setItems(
         pendingDraft.items.map((it) =>
-          calcLoai2Item({ ...it, gia_tb_tt: "C" }, tyGia, "", maTte),
+          calcLoai2Item(
+            { ...it, gia_tb_tt: fixedTt },
+            tyGia,
+            "",
+            maTte,
+            fixedTt,
+          ),
         ),
       );
       setActiveRowIndex(0);
@@ -540,6 +583,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     pushUndoSnapshot,
     items,
     isCreate,
+    fixedTt,
     tyGia,
     maTte,
     setPendingDraft,
@@ -572,19 +616,24 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     return () => window.cancelAnimationFrame(rafId);
   }, [isEditable, isSuspended, isCreate, voucherStt, pickupPayload]);
 
-  // 1. Tự động lấy số phiếu tiếp theo (VD: lớn nhất HD1000 -> tự điền HD1001) khi tạo phiếu mới
+  // 1a. Reset cờ userEditedSoCtRef khi mở phiên tạo mới / đổi loại chứng từ
   useEffect(() => {
+    userEditedSoCtRef.current = false;
     if (!isCreate) {
       autoSuggestedSoCtRef.current = "";
-      userEditedSoCtRef.current = false;
-      return;
     }
-    userEditedSoCtRef.current = false;
+  }, [isCreate, effectiveMaCt, apiDbMode]);
+
+  // 1b. Tự động lấy số phiếu tiếp theo (X1: HD1001 theo tháng; N5: 001 theo ngày)
+  useEffect(() => {
+    if (!isCreate) return;
     let cancelled = false;
+    const shouldForceRefresh = forceRefreshSoCtRef.current;
+    forceRefreshSoCtRef.current = false;
     const fetchNextSoCt = async () => {
       try {
         const res = await fetch(
-          `/api/vouchers/next-number?ma_ct=${encodeURIComponent(maCt || "X1")}&ngay_ct=${encodeURIComponent(ngayCt)}&db_mode=${encodeURIComponent(voucherMode)}`,
+          `/api/vouchers/next-number?ma_ct=${encodeURIComponent(effectiveMaCt)}&ngay_ct=${encodeURIComponent(ngayCt)}&db_mode=${encodeURIComponent(apiDbMode)}`,
         );
         if (res.ok) {
           const data = await res.json();
@@ -595,7 +644,10 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             autoSuggestedSoCtRef.current = cleanSuggested;
             setSoCt((prev) => {
               const p = prev.trim().toUpperCase();
-              if (!userEditedSoCtRef.current && (!p || p === prevAuto)) {
+              if (
+                shouldForceRefresh ||
+                (!userEditedSoCtRef.current && (!p || p === prevAuto))
+              ) {
                 return suggested;
               }
               return prev;
@@ -611,15 +663,49 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCreate, maCt, voucherMode]);
+  }, [isCreate, effectiveMaCt, apiDbMode, ngayCt, pickupSoCtTrigger]);
 
   // 2. Watch for pickup payload from PickupDialog:
   // - Mode thêm mới (isCreate): ghi đè toàn bộ các dòng hiện tại trên grid.
   // - Mode sửa (!isCreate): nối thêm các dòng mới chọn vào cuối grid.
+  // - Với N5 (Nhập lại): đồng bộ ngược lại Mã đối tượng, Ngày chứng từ và tự chọn lại Số phiếu phù hợp.
   useEffect(() => {
     if (pickupPayload && pickupPayload.items.length > 0) {
+      if (isReturn) {
+        const pickedNgay = (pickupPayload.ngay_ct || "").trim().slice(0, 10);
+        if (pickedNgay && /^\d{4}-\d{2}-\d{2}$/.test(pickedNgay)) {
+          if (isCreate) {
+            userEditedSoCtRef.current = false;
+            forceRefreshSoCtRef.current = true;
+            setPickupSoCtTrigger((v) => v + 1);
+          }
+          setNgayCt(pickedNgay);
+        } else if (isCreate) {
+          userEditedSoCtRef.current = false;
+          forceRefreshSoCtRef.current = true;
+          setPickupSoCtTrigger((v) => v + 1);
+        }
+        const pickedDt = (pickupPayload.ma_dt || "").trim().toUpperCase();
+        if (pickedDt) {
+          maDtValueRef.current = pickedDt;
+          setMaDt(pickedDt);
+          committedMaDtRef.current = "";
+          void handleSelectCustomer(pickedDt).then(() => {
+            if (pickupPayload.ma_xe) {
+              setMaXe(pickupPayload.ma_xe);
+              setTenXe("");
+            }
+          });
+        }
+      }
       const calculatedItems = pickupPayload.items.map((it) =>
-        calcLoai2Item({ ...it, gia_tb_tt: "C" }, tyGia, "", maTte),
+        calcLoai2Item(
+          { ...it, gia_tb_tt: fixedTt },
+          tyGia,
+          "",
+          maTte,
+          fixedTt,
+        ),
       );
       applyPickupItems(
         calculatedItems,
@@ -629,7 +715,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       onClearPickupPayload?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickupPayload, isCreate, tyGia, maTte, applyPickupItems, onClearPickupPayload]);
+  }, [pickupPayload, isCreate, isReturn, fixedTt, tyGia, maTte, applyPickupItems, onClearPickupPayload]);
 
   // Sau khi nạp các dòng từ PickupDialog vào grid, focus xuống dòng cuối cùng của grid hàng hóa.
   useEffect(() => {
@@ -856,7 +942,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       }
       setMaDtGtGt(cust.ms_thue || "");
       setMaVm(cust.ma_vm || "");
-      loadDebtInfo(realCode, true);
+      loadDebtInfo(realCode, !isReturn);
     } else {
       committedMaDtRef.current = "";
       setMaDt(raw);
@@ -946,10 +1032,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       const curr = itemsLatestRef.current;
       pushUndoSnapshot(curr);
       const calculated = calcLoai2Item(
-        { ...updatedItem, gia_tb_tt: "C" },
+        { ...updatedItem, gia_tb_tt: fixedTt },
         tyGia,
         fieldName || "",
         maTte,
+        fixedTt,
       );
       const next = [...curr];
       next[idx] = calculated;
@@ -957,7 +1044,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
       setItems(next);
       setInvalidField((prev) => (prev === "items" ? null : prev));
     },
-    [tyGia, maTte, pushUndoSnapshot],
+    [fixedTt, tyGia, maTte, pushUndoSnapshot],
   );
 
   const handleDeleteItem = useCallback(
@@ -999,11 +1086,11 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     }
 
     pushUndoSnapshot(curr);
-    const next = [...curr, emptyDetailRow()];
+    const next = [...curr, emptyDetailRow(isReturn)];
     itemsLatestRef.current = next;
     setItems(next);
     setActiveRowIndex(next.length - 1);
-  }, [pushUndoSnapshot]);
+  }, [isReturn, pushUndoSnapshot]);
 
   const handleDuplicateRow = useCallback(
     (idx?: number) => {
@@ -1154,17 +1241,17 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         ...it,
         ma_vt: (it.ma_vt || "").trim().toUpperCase(),
         ma_kho: (it.ma_kho || "K0101").trim().toUpperCase(),
-        tk: it.tk || (isWarehouse ? "6322" : "632"),
-        tk_du: it.tk_du || (isWarehouse ? "155" : "1561"),
-        tk_du2: it.tk_du2 || (isWarehouse ? "5112" : "5111"),
+        tk: it.tk || (isReturn ? (isWarehouse ? "155" : "1561") : isWarehouse ? "6322" : "632"),
+        tk_du: it.tk_du || (isReturn ? (isWarehouse ? "6322" : "632") : isWarehouse ? "155" : "1561"),
+        tk_du2: it.tk_du2 || (isReturn ? "5212" : isWarehouse ? "5112" : "5111"),
         tk_du4: it.tk_du4 || "521",
-        gia_tb_tt: "C",
+        gia_tb_tt: fixedTt,
       }));
 
       const payload = {
         ma_dvcs: "S1",
-        ma_ct: maCt || "X1",
-        nh_ct: "2",
+        ma_ct: effectiveMaCt,
+        nh_ct: isReturn ? "1" : "2",
         ma_tte: maTte,
         ty_gia: tyGia,
         ngay_ct: ngayCt,
@@ -1194,14 +1281,14 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         ttien3: saveTotals.ttien3,
         ttien0: saveTotals.ttien0,
         user_name: isCreate ? CURRENT_USER : (voucher?.user_name ?? ""),
-        skip_debt_check: bypassChecks,
+        skip_debt_check: bypassChecks || isReturn,
         custom_so_ct: isCustomSoCt,
         items: normalizedItems,
       };
 
       const url = isCreate
-        ? `/api/vouchers?db_mode=${encodeURIComponent(voucherMode)}`
-        : `/api/vouchers/${encodeURIComponent(voucherStt)}?db_mode=${encodeURIComponent(voucherMode)}`;
+        ? `/api/vouchers?db_mode=${encodeURIComponent(apiDbMode)}`
+        : `/api/vouchers/${encodeURIComponent(voucherStt)}?db_mode=${encodeURIComponent(apiDbMode)}`;
       const method = isCreate ? "POST" : "PUT";
 
       const res = await fetch(url, {
@@ -1448,6 +1535,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
     <div className="flex flex-col h-full w-full bg-white overflow-hidden">
       <VoucherFormHeaderBar
         isWarehouse={isWarehouse}
+        isReturn={isReturn}
         isCreate={isCreate}
         isEdit={isEdit}
         isDirty={isDirty}
@@ -1474,6 +1562,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       <VoucherMasterSection
         isWarehouse={isWarehouse}
+        isReturn={isReturn}
         isEditable={isEditable}
         invalidField={invalidField}
         setInvalidField={setInvalidField}
@@ -1622,6 +1711,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           currency={maTte}
           variant="form"
           voucherMode={voucherMode}
+          maCt={effectiveMaCt}
           editable={isEditable}
           highlightSpecs={highlightSpecs}
           activeRowIndex={activeRowIndex}
@@ -1679,7 +1769,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             const row = items[activeRowIndex];
             handleItemChange(
               activeRowIndex,
-              { ...row, tk_du2: code, tk_du: code },
+              { ...row, tk_du2: code },
               "TK_DU2",
             );
           }

@@ -5,6 +5,7 @@ import {
   VoucherPagination,
   VoucherFilterParams,
   VoucherSummaryTotals,
+  VoucherMode,
 } from "../types/voucher";
 import { Button } from "./ui/Button";
 import { DetailGrid } from "./DetailGrid";
@@ -76,7 +77,7 @@ interface VoucherListProps {
   detailItems: VoucherDetail[];
   detailLoading?: boolean;
   debtAmount?: number | null;
-  voucherMode?: "sales" | "warehouse";
+  voucherMode?: VoucherMode;
   onSelectStt: (stt: string) => void;
   onEditVoucher?: (stt: string) => void;
   onToggleMark?: (stt: string) => void;
@@ -883,6 +884,10 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
             items={detailItems}
             currency={detailCurrency}
             voucherMode={voucherMode}
+            maCt={
+              activeVoucher?.ma_ct ||
+              (voucherMode === "return" ? "N5" : "X1")
+            }
             embedded
           />
         </div>

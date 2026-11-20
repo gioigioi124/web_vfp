@@ -13,6 +13,7 @@ export interface PickupFooterProps {
   activeStt: string | null;
   slips: PickupSlip[];
   activeItems: PickupItem[];
+  isReturn?: boolean;
   cancelBtnRef: React.MutableRefObject<HTMLButtonElement | null>;
   onCreateWarehouseSlip?: () => void;
   onEditWarehouseSlip?: (
@@ -33,6 +34,7 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
   activeStt,
   slips,
   activeItems,
+  isReturn = false,
   cancelBtnRef,
   onCreateWarehouseSlip,
   onEditWarehouseSlip,
@@ -89,10 +91,14 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           onClick={onCreateWarehouseSlip}
           type="button"
           className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
-          title="Thêm mới phiếu xuất kho (F2)"
+          title={
+            isReturn
+              ? "Thêm mới phiếu nhập lại kho (N5) (F2)"
+              : "Thêm mới phiếu xuất kho (F2)"
+          }
         >
           <Plus className="w-3.5 h-3.5 text-emerald-700" />
-          Thêm phiếu kho
+          {isReturn ? "Thêm phiếu nhập lại" : "Thêm phiếu kho"}
         </Button>
       )}
 
@@ -111,10 +117,14 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           disabled={!activeStt}
           type="button"
           className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"
-          title="Sửa phiếu xuất kho đang chọn (F3)"
+          title={
+            isReturn
+              ? "Sửa phiếu nhập lại kho đang chọn (F3)"
+              : "Sửa phiếu xuất kho đang chọn (F3)"
+          }
         >
           <Edit3 className="w-3.5 h-3.5 text-amber-700" />
-          Sửa phiếu kho
+          {isReturn ? "Sửa phiếu nhập lại" : "Sửa phiếu kho"}
         </Button>
       )}
 
@@ -129,10 +139,14 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           disabled={!activeStt}
           type="button"
           className="border-danger-300 bg-danger-50 hover:bg-danger-100 text-danger-800 disabled:opacity-50"
-          title="Xóa phiếu xuất kho đang chọn (F8)"
+          title={
+            isReturn
+              ? "Xóa phiếu nhập lại kho đang chọn (F8)"
+              : "Xóa phiếu xuất kho đang chọn (F8)"
+          }
         >
           <Trash2 className="w-3.5 h-3.5 text-danger-600" />
-          Xóa phiếu kho
+          {isReturn ? "Xóa phiếu nhập lại" : "Xóa phiếu kho"}
         </Button>
       )}
 

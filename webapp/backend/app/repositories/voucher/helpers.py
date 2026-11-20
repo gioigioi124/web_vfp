@@ -1,6 +1,6 @@
 """Shared helpers, schema mappers, and WHERE clause builder for VoucherRepository."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 import sys
 from typing import Any, List, Optional, Tuple
@@ -61,6 +61,24 @@ class VoucherHelpersMixin:
 
     def _get_target_db(self, db_mode: Optional[str] = "sales") -> str:
         return self.kh_db if self._is_warehouse(db_mode) else self.vp_db
+
+    def _day_date_bounds(self, ngay_ct: Optional[str]) -> Tuple[str, str, str]:
+        """Return (day_start, next_day_start, YYYYMMDD) for the exact day of `ngay_ct`."""
+        ref_date: Optional[date] = None
+        if ngay_ct:
+            s = str(ngay_ct).strip()[:10]
+            try:
+                ref_date = datetime.strptime(s, "%Y-%m-%d").date()
+            except ValueError:
+                ref_date = None
+        if ref_date is None:
+            ref_date = date.today()
+        next_day = ref_date + timedelta(days=1)
+        return (
+            ref_date.strftime("%Y-%m-%d"),
+            next_day.strftime("%Y-%m-%d"),
+            ref_date.strftime("%Y%m%d"),
+        )
 
     def _month_date_bounds(self, ngay_ct: Optional[str]) -> Tuple[str, str, str]:
         """Return (month_start, next_month_start, YYYYMM) for the month of `ngay_ct`."""
@@ -245,7 +263,7 @@ class VoucherHelpersMixin:
             dmdt_phone=(r[53] or "").strip() if len(r) > 53 else "",
         )
 
-    def _row_to_detail_schema(self, dr: Any) -> VoucherDetailSchema:
+    def _row_to_detail_schema(self, dr: Any, default_gia_tb_tt: str = "C") -> VoucherDetailSchema:
         return VoucherDetailSchema(
             stt_px=(dr[0] or "").strip() if dr[0] else None,
             stt0=(dr[1] or "").strip(),
@@ -281,7 +299,7 @@ class VoucherHelpersMixin:
             chiet_khau=float(dr[31] or 0.0),
             tien_nt4=float(dr[32] or 0.0),
             tien4=float(dr[33] or 0.0),
-            gia_tb_tt=(dr[34] or "C").strip(),
+            gia_tb_tt=(dr[34] or default_gia_tb_tt).strip(),
             ten_vt=(dr[35] or "").strip(),
             ten_kho=(dr[36] or "").strip(),
             loai_vt=(dr[37] or "1").strip(),

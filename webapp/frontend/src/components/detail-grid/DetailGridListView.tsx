@@ -12,6 +12,7 @@ export interface DetailGridListViewProps {
   currency: string;
   embedded: boolean;
   isWarehouse: boolean;
+  isReturn?: boolean;
   currentActiveRow: number;
   tableRef: React.MutableRefObject<HTMLTableElement | null>;
   onSelectRow: (idx: number) => void;
@@ -25,6 +26,7 @@ export const DetailGridListView: React.FC<DetailGridListViewProps> = React.memo(
     currency,
     embedded,
     isWarehouse,
+    isReturn = false,
     currentActiveRow,
     tableRef,
     onSelectRow,
@@ -82,7 +84,7 @@ export const DetailGridListView: React.FC<DetailGridListViewProps> = React.memo(
                   className="w-24 text-right border-r border-neutral-200 font-mono"
                   scope="col"
                 >
-                  SL xuất
+                  {isReturn ? "SL nhập" : "SL xuất"}
                 </th>
                 <th
                   className={`w-20 text-right border-r border-neutral-200 font-mono ${amber}`}

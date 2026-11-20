@@ -11,6 +11,7 @@ import { CURRENT_USER, VoucherDraftPayload } from "./types";
 
 export interface VoucherFormHeaderBarProps {
   isWarehouse: boolean;
+  isReturn?: boolean;
   isCreate: boolean;
   isEdit: boolean;
   isDirty: boolean;
@@ -31,6 +32,7 @@ export interface VoucherFormHeaderBarProps {
 
 export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
   isWarehouse,
+  isReturn = false,
   isCreate,
   isEdit,
   isDirty,
@@ -49,12 +51,14 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
   onClearError,
 }) => (
   <>
-    {/* ===== Window Header (navy / emerald for warehouse) ===== */}
+    {/* ===== Window Header (navy / emerald for warehouse / amber for N5 return) ===== */}
     <header
       className={`${
         isWarehouse
           ? "bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-900 border-emerald-950"
-          : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900"
+          : isReturn
+            ? "bg-gradient-to-r from-amber-900 via-amber-800 to-amber-900 border-amber-950"
+            : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900"
       } text-white px-4 py-2 flex items-center justify-between shadow-md shrink-0 border-b`}
     >
       <div className="flex items-center gap-3">
@@ -64,19 +68,37 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
         <div className="flex items-center gap-2">
           <span className="font-bold text-sm tracking-wide uppercase text-white">
             {isWarehouse
-              ? isCreate
-                ? "Thêm Mới Phiếu Xuất Kho"
-                : isEdit
-                  ? "Sửa Phiếu Xuất Kho"
-                  : "Xem Phiếu Xuất Kho"
-              : isCreate
-                ? "Thêm Mới Chứng Từ"
-                : isEdit
-                  ? "Sửa Chứng Từ"
-                  : "Xem Chứng Từ"}
+              ? isReturn
+                ? isCreate
+                  ? "Thêm Mới Phiếu Nhập Lại Kho (N5)"
+                  : isEdit
+                    ? "Sửa Phiếu Nhập Lại Kho (N5)"
+                    : "Xem Phiếu Nhập Lại Kho (N5)"
+                : isCreate
+                  ? "Thêm Mới Phiếu Xuất Kho"
+                  : isEdit
+                    ? "Sửa Phiếu Xuất Kho"
+                    : "Xem Phiếu Xuất Kho"
+              : isReturn
+                ? isCreate
+                  ? "Thêm Mới Phiếu Nhập Lại (N5)"
+                  : isEdit
+                    ? "Sửa Phiếu Nhập Lại (N5)"
+                    : "Xem Phiếu Nhập Lại (N5)"
+                : isCreate
+                  ? "Thêm Mới Chứng Từ"
+                  : isEdit
+                    ? "Sửa Chứng Từ"
+                    : "Xem Chứng Từ"}
           </span>
           <span className="text-primary-200 text-xs font-normal">
-            {isWarehouse ? "/ Phiếu xuất kho" : "/ Bán hàng công nợ"}
+            {isWarehouse
+              ? isReturn
+                ? "/ Phiếu nhập lại kho (N5)"
+                : "/ Phiếu xuất kho"
+              : isReturn
+                ? "/ Hàng bán bị trả lại (N5)"
+                : "/ Bán hàng công nợ"}
           </span>
           <span
             className={`ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
