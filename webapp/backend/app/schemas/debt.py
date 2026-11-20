@@ -45,6 +45,7 @@ class DebtLedgerEntry(BaseModel):
     dien_giai: str = ""
     ps_tang: float = 0.0
     ps_giam: float = 0.0
+    luy_ke: float = 0.0
 
 class DebtLedgerResponse(BaseModel):
     ma_dt: str = ""

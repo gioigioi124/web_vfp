@@ -459,6 +459,7 @@ class DebtRepository:
                         start_str, end_str, tk_param, clean_ma_dt,
                     ],
                 )
+                running_balance = du_dau
                 for row in cur.fetchall():
                     ps_tang = float(row[5] or 0.0)
                     ps_giam = float(row[6] or 0.0)
@@ -466,6 +467,7 @@ class DebtRepository:
                         continue
                     tong_ps_tang += ps_tang
                     tong_ps_giam += ps_giam
+                    running_balance += ps_tang - ps_giam
                     entries.append(
                         DebtLedgerEntry(
                             stt=(row[0] or "").strip(),
@@ -475,6 +477,7 @@ class DebtRepository:
                             dien_giai=(row[4] or "").strip(),
                             ps_tang=ps_tang,
                             ps_giam=ps_giam,
+                            luy_ke=running_balance,
                         )
                     )
         except Exception as e:

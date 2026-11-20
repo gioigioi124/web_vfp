@@ -454,7 +454,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
           if (nextTr) {
             const nextKey = nextTr.getAttribute("data-row-key");
             if (nextKey) setSelectedRowKey(nextKey);
-            focusRowCol(nextTr, forward ? 1 : 6);
+            focusRowCol(nextTr, forward ? 1 : 7);
             ensureRowElementVisible(nextTr);
           }
         }

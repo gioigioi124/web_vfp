@@ -14,6 +14,7 @@ interface GridRowData {
   dienGiai: string;
   psTang: string;
   psGiam: string;
+  luyKe: string;
   entry?: DebtLedgerEntry;
   isMarked?: boolean;
   isSummary?: boolean;
@@ -22,6 +23,7 @@ interface GridRowData {
   dienGiaiClassName?: string;
   psTangClassName?: string;
   psGiamClassName?: string;
+  luyKeClassName?: string;
 }
 
 export interface DebtLedgerTableProps {
@@ -127,7 +129,7 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
             }`}
           />
         </td>
-        <td className="xl-cell min-w-[280px]">
+        <td className="xl-cell min-w-[260px]">
           <input
             {...cellFocusProps(4)}
             value={row.dienGiai}
@@ -158,9 +160,20 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
             }`}
           />
         </td>
+        <td className="xl-cell bg-neutral-50/40">
+          <input
+            {...cellFocusProps(7)}
+            value={row.luyKe}
+            className={`xl-input text-right font-mono pr-3 grid-cell-input ${
+              row.luyKeClassName || "font-semibold text-primary-900"
+            }`}
+          />
+        </td>
       </tr>
     );
   };
+
+  let runningBalance = ledger ? Number(ledger.du_dau || 0) : 0;
 
   return (
     <div
@@ -202,19 +215,25 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
               Số phiếu
             </th>
             <th
-              className="min-w-[280px] border-r border-neutral-200"
+              className="min-w-[260px] border-r border-neutral-200"
               scope="col"
             >
               Diễn giải
             </th>
             <th
-              className="w-36 text-right pr-3 border-r border-neutral-200"
+              className="w-32 text-right pr-3 border-r border-neutral-200"
               scope="col"
             >
               Ps tăng
             </th>
-            <th className="w-36 text-right pr-3" scope="col">
+            <th
+              className="w-32 text-right pr-3 border-r border-neutral-200"
+              scope="col"
+            >
               Ps giảm
+            </th>
+            <th className="w-36 text-right pr-3" scope="col">
+              Lũy kế
             </th>
           </tr>
         </thead>
@@ -235,17 +254,22 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
               ledger && ledger.du_dau_giam !== 0
                 ? formatSpaceNumber(ledger.du_dau_giam)
                 : "",
+            luyKe: ledger ? formatSpaceNumber(ledger.du_dau) : "",
             isSummary: true,
             psGiamClassName:
               ledger && ledger.du_dau_giam !== 0
                 ? "font-semibold text-emerald-700"
                 : "font-semibold text-neutral-900",
+            luyKeClassName:
+              ledger && Math.round(ledger.du_dau) <= 0
+                ? "font-semibold text-emerald-700"
+                : "font-semibold text-primary-900",
           })}
 
           {loading ? (
             <tr>
               <td
-                colSpan={7}
+                colSpan={8}
                 className="px-4 py-10 text-center text-neutral-400"
               >
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-1.5 text-primary-600" />
@@ -255,7 +279,7 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
           ) : !inputMaDt.trim() && !ledger ? (
             <tr>
               <td
-                colSpan={7}
+                colSpan={8}
                 className="px-4 py-10 text-center text-neutral-400 italic"
               >
                 Nhập Mã ĐT rồi nhấn Enter để tra cứu sổ chi tiết công nợ.
@@ -264,7 +288,7 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
           ) : entries.length === 0 ? (
             <tr>
               <td
-                colSpan={7}
+                colSpan={8}
                 className="px-4 py-8 text-center text-neutral-400 italic"
               >
                 Không có phát sinh trong khoảng thời gian đã chọn.
@@ -277,6 +301,15 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
               const isDrillable = Boolean(
                 entry.stt && (maCtUpper === "X1" || maCtUpper === "N5"),
               );
+              runningBalance =
+                entry.luy_ke !== undefined
+                  ? Number(entry.luy_ke)
+                  : runningBalance +
+                    (Number(entry.ps_tang) || 0) -
+                    (Number(entry.ps_giam) || 0);
+              const roundedRunning = Math.round(runningBalance);
+              const isSettled = roundedRunning === 0;
+              const isOverpaid = roundedRunning < 0;
               return renderGridRow({
                 key: `entry-${rowIdx}`,
                 entry,
@@ -289,6 +322,7 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
                   entry.ps_tang !== 0 ? formatSpaceNumber(entry.ps_tang) : "",
                 psGiam:
                   entry.ps_giam !== 0 ? formatSpaceNumber(entry.ps_giam) : "",
+                luyKe: formatSpaceNumber(runningBalance),
                 isMarked: isCreditRow,
                 maCtClassName: isDrillable
                   ? "font-bold text-primary-700"
@@ -304,6 +338,11 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
                   entry.ps_giam !== 0
                     ? "font-bold text-emerald-700"
                     : "text-neutral-700",
+                luyKeClassName: isSettled
+                  ? "font-bold text-emerald-700 bg-emerald-50/70"
+                  : isOverpaid
+                    ? "font-semibold text-emerald-700"
+                    : "font-semibold text-primary-900",
               });
             })
           )}
@@ -319,11 +358,13 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
             dienGiai: "Phát sinh trong kỳ",
             psTang: ledger ? formatSpaceNumber(ledger.tong_ps_tang) : "0",
             psGiam: ledger ? formatSpaceNumber(ledger.tong_ps_giam) : "0",
+            luyKe: "",
             isSummary: true,
             psGiamClassName:
               ledger && ledger.tong_ps_giam !== 0
                 ? "font-semibold text-emerald-700"
                 : "font-semibold text-neutral-900",
+            luyKeClassName: "text-neutral-400",
           })}
 
           {/* Dư cuối kỳ */}
@@ -336,11 +377,16 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
             dienGiai: "Dư cuối kỳ",
             psTang: ledger ? formatSpaceNumber(ledger.du_cuoi_tang) : "0",
             psGiam: ledger ? formatSpaceNumber(ledger.du_cuoi_giam) : "0",
+            luyKe: ledger ? formatSpaceNumber(ledger.du_cuoi) : "0",
             isSummary: true,
             psGiamClassName:
               ledger && ledger.du_cuoi_giam > 0
                 ? "font-semibold text-emerald-700"
                 : "font-semibold text-neutral-400",
+            luyKeClassName:
+              ledger && Math.round(ledger.du_cuoi) <= 0
+                ? "font-bold text-emerald-700"
+                : "font-bold text-primary-900",
           })}
         </tfoot>
       </table>

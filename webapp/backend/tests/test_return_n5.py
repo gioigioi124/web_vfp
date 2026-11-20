@@ -349,3 +349,51 @@ def test_pickup_list_and_accept_n5_mapping():
     assert r1.tk_du2 == "531"
     assert r2.gia_tb_tt == "K"
     assert r2.tk_du2 == "5212"
+
+
+def test_debt_ledger_running_balance_luy_ke():
+    """
+    Sổ chi tiết công nợ tính lũy kế (luy_ke) chính xác qua từng chứng từ
+    (Dư đầu + Ps tăng - Ps giảm) và về 0 khi khách trả hết.
+    """
+    from app.repositories.debt_repo import debt_repository
+
+    mock_cur = MagicMock()
+    queries = []
+
+    def _exec(sql, params=None):
+        queries.append(sql)
+        return None
+
+    def _fetchone():
+        q = queries[-1] if queries else ""
+        if "FROM VTSYS.dbo.DmDt" in q or "DmDt" in q:
+            return ("Khách Hàng A", 5000000.0)
+        if "CdK" in q:
+            return (1000000.0,)
+        return None
+
+    def _fetchall():
+        return [
+            ("S1", "X1", datetime(2026, 11, 2), "HD0001", "Bán hàng", 2000000.0, 0.0),
+            ("S2", "N5", datetime(2026, 11, 3), "001", "Hàng trả lại", 0.0, 500000.0),
+            ("S3", "PT", datetime(2026, 11, 4), "PT001", "Thu tiền mặt", 0.0, 2500000.0),
+        ]
+
+    mock_cur.execute.side_effect = _exec
+    mock_cur.fetchone.side_effect = _fetchone
+    mock_cur.fetchall.side_effect = _fetchall
+
+    @contextmanager
+    def _fake_cur(db_name=None):
+        yield mock_cur
+
+    with patch("app.repositories.debt_repo.get_db_cursor", side_effect=_fake_cur):
+        ledger = debt_repository.get_customer_debt_ledger(
+            ma_dt="KH001", ngay_bd="2026-11-01", ngay_kt="2026-11-30"
+        )
+
+    assert ledger.du_dau == 1000000.0
+    assert [e.luy_ke for e in ledger.entries] == [3000000.0, 2500000.0, 0.0]
+    assert ledger.du_cuoi == 0.0
+

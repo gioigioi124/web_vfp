@@ -65,6 +65,7 @@ export function exportDebtLedgerCsv(params: {
   const customerName = tenDt || ledger?.ten_dt || "";
   const entries: DebtLedgerEntry[] = ledger?.entries || [];
 
+  let running = ledger?.du_dau || 0;
   const csvRows: (string | number)[][] = [
     [`SỔ CHI TIẾT CÔNG NỢ PHẢI THU (TK ${ledger?.tk || "131"})`],
     [
@@ -73,7 +74,7 @@ export function exportDebtLedgerCsv(params: {
       `Đến ngày: ${formatDate(toDate)}`,
     ],
     [],
-    ["Mã CT", "Ngày", "Số phiếu", "Diễn giải", "Ps tăng", "Ps giảm"],
+    ["Mã CT", "Ngày", "Số phiếu", "Diễn giải", "Ps tăng", "Ps giảm", "Lũy kế"],
     [
       "",
       "",
@@ -81,15 +82,23 @@ export function exportDebtLedgerCsv(params: {
       "Dư đầu kỳ",
       ledger && ledger.du_dau_tang > 0 ? Math.round(ledger.du_dau_tang) : "",
       ledger && ledger.du_dau_giam > 0 ? Math.round(ledger.du_dau_giam) : "",
+      ledger ? Math.round(ledger.du_dau) : "",
     ],
-    ...entries.map((en) => [
-      en.ma_ct || "",
-      formatDate(en.ngay_ct),
-      en.so_ct || "",
-      en.dien_giai || "",
-      en.ps_tang !== 0 ? Math.round(en.ps_tang) : "",
-      en.ps_giam !== 0 ? Math.round(en.ps_giam) : "",
-    ]),
+    ...entries.map((en) => {
+      running =
+        en.luy_ke !== undefined
+          ? en.luy_ke
+          : running + (Number(en.ps_tang) || 0) - (Number(en.ps_giam) || 0);
+      return [
+        en.ma_ct || "",
+        formatDate(en.ngay_ct),
+        en.so_ct || "",
+        en.dien_giai || "",
+        en.ps_tang !== 0 ? Math.round(en.ps_tang) : "",
+        en.ps_giam !== 0 ? Math.round(en.ps_giam) : "",
+        Math.round(running),
+      ];
+    }),
     [
       "",
       "",
@@ -97,6 +106,7 @@ export function exportDebtLedgerCsv(params: {
       "Phát sinh trong kỳ",
       Math.round(ledger?.tong_ps_tang || 0),
       Math.round(ledger?.tong_ps_giam || 0),
+      "",
     ],
     [
       "",
@@ -105,6 +115,7 @@ export function exportDebtLedgerCsv(params: {
       "Dư cuối kỳ",
       Math.round(ledger?.du_cuoi_tang || 0),
       Math.round(ledger?.du_cuoi_giam || 0),
+      Math.round(ledger?.du_cuoi || 0),
     ],
   ];
 

@@ -44,6 +44,7 @@ export interface DebtLedgerEntry {
   dien_giai: string;
   ps_tang: number;
   ps_giam: number;
+  luy_ke?: number;
 }
 
 export interface DebtLedgerData {
