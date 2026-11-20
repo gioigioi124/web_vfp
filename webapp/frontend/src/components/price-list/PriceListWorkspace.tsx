@@ -1,0 +1,1116 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CalendarClock,
+  Copy,
+  Download,
+  FileSpreadsheet,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Tag,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import {
+  PriceListDetailItem,
+  PriceListExportRow,
+  PriceListHeader,
+} from "../../types/priceList";
+import { formatCurrency, formatDate, getTodayDate } from "../../lib/format";
+import { HighlightText } from "../ui/HighlightText";
+import {
+  PriceListExcelModal,
+  PriceListExcelModalMode,
+} from "./PriceListExcelModals";
+import { PriceListFormModal } from "./PriceListFormModal";
+
+type SortKey = "so_ct" | "ngay_ct" | "ma_dt" | "ma_vm" | "user_name" | "item_count";
+
+function csvEscape(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+export const PriceListWorkspace: React.FC = () => {
+  const today = getTodayDate();
+  const [fromDate, setFromDate] = useState(`${today.slice(0, 7)}-01`);
+  const [toDate, setToDate] = useState(today);
+  const [filterSoCt, setFilterSoCt] = useState("");
+  const [filterMaVm, setFilterMaVm] = useState("");
+  const [filterMaDt, setFilterMaDt] = useState("");
+
+  const [headers, setHeaders] = useState<PriceListHeader[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [checkedStts, setCheckedStts] = useState<Set<string>>(new Set());
+
+  const [activeStt, setActiveStt] = useState<string | null>(null);
+  const [activeItems, setActiveItems] = useState<PriceListDetailItem[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailSearch, setDetailSearch] = useState("");
+
+  const [sortKey, setSortKey] = useState<SortKey>("so_ct");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  // Draggable split height ratio (%)
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [topPct, setTopPct] = useState(52);
+  const [draggingSplit, setDraggingSplit] = useState(false);
+
+  // Modals & toast feedback
+  const [banner, setBanner] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [excelModal, setExcelModal] = useState<{
+    open: boolean;
+    mode: PriceListExcelModalMode;
+  }>({ open: false, mode: "import-new" });
+  const [formModal, setFormModal] = useState<{
+    open: boolean;
+    stt: string | null;
+  }>({ open: false, stt: null });
+
+  // Bulk Date / Bulk Copy inline modal
+  const [bulkActionDialog, setBulkActionDialog] = useState<{
+    type: "date" | "copy" | null;
+    ngayCt: string;
+    ngayCt1: string;
+    ngayCt2: string;
+    userName: string;
+  }>({
+    type: null,
+    ngayCt: today,
+    ngayCt1: today,
+    ngayCt2: "",
+    userName: "ADMIN",
+  });
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+
+  const showToast = useCallback((type: "success" | "error", text: string) => {
+    setBanner({ type, text });
+  }, []);
+
+  const loadHeaders = useCallback(
+    async (preserveActiveStt?: string | null) => {
+      setLoadingList(true);
+      try {
+        const q = new URLSearchParams();
+        if (fromDate) q.set("from_date", fromDate);
+        if (toDate) q.set("to_date", toDate);
+        const res = await fetch(`/api/price-lists?${q.toString()}`);
+        const body = await res.json();
+        if (!res.ok || !body?.success) {
+          throw new Error(body?.detail || "Không tải được danh sách bảng giá.");
+        }
+        const rows: PriceListHeader[] = Array.isArray(body.data) ? body.data : [];
+        setHeaders(rows);
+        setCheckedStts((prev) => {
+          const valid = new Set(rows.map((r) => r.stt));
+          const next = new Set<string>();
+          prev.forEach((s) => {
+            if (valid.has(s)) next.add(s);
+          });
+          return next;
+        });
+
+        const nextActive =
+          preserveActiveStt !== undefined
+            ? preserveActiveStt
+            : activeStt && rows.some((r) => r.stt === activeStt)
+              ? activeStt
+              : rows[0]?.stt || null;
+        setActiveStt(nextActive);
+      } catch (err) {
+        showToast(
+          "error",
+          err instanceof Error ? err.message : "Lỗi tải danh sách bảng giá.",
+        );
+      } finally {
+        setLoadingList(false);
+      }
+    },
+    [fromDate, toDate, activeStt, showToast],
+  );
+
+  const loadDetail = useCallback(async (stt: string | null) => {
+    if (!stt) {
+      setActiveItems([]);
+      return;
+    }
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`/api/price-lists/${encodeURIComponent(stt)}`);
+      const body = await res.json();
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.detail || "Không tải được chi tiết bảng giá.");
+      }
+      setActiveItems(Array.isArray(body.data?.items) ? body.data.items : []);
+    } catch {
+      setActiveItems([]);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHeaders(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    void loadDetail(activeStt);
+  }, [activeStt, loadDetail]);
+
+  // Drag split handler
+  useEffect(() => {
+    if (!draggingSplit) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.height <= 0) return;
+      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      setTopPct(Math.max(25, Math.min(75, pct)));
+    };
+    const onUp = () => setDraggingSplit(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [draggingSplit]);
+
+  const filteredHeaders = useMemo(() => {
+    const qSo = filterSoCt.trim().toLowerCase();
+    const qVm = filterMaVm.trim().toLowerCase();
+    const qDt = filterMaDt.trim().toLowerCase();
+
+    const list = headers.filter((h) => {
+      if (qSo && !(h.so_ct || "").toLowerCase().includes(qSo)) return false;
+      if (
+        qVm &&
+        !(h.ma_vm || "").toLowerCase().includes(qVm) &&
+        !(h.ten_vm || "").toLowerCase().includes(qVm)
+      ) {
+        return false;
+      }
+      if (
+        qDt &&
+        !(h.ma_dt || "").toLowerCase().includes(qDt) &&
+        !(h.ten_dt || "").toLowerCase().includes(qDt)
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "item_count") {
+        cmp = (a.item_count || 0) - (b.item_count || 0);
+      } else {
+        const va = String(a[sortKey] || "");
+        const vb = String(b[sortKey] || "");
+        cmp = va.localeCompare(vb, "vi");
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return list;
+  }, [headers, filterSoCt, filterMaVm, filterMaDt, sortKey, sortDir]);
+
+  const selectedHeaders = useMemo(
+    () => headers.filter((h) => checkedStts.has(h.stt)),
+    [headers, checkedStts],
+  );
+
+  const activeHeader = useMemo(
+    () => headers.find((h) => h.stt === activeStt) || null,
+    [headers, activeStt],
+  );
+
+  const filteredDetailItems = useMemo(() => {
+    const q = detailSearch.trim().toLowerCase();
+    if (!q) return activeItems;
+    return activeItems.filter(
+      (it) =>
+        (it.ma_vt || "").toLowerCase().includes(q) ||
+        (it.ten_vt || "").toLowerCase().includes(q),
+    );
+  }, [activeItems, detailSearch]);
+
+  const allFilteredChecked =
+    filteredHeaders.length > 0 &&
+    filteredHeaders.every((h) => checkedStts.has(h.stt));
+
+  const toggleAllFiltered = () => {
+    setCheckedStts((prev) => {
+      const next = new Set(prev);
+      if (allFilteredChecked) {
+        filteredHeaders.forEach((h) => next.delete(h.stt));
+      } else {
+        filteredHeaders.forEach((h) => next.add(h.stt));
+      }
+      return next;
+    });
+  };
+
+  const toggleRowCheck = (stt: string) => {
+    setCheckedStts((prev) => {
+      const next = new Set(prev);
+      if (next.has(stt)) next.delete(stt);
+      else next.add(stt);
+      return next;
+    });
+  };
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const renderSortIcon = (key: SortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="w-3 h-3 opacity-35" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="w-3 h-3 text-primary" />
+    ) : (
+      <ArrowDown className="w-3 h-3 text-primary" />
+    );
+  };
+
+  const handleDeleteOne = async (h: PriceListHeader) => {
+    if (!window.confirm(`Xóa bảng giá "${h.so_ct || h.stt}" (${h.stt}) khỏi SQL?`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/price-lists/${encodeURIComponent(h.stt)}`, {
+        method: "DELETE",
+      });
+      const body = await res.json();
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.detail || "Không thể xóa bảng giá.");
+      }
+      showToast("success", `Đã xóa bảng giá ${h.so_ct || h.stt}.`);
+      await loadHeaders(activeStt === h.stt ? null : activeStt);
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Lỗi xóa bảng giá.");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedHeaders.length === 0) return;
+    if (
+      !window.confirm(
+        `Bạn có chắc muốn XÓA VĨNH VIỄN ${selectedHeaders.length} bảng giá đã chọn khỏi SQL?`,
+      )
+    ) {
+      return;
+    }
+    setBulkSubmitting(true);
+    try {
+      for (const h of selectedHeaders) {
+        const res = await fetch(`/api/price-lists/${encodeURIComponent(h.stt)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.detail || `Lỗi xóa ${h.so_ct || h.stt}`);
+        }
+      }
+      showToast("success", `Đã xóa ${selectedHeaders.length} bảng giá đã chọn.`);
+      setCheckedStts(new Set());
+      await loadHeaders(null);
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Lỗi xóa hàng loạt.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    const targetStts =
+      selectedHeaders.length > 0
+        ? selectedHeaders.map((h) => h.stt)
+        : activeStt
+          ? [activeStt]
+          : filteredHeaders.map((h) => h.stt);
+    if (targetStts.length === 0) {
+      showToast("error", "Không có bảng giá nào để xuất CSV.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/price-lists/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stt_list: targetStts }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.detail || "Không thể xuất dữ liệu bảng giá.");
+      }
+      const rows: PriceListExportRow[] = body.data || [];
+      const headerCols = [
+        "Stt_ID",
+        "So_Ct",
+        "Ngay_Ct",
+        "Ngay_Ct2",
+        "Khu_Vuc",
+        "Doi_Tuong",
+        "Ten_Doi_Tuong",
+        "Ma_Vat_Tu",
+        "Ten_Vat_Tu",
+        "DVT",
+        "Gia_Ban",
+        "Chiet_Khau_%",
+      ];
+      const csvLines = [headerCols.join(",")];
+      for (const r of rows) {
+        csvLines.push(
+          [
+            r.stt_id,
+            r.so_ct,
+            r.ngay_ct,
+            r.ngay_ct2 || "",
+            r.khu_vuc,
+            r.doi_tuong,
+            r.ten_doi_tuong,
+            r.ma_vat_tu,
+            r.ten_vat_tu,
+            r.dvt,
+            r.gia_ban,
+            r.chiet_khau_phan_tram,
+          ]
+            .map(csvEscape)
+            .join(","),
+        );
+      }
+      const blob = new Blob(["\ufeff" + csvLines.join("\r\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bang_gia_${getTodayDate()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(
+        "success",
+        `Đã xuất ${rows.length} dòng chi tiết từ ${targetStts.length} bảng giá ra CSV.`,
+      );
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Lỗi xuất CSV.");
+    }
+  };
+
+  const handleBulkActionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkActionDialog.type || selectedHeaders.length === 0) return;
+
+    setBulkSubmitting(true);
+    try {
+      const stt_list = selectedHeaders.map((h) => h.stt);
+      if (bulkActionDialog.type === "date") {
+        const res = await fetch("/api/price-lists/bulk-date", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stt_list,
+            ngay_ct: bulkActionDialog.ngayCt,
+            ngay_ct1: bulkActionDialog.ngayCt1 || bulkActionDialog.ngayCt,
+            ngay_ct2: bulkActionDialog.ngayCt2 || null,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok || !body?.success) {
+          throw new Error(body?.detail || "Không thể đổi ngày hàng loạt.");
+        }
+        showToast(
+          "success",
+          `Đã cập nhật ngày cho ${body.data?.updated_count || stt_list.length} bảng giá.`,
+        );
+      } else {
+        const res = await fetch("/api/price-lists/bulk-copy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stt_list,
+            ngay_ct: bulkActionDialog.ngayCt,
+            user_name: bulkActionDialog.userName.trim().toUpperCase() || "ADMIN",
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok || !body?.success) {
+          throw new Error(body?.detail || "Không thể nhân bản bảng giá.");
+        }
+        showToast(
+          "success",
+          `Đã nhân bản ${body.data?.copied_count || stt_list.length} bảng giá (${body.data?.copied_items || 0} dòng chi tiết) sang ngày ${formatDate(bulkActionDialog.ngayCt)}.`,
+        );
+        // Nếu ngày mới nằm ngoài range lọc hiện tại thì mở rộng range để user thấy ngay bảng giá mới
+        if (bulkActionDialog.ngayCt > toDate) setToDate(bulkActionDialog.ngayCt);
+        if (bulkActionDialog.ngayCt < fromDate) setFromDate(bulkActionDialog.ngayCt);
+      }
+      setBulkActionDialog((prev) => ({ ...prev, type: null }));
+      await loadHeaders();
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Lỗi xử lý hàng loạt.");
+    } finally {
+      setBulkSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
+      {/* Top Toolbar */}
+      <header className="shrink-0 bg-white border-b border-slate-200 px-4 py-2.5 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-700">
+              <Tag className="w-4 h-4" />
+            </div>
+            <div>
+              <h1 className="text-[14px] font-bold text-slate-900 leading-tight">
+                Quản Lý Bảng Giá Bán (BG / BG0)
+              </h1>
+              <p className="text-[11px] text-slate-500">
+                Import Excel tạo mới, cập nhật giá, xóa hàng hóa hàng loạt, đổi ngày & nhân bản bảng giá
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void loadHeaders()}
+              disabled={loadingList}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? "animate-spin" : ""}`} />
+              <span>Tải lại</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormModal({ open: true, stt: null })}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tạo bảng giá</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setExcelModal({ open: true, mode: "import-new" })}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[12px] font-semibold hover:bg-emerald-700 shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Import Tạo Mới Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExportCsv()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-600" />
+              <span>Xuất CSV</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <label className="inline-flex items-center gap-1.5">
+            <span className="text-slate-500">Từ:</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="erp-input h-7 text-[12px]"
+            />
+          </label>
+          <label className="inline-flex items-center gap-1.5">
+            <span className="text-slate-500">Đến:</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="erp-input h-7 text-[12px]"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void loadHeaders()}
+            className="px-2.5 h-7 rounded border border-primary/30 bg-primary/10 text-primary font-semibold hover:bg-primary/15"
+          >
+            Lọc ngày
+          </button>
+
+          <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
+
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={filterSoCt}
+              onChange={(e) => setFilterSoCt(e.target.value)}
+              placeholder="Lọc Số CT..."
+              className="erp-input h-7 pl-7 w-32 text-[12px]"
+            />
+          </div>
+          <input
+            type="text"
+            value={filterMaVm}
+            onChange={(e) => setFilterMaVm(e.target.value)}
+            placeholder="Lọc Mã vùng..."
+            className="erp-input h-7 w-28 text-[12px]"
+          />
+          <input
+            type="text"
+            value={filterMaDt}
+            onChange={(e) => setFilterMaDt(e.target.value)}
+            placeholder="Lọc Mã / Tên KH..."
+            className="erp-input h-7 w-40 text-[12px]"
+          />
+          <span className="ml-auto text-[11px] text-slate-500">
+            Hiển thị <strong>{filteredHeaders.length}</strong> / {headers.length} bảng giá
+          </span>
+        </div>
+
+        {/* Bulk Action Bar */}
+        {selectedHeaders.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-[12px]">
+            <span className="font-semibold text-sky-900">
+              Đã tích chọn {selectedHeaders.length} bảng giá:
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setBulkActionDialog({
+                  type: "date",
+                  ngayCt: today,
+                  ngayCt1: today,
+                  ngayCt2: "",
+                  userName: "ADMIN",
+                })
+              }
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-sky-300 text-sky-800 hover:bg-sky-100 font-medium"
+            >
+              <CalendarClock className="w-3.5 h-3.5" />
+              <span>Đổi ngày</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setBulkActionDialog({
+                  type: "copy",
+                  ngayCt: today,
+                  ngayCt1: today,
+                  ngayCt2: "",
+                  userName: "ADMIN",
+                })
+              }
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-white border border-sky-300 text-sky-800 hover:bg-sky-100 font-medium"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Nhân bản sang ngày mới</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setExcelModal({ open: true, mode: "import-update" })}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Cập nhật giá Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setExcelModal({ open: true, mode: "delete-items" })}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-600 text-white hover:bg-amber-700 font-medium"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Xóa HH từ Excel</span>
+            </button>
+            <button
+              type="button"
+              disabled={bulkSubmitting}
+              onClick={() => void handleBulkDelete()}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-600 text-white hover:bg-rose-700 font-medium disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Xóa bảng giá</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setCheckedStts(new Set())}
+              className="ml-auto text-[11px] text-slate-600 hover:text-slate-900 underline"
+            >
+              Bỏ chọn
+            </button>
+          </div>
+        )}
+
+        {banner && (
+          <div
+            className={`flex items-center justify-between px-3 py-1.5 rounded-lg border text-[12px] ${
+              banner.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : "bg-rose-50 border-rose-200 text-rose-800"
+            }`}
+          >
+            <span>{banner.text}</span>
+            <button
+              type="button"
+              onClick={() => setBanner(null)}
+              className="text-[11px] underline opacity-75 hover:opacity-100 ml-3"
+            >
+              Đóng
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* Split Pane Body */}
+      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {/* Top Pane: BG Headers */}
+        <div
+          style={{ height: `${topPct}%` }}
+          className="min-h-[140px] overflow-auto bg-white border-b border-slate-200"
+        >
+          <table className="w-full text-left border-collapse text-[12px]">
+            <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700 border-b border-slate-200">
+              <tr>
+                <th className="w-9 px-2.5 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredChecked}
+                    onChange={toggleAllFiltered}
+                    title="Chọn tất cả dòng đang lọc"
+                  />
+                </th>
+                <th
+                  onClick={() => toggleSort("so_ct")}
+                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Số CT {renderSortIcon("so_ct")}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort("ngay_ct")}
+                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Ngày CT {renderSortIcon("ngay_ct")}
+                  </span>
+                </th>
+                <th className="px-2.5 py-2">Hết hạn (CT2)</th>
+                <th
+                  onClick={() => toggleSort("ma_dt")}
+                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Khách hàng (Mã ĐT) {renderSortIcon("ma_dt")}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort("ma_vm")}
+                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Khu vực {renderSortIcon("ma_vm")}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort("item_count")}
+                  className="px-2.5 py-2 text-right cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    Số HH {renderSortIcon("item_count")}
+                  </span>
+                </th>
+                <th
+                  onClick={() => toggleSort("user_name")}
+                  className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60"
+                >
+                  <span className="inline-flex items-center gap-1">
+                    User {renderSortIcon("user_name")}
+                  </span>
+                </th>
+                <th className="px-2.5 py-2">Trạng thái</th>
+                <th className="px-2.5 py-2 text-right w-20">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loadingList && headers.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-10 text-center text-slate-400">
+                    Đang tải dữ liệu bảng giá...
+                  </td>
+                </tr>
+              ) : filteredHeaders.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-10 text-center text-slate-400">
+                    Không có bảng giá nào trong khoảng thời gian / điều kiện lọc này.
+                  </td>
+                </tr>
+              ) : (
+                filteredHeaders.map((h) => {
+                  const isActive = h.stt === activeStt;
+                  const isChecked = checkedStts.has(h.stt);
+                  const isClosed = h.closed === "1";
+                  const isExpired = Boolean(h.ngay_ct2 && h.ngay_ct2 < today);
+                  return (
+                    <tr
+                      key={h.stt}
+                      onClick={() => setActiveStt(h.stt)}
+                      className={`cursor-pointer transition-colors ${
+                        isActive
+                          ? "bg-sky-50/90"
+                          : isChecked
+                            ? "bg-emerald-50/40 hover:bg-slate-50"
+                            : "hover:bg-slate-50"
+                      }`}
+                    >
+                      <td
+                        className="px-2.5 py-1.5 text-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleRowCheck(h.stt)}
+                        />
+                      </td>
+                      <td className="px-2.5 py-1.5 font-semibold text-primary">
+                        {h.so_ct || <span className="text-slate-400 italic">(Trống)</span>}
+                      </td>
+                      <td className="px-2.5 py-1.5 font-mono text-[11px]">
+                        {formatDate(h.ngay_ct)}
+                      </td>
+                      <td className="px-2.5 py-1.5 font-mono text-[11px] text-slate-500">
+                        {h.ngay_ct2 ? formatDate(h.ngay_ct2) : "—"}
+                      </td>
+                      <td className="px-2.5 py-1.5 max-w-[260px] truncate">
+                        {h.ma_dt ? (
+                          <span>
+                            <span className="font-mono font-semibold text-slate-900">
+                              {h.ma_dt}
+                            </span>
+                            {h.ten_dt ? (
+                              <span className="text-slate-500 ml-1.5">· {h.ten_dt}</span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-2.5 py-1.5 font-mono">
+                        {h.ma_vm ? (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 text-[11px] font-semibold">
+                            {h.ma_vm}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right font-semibold tabular-nums">
+                        {h.item_count}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-[11px] text-slate-600">
+                        {h.user_name}
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        {isClosed ? (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[10.5px] font-semibold">
+                            Đã đóng
+                          </span>
+                        ) : isExpired ? (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10.5px] font-semibold">
+                            Hết hạn
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10.5px] font-semibold">
+                            Đang áp dụng
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className="px-2.5 py-1.5 text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setFormModal({ open: true, stt: h.stt })}
+                            className="p-1 rounded text-slate-500 hover:text-primary hover:bg-primary/10"
+                            title="Sửa bảng giá"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteOne(h)}
+                            className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-rose-50"
+                            title="Xóa bảng giá"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Draggable Splitter */}
+        <div
+          onMouseDown={() => setDraggingSplit(true)}
+          className="h-1.5 shrink-0 bg-slate-200 hover:bg-primary/40 cursor-row-resize flex items-center justify-center transition-colors"
+          title="Kéo để thay đổi kích thước bảng chi tiết"
+        >
+          <div className="w-10 h-0.5 rounded-full bg-slate-400" />
+        </div>
+
+        {/* Bottom Pane: BG0 Detail */}
+        <div className="flex-1 min-h-[120px] flex flex-col bg-white overflow-hidden">
+          <div className="shrink-0 px-4 py-2 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2 text-[12px]">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-bold text-slate-800">
+                Chi tiết hàng hóa (BG0):
+              </span>
+              {activeHeader ? (
+                <span className="truncate text-slate-600">
+                  <strong className="text-primary">{activeHeader.so_ct}</strong> ·{" "}
+                  {formatDate(activeHeader.ngay_ct)} ·{" "}
+                  {activeHeader.ma_dt
+                    ? `KH: ${activeHeader.ma_dt}${activeHeader.ten_dt ? ` (${activeHeader.ten_dt})` : ""}`
+                    : activeHeader.ma_vm
+                      ? `Vùng: ${activeHeader.ma_vm}`
+                      : "Chung"}{" "}
+                  · <strong>{activeItems.length}</strong> mặt hàng
+                </span>
+              ) : (
+                <span className="text-slate-400">Chọn một bảng giá phía trên để xem chi tiết</span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={detailSearch}
+                  onChange={(e) => setDetailSearch(e.target.value)}
+                  placeholder="Tìm mã / tên hàng trong bảng giá..."
+                  className="erp-input h-7 pl-7 w-56 text-[12px]"
+                />
+              </div>
+              {activeHeader && (
+                <button
+                  type="button"
+                  onClick={() => setFormModal({ open: true, stt: activeHeader.stt })}
+                  className="inline-flex items-center gap-1 px-2.5 h-7 rounded border border-slate-300 bg-white text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Pencil className="w-3 h-3 text-primary" />
+                  <span>Sửa chi tiết</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-left border-collapse text-[12px]">
+              <thead className="bg-slate-100 sticky top-0 z-10 text-[11px] text-slate-700 border-b border-slate-200">
+                <tr>
+                  <th className="w-12 px-3 py-1.5 text-center">#</th>
+                  <th className="w-40 px-3 py-1.5">Mã vật tư</th>
+                  <th className="px-3 py-1.5">Tên hàng hóa</th>
+                  <th className="w-24 px-3 py-1.5 text-center">ĐVT</th>
+                  <th className="w-36 px-3 py-1.5 text-right">Đơn giá</th>
+                  <th className="w-24 px-3 py-1.5 text-right">% Chiết khấu</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loadingDetail ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                      Đang tải danh sách hàng hóa...
+                    </td>
+                  </tr>
+                ) : !activeHeader ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                      Chưa chọn bảng giá.
+                    </td>
+                  </tr>
+                ) : filteredDetailItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-slate-400">
+                      Không có dòng hàng hóa phù hợp.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDetailItems.map((it, idx) => (
+                    <tr key={`${it.ma_vt}-${idx}`} className="hover:bg-slate-50">
+                      <td className="px-3 py-1.5 text-center text-[11px] text-slate-400">
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono font-semibold text-slate-900">
+                        <HighlightText text={it.ma_vt} query={detailSearch} />
+                      </td>
+                      <td className="px-3 py-1.5 text-slate-700">
+                        <HighlightText text={it.ten_vt || "—"} query={detailSearch} />
+                      </td>
+                      <td className="px-3 py-1.5 text-center text-slate-500">
+                        {it.dvt || ""}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-emerald-700">
+                        {formatCurrency(it.gia)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-slate-700">
+                        {it.ck ? `${it.ck}%` : "0%"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Inline Bulk Date / Bulk Copy Dialog */}
+      {bulkActionDialog.type && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <form
+            onSubmit={(e) => void handleBulkActionSubmit(e)}
+            className="w-full max-w-md bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden"
+          >
+            <div className="px-5 py-3 border-b border-slate-200 bg-slate-50">
+              <h3 className="text-[14px] font-bold text-slate-900">
+                {bulkActionDialog.type === "date"
+                  ? `Đổi ngày cho ${selectedHeaders.length} bảng giá`
+                  : `Nhân bản ${selectedHeaders.length} bảng giá sang ngày mới`}
+              </h3>
+            </div>
+            <div className="p-5 space-y-3 text-[12px]">
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-slate-700">Ngày chứng từ mới (Ngay_Ct) *</span>
+                <input
+                  type="date"
+                  required
+                  value={bulkActionDialog.ngayCt}
+                  onChange={(e) =>
+                    setBulkActionDialog((prev) => ({
+                      ...prev,
+                      ngayCt: e.target.value,
+                      ngayCt1: e.target.value,
+                    }))
+                  }
+                  className="erp-input h-8"
+                />
+              </label>
+
+              {bulkActionDialog.type === "date" ? (
+                <>
+                  <label className="flex flex-col gap-1">
+                    <span className="font-medium text-slate-700">Ngày bắt đầu hiệu lực (Ngay_Ct1)</span>
+                    <input
+                      type="date"
+                      value={bulkActionDialog.ngayCt1}
+                      onChange={(e) =>
+                        setBulkActionDialog((prev) => ({ ...prev, ngayCt1: e.target.value }))
+                      }
+                      className="erp-input h-8"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="font-medium text-slate-700">
+                      Ngày hết hạn mới (Ngay_Ct2 - bỏ trống nếu giữ vô thời hạn)
+                    </span>
+                    <input
+                      type="date"
+                      value={bulkActionDialog.ngayCt2}
+                      onChange={(e) =>
+                        setBulkActionDialog((prev) => ({ ...prev, ngayCt2: e.target.value }))
+                      }
+                      className="erp-input h-8"
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="flex flex-col gap-1">
+                  <span className="font-medium text-slate-700">User tạo bản sao</span>
+                  <input
+                    type="text"
+                    value={bulkActionDialog.userName}
+                    onChange={(e) =>
+                      setBulkActionDialog((prev) => ({
+                        ...prev,
+                        userName: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    className="erp-input h-8 uppercase"
+                  />
+                </label>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-200 bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setBulkActionDialog((prev) => ({ ...prev, type: null }))}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={bulkSubmitting}
+                className="px-4 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50"
+              >
+                {bulkSubmitting ? "Đang xử lý..." : "Xác nhận"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Excel Preview / Commit Modal */}
+      <PriceListExcelModal
+        isOpen={excelModal.open}
+        mode={excelModal.mode}
+        selectedHeaders={selectedHeaders}
+        onClose={() => setExcelModal((prev) => ({ ...prev, open: false }))}
+        onSuccess={(msg) => {
+          showToast("success", msg);
+          void loadHeaders();
+        }}
+      />
+
+      {/* Manual Create / Edit Modal */}
+      <PriceListFormModal
+        isOpen={formModal.open}
+        editingStt={formModal.stt}
+        onClose={() => setFormModal({ open: false, stt: null })}
+        onSaved={(stt, msg) => {
+          showToast("success", msg);
+          void loadHeaders(stt || activeStt);
+          if (stt && stt === activeStt) {
+            void loadDetail(stt);
+          }
+        }}
+      />
+    </div>
+  );
+};

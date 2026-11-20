@@ -31,6 +31,11 @@ const CatalogViewerPage = lazy(() =>
     default: m.CatalogViewerPage,
   })),
 );
+const PriceListWorkspace = lazy(() =>
+  import("./components/price-list/PriceListWorkspace").then((m) => ({
+    default: m.PriceListWorkspace,
+  })),
+);
 
 const LazyFallback = (
   <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
@@ -163,6 +168,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/sales-returns/:stt" element={<App initialVoucherMode="return" />} />
             <Route path="/warehouse-slips" element={<App initialVoucherMode="warehouse" />} />
             <Route path="/warehouse-slips/:stt" element={<App initialVoucherMode="warehouse" />} />
+            <Route
+              path="/price-lists"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <PriceListWorkspace />
+                </Suspense>
+              }
+            />
 
             {/* Nhóm 6: Catalog danh mục (Chỉ xem) */}
             <Route path="/catalogs" element={<Navigate to="/catalogs/khach-hang" replace />} />
