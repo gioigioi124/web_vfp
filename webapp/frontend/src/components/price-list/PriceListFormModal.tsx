@@ -317,31 +317,31 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-3 sm:p-4">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-0 sm:p-4">
       <div
         ref={containerRef}
-        className="w-full max-w-5xl max-h-[92vh] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+        className="w-full h-[100dvh] sm:h-auto max-w-5xl sm:max-h-[92vh] bg-white rounded-none sm:rounded-xl shadow-2xl border-0 sm:border border-slate-200 flex flex-col overflow-hidden pt-safe sm:pt-0"
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50">
-          <div>
-            <h2 className="text-[14px] font-bold text-slate-900">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-2.5 sm:py-3 border-b border-slate-200 bg-slate-50 shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-[14px] font-bold text-slate-900 truncate">
               {editingStt ? `Sửa Bảng Giá (${editingStt})` : "Tạo Bảng Giá Mới (BG / BG0)"}
             </h2>
-            <p className="text-[11px] text-slate-500">
+            <p className="hidden sm:block text-[11px] text-slate-500">
               Quy tắc BG: Nhập Mã Khách hàng (Mã ĐT) hoặc Mã Vùng (Khu vực). Nếu chọn Mã KH, Mã Vùng tự động xóa để tránh xung đột.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/70"
+            className="p-2 sm:p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="flex-1 flex flex-col min-h-0">
-          <div className="p-4 border-b border-slate-200 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-[12px]">
+          <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 text-[12px] max-h-[38vh] sm:max-h-none overflow-y-auto shrink-0">
             <label className="flex flex-col gap-1">
               <span className="font-medium text-slate-700">Số bảng giá (Số CT) *</span>
               <input
@@ -461,7 +461,7 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
           {/* BG0 Grid */}
           <div
             ref={gridScrollRef}
-            className="flex-1 min-h-0 overflow-auto p-4 table-sticky-header"
+            className="flex-1 min-h-0 overflow-auto p-2.5 sm:p-4 table-sticky-header"
           >
             {loading ? (
               <div className="py-12 text-center text-slate-500 text-[12px]">
@@ -469,7 +469,7 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
                 Đang tải chi tiết mặt hàng...
               </div>
             ) : (
-              <table className="xl-grid xl-grid-no-hover dense-table w-full border-collapse text-[12px]">
+              <table className="xl-grid xl-grid-no-hover dense-table mobile-table-sticky w-full border-collapse text-[12px]">
                 <thead className="sticky top-0 z-10 bg-neutral-100 [&_th]:bg-neutral-100 text-neutral-600 font-semibold text-[11px] uppercase tracking-wider select-none border-b border-neutral-300">
                   <tr>
                     <th className="w-10 text-center border-r border-neutral-200">#</th>
@@ -610,25 +610,25 @@ export const PriceListFormModal: React.FC<PriceListFormModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center justify-between px-5 py-3 border-t border-slate-200 bg-slate-50">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-2.5 sm:py-3 pb-safe border-t border-slate-200 bg-slate-50 shrink-0">
             <span className="text-[11.5px] text-slate-500">
               Tổng số dòng đang có mã hàng:{" "}
               <strong className="text-slate-800">
                 {rows.filter((r) => r.ma_vt.trim() !== "").length}
               </strong>
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 ml-auto">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-100"
+                className="px-4 py-2 sm:py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-100"
               >
                 Đóng
               </button>
               <button
                 type="submit"
                 disabled={saving || loading}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 sm:py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50"
               >
                 {saving ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />

@@ -11,6 +11,8 @@ import { VfpNavDir } from "./ui/VfpLookupCell";
 import { arrowDir } from "./ui/excelCell";
 import { DetailGridListView } from "./detail-grid/DetailGridListView";
 import { DetailGridFormRow } from "./detail-grid/DetailGridFormRow";
+import { MobileDetailItemList } from "./detail-grid/MobileDetailItemList";
+import { useIsMobile } from "../hooks/useViewport";
 
 /** Kết quả tra giá trả về cho DetailGrid (đơn giá ngoại tệ + % chiết khấu). */
 export interface PriceLookupResult {
@@ -79,6 +81,7 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
     gridRef,
     onLookupPrice,
   }) => {
+    const isMobile = useIsMobile();
     const isWarehouse = voucherMode === "warehouse";
     const isReturn =
       (maCt || (voucherMode === "return" ? "N5" : "X1"))
@@ -1006,6 +1009,27 @@ export const DetailGrid: React.FC<DetailGridProps> = React.memo(
 
     // ===== Biến thể FORM (ctbhd): đã bỏ cột Đvt bán; Disable Đvt & TK Có; TT cố định là "C" =====
     if (variant === "form") {
+      if (isMobile) {
+        return (
+          <MobileDetailItemList
+            items={items}
+            editable={editable}
+            isWarehouse={isWarehouse}
+            isReturn={isReturn}
+            currency={currency}
+            activeRowIndex={currentActiveRow}
+            itemsRef={itemsRef}
+            firstMaVtRef={firstMaVtRef}
+            fetchVatTuOptions={fetchVatTuOptions}
+            fetchKhoOptionsLocal={fetchKhoOptionsLocal}
+            onSelectRow={handleSelectRow}
+            onApplyRow={applyRow}
+            onEnrichVatTuRow={enrichVatTuRow}
+            onAddItem={onAddItem}
+            onDeleteItem={onDeleteItem}
+          />
+        );
+      }
       return (
         <div className="w-full h-full flex flex-col bg-white overflow-hidden">
           <div

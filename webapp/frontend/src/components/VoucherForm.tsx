@@ -1532,7 +1532,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-white overflow-hidden">
+    <div className="flex flex-col h-[100dvh] lg:h-full w-full bg-white overflow-hidden">
       <VoucherFormHeaderBar
         isWarehouse={isWarehouse}
         isReturn={isReturn}
@@ -1560,6 +1560,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
         }}
       />
 
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden">
       <VoucherMasterSection
         isWarehouse={isWarehouse}
         isReturn={isReturn}
@@ -1620,7 +1621,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       {/* ===== Grid Toolbar ===== */}
       <div
-        className="bg-neutral-100 px-3 py-1 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2 shrink-0"
+        className="bg-neutral-100 px-3 py-1.5 md:py-1 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2 shrink-0"
         data-purpose="grid-actions"
       >
         <div className="flex flex-wrap items-center gap-1.5 min-w-0">
@@ -1629,17 +1630,18 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           </span>
           <span className="text-neutral-400">|</span>
           <span className="text-neutral-500 text-[11px] whitespace-nowrap">
-            Đang ghi nhận:{" "}
             <b className="text-neutral-800">{items.length} dòng</b>
           </span>
-          <span className="text-neutral-400">|</span>
-          <PromotionCounter
-            items={items}
-            ngayCt={ngayCt}
-            maTte={maTte}
-            isWarehouse={isWarehouse}
-            voucherKey={voucherStt || (isCreate ? "NEW" : "VIEW")}
-          />
+          <span className="hidden sm:inline text-neutral-400">|</span>
+          <div className="hidden sm:block">
+            <PromotionCounter
+              items={items}
+              ngayCt={ngayCt}
+              maTte={maTte}
+              isWarehouse={isWarehouse}
+              voucherKey={voucherStt || (isCreate ? "NEW" : "VIEW")}
+            />
+          </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {isEditable && (
@@ -1649,7 +1651,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 onClick={handleUndo}
                 disabled={historyCounts.undo === 0}
                 title={`Hoàn tác bước trước (Ctrl+Z)${historyCounts.undo > 0 ? ` — còn ${historyCounts.undo} bước` : ""}`}
-                className="px-1.5 py-0.5 text-neutral-700 hover:bg-neutral-100 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer border-r border-neutral-200 transition-colors"
+                className="px-2 md:px-1.5 py-1 md:py-0.5 text-neutral-700 hover:bg-neutral-100 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer border-r border-neutral-200 transition-colors"
                 aria-label="Hoàn tác"
               >
                 <Undo2 className="w-3.5 h-3.5" />
@@ -1659,7 +1661,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 onClick={handleRedo}
                 disabled={historyCounts.redo === 0}
                 title={`Làm lại (Ctrl+Y)${historyCounts.redo > 0 ? ` — còn ${historyCounts.redo} bước` : ""}`}
-                className="px-1.5 py-0.5 text-neutral-700 hover:bg-neutral-100 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer border-r border-neutral-200 transition-colors"
+                className="px-2 md:px-1.5 py-1 md:py-0.5 text-neutral-700 hover:bg-neutral-100 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer border-r border-neutral-200 transition-colors"
                 aria-label="Làm lại"
               >
                 <Redo2 className="w-3.5 h-3.5" />
@@ -1669,7 +1671,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
                 onClick={() => handleDuplicateRow(activeRowIndex)}
                 disabled={!items[activeRowIndex]?.ma_vt?.trim()}
                 title="Nhân đôi dòng đang chọn (Ctrl+Shift+D)"
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-neutral-700 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-1 md:py-0.5 text-[11px] font-medium text-neutral-700 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
                 <CopyPlus className="w-3.5 h-3.5" />
                 <span>Nhân đôi</span>
@@ -1681,7 +1683,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
             onClick={toggleHighlightSpecs}
             aria-pressed={highlightSpecs}
             title="Bật/tắt tô màu phân loại và tô đậm kích thước trong Tên vật tư"
-            className={`px-2 py-0.5 rounded border shadow-sm text-[11px] transition-colors cursor-pointer ${
+            className={`hidden md:inline-block px-2 py-0.5 rounded border shadow-sm text-[11px] transition-colors cursor-pointer ${
               highlightSpecs
                 ? "bg-primary-50 border-primary-300 text-primary-800 font-semibold hover:bg-primary-100"
                 : "bg-white border-neutral-300 text-neutral-500 font-medium hover:bg-neutral-50"
@@ -1702,7 +1704,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
 
       {/* ===== Main Data Grid ===== */}
       <div
-        className="flex-1 overflow-hidden bg-white relative"
+        className="flex-1 md:overflow-hidden bg-white relative"
         data-purpose="ledger-table-container"
       >
         <DetailGrid
@@ -1723,6 +1725,7 @@ export const VoucherForm: React.FC<VoucherFormProps> = ({
           firstMaVtRef={firstMaVtRef}
           onLookupPrice={handleLookupPrice}
         />
+      </div>
       </div>
 
       <VoucherFormFooter

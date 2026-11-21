@@ -1318,10 +1318,23 @@ export function App({
             voucherMode={voucherMode}
             onSelectStt={setSelectedStt}
             onEditVoucher={navToDetail}
+            onDeleteVoucher={(v) =>
+              setDeleteTarget({
+                stt: v.stt,
+                so_ct: v.so_ct,
+                ma_dt: v.ma_dt,
+                ten_dt: v.ten_dt,
+                ngay_ct: v.ngay_ct,
+                dbMode: apiDbMode,
+              })
+            }
             onToggleMark={toggleMark}
             onToggleSelectAll={handleToggleSelectAll}
             onOpenFilter={openFilterModal}
             onOpenPrint={handleOpenPrint}
+            onOpenPreview={(sttOrStts) =>
+              handleOpenPrint(sttOrStts, { mode: "preview" })
+            }
             onOpenPickup={handleOpenPickup}
             onOpenDebt={handleOpenDebt}
             onRefresh={refresh}
@@ -1332,8 +1345,57 @@ export function App({
 
       {/* ===== Bottom Shortcut Action Toolbar (ẩn khi đang mở form Thêm mới / Sửa) ===== */}
       {!sttParam && (
-        <footer className="bg-neutral-900 text-neutral-200 border-t border-neutral-800 px-3 py-1 flex-shrink-0 z-20 text-[11px]">
-          <div className="flex items-center justify-between flex-wrap gap-y-1 gap-x-2">
+        <footer className="bg-neutral-900 text-neutral-200 border-t border-neutral-800 px-3 py-1.5 md:py-1 pb-safe flex-shrink-0 z-20 text-[11px]">
+          {/* Mobile Compact Action Bar (< md) */}
+          <div className="flex md:hidden items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <button
+                type="button"
+                onClick={() => handleHotkeyBarAction("NEW")}
+                className="h-10 px-3.5 rounded-lg bg-primary-700 hover:bg-primary-800 active:bg-primary-900 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow cursor-pointer shrink-0"
+              >
+                <span>+ Thêm</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleHotkeyBarAction("FILTER")}
+                className="h-10 px-3 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <Filter className="w-3.5 h-3.5" />
+                <span>Lọc</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPrintPrice((p) => (p === "1" ? "0" : "1"))}
+                className={`h-10 px-2.5 rounded-lg border text-[11px] font-semibold cursor-pointer ${
+                  printPrice === "1"
+                    ? "bg-neutral-800 border-primary-500 text-primary-200"
+                    : "bg-neutral-800 border-neutral-700 text-neutral-400"
+                }`}
+                title="Chuyển đổi in giá bán / không in giá"
+              >
+                {printPrice === "1" ? "Có giá" : "0 giá"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleHotkeyBarAction(marked.size > 0 ? "PRINT" : "PREVIEW")
+                }
+                disabled={!selectedStt && marked.size === 0}
+                className="h-10 px-3 rounded-lg bg-neutral-800 hover:bg-primary-700 disabled:opacity-40 border border-neutral-700 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>
+                  {marked.size > 0 ? `In (${marked.size})` : "In phiếu"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Desktop Action Toolbar (>= md) */}
+          <div className="hidden md:flex items-center justify-between flex-wrap gap-y-1 gap-x-2">
             {/* Tùy chọn in */}
             <div className="flex items-center gap-2.5 bg-neutral-800/80 px-2 py-0.5 rounded border border-neutral-700 text-[11px]">
               <span className="font-medium text-neutral-300">Tùy chọn in:</span>

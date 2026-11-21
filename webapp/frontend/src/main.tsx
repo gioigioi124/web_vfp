@@ -51,6 +51,11 @@ const GeneralLedgerReportPage = lazy(() =>
     default: m.GeneralLedgerReportPage,
   })),
 );
+const InventoryReportPage = lazy(() =>
+  import("./components/modules/InventoryReportPage").then((m) => ({
+    default: m.InventoryReportPage,
+  })),
+);
 
 const LazyFallback = (
   <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
@@ -230,6 +235,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <Suspense fallback={LazyFallback}>
                   <GenericVoucherWorkspace moduleKey="inv-transfer" />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/inventory/reports"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <InventoryReportPage />
                 </Suspense>
               }
             />

@@ -469,7 +469,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[70] flex items-end md:items-center justify-center p-0 md:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label="Sổ chi tiết công nợ phải thu"
@@ -479,40 +479,40 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
     >
       <div
         ref={panelRef}
-        className={`flex flex-col w-full bg-white rounded-xl shadow-2xl border border-neutral-300 overflow-hidden transition-all ${
+        className={`flex flex-col w-full bg-white rounded-none md:rounded-xl shadow-2xl border-0 md:border border-neutral-300 overflow-hidden transition-all pt-safe md:pt-0 ${
           isMaximized
-            ? "max-w-[98vw] h-[95vh]"
-            : "max-w-6xl h-[86vh] max-h-[92vh]"
+            ? "md:max-w-[98vw] h-[100dvh] md:h-[95vh]"
+            : "md:max-w-6xl h-[100dvh] md:h-[86vh] md:max-h-[92vh]"
         }`}
         data-purpose="debt-inquiry-modal"
       >
         {/* ===== Modal Header (compact navy gradient matching PickupDialog/FilterDialog) ===== */}
-        <header className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0 select-none">
-          <div className="flex items-center gap-2.5">
+        <header className="flex items-center justify-between px-3.5 md:px-4 py-2.5 md:py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0 select-none">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="w-2 h-2 rounded-full bg-secondary-300 shrink-0" />
-            <h1 className="text-sm font-bold tracking-wide uppercase text-white">
-              Sổ Chi Tiết Công Nợ Phải Thu
+            <h1 className="text-xs sm:text-sm font-bold tracking-wide uppercase text-white truncate">
+              Sổ Chi Tiết Công Nợ
             </h1>
-            <span className="text-[11px] font-mono bg-white/10 text-neutral-100 px-1.5 py-0.5 rounded border border-white/15">
+            <span className="text-[11px] font-mono bg-white/10 text-neutral-100 px-1.5 py-0.5 rounded border border-white/15 shrink-0">
               TK {ledger?.tk || "131"}
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => void fetchLedger()}
               disabled={loading}
-              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer disabled:opacity-50"
+              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-9 h-9 md:w-6 md:h-6 flex items-center justify-center cursor-pointer disabled:opacity-50"
               title="Làm mới [F5]"
               type="button"
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+                className={`w-4 h-4 md:w-3.5 md:h-3.5 ${loading ? "animate-spin" : ""}`}
               />
             </button>
             <button
               onClick={() => setIsMaximized((prev) => !prev)}
-              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
+              className="hidden md:flex p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 items-center justify-center cursor-pointer"
               title={isMaximized ? "Thu nhỏ" : "Phóng to"}
               type="button"
             >
@@ -524,11 +524,12 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-6 h-6 flex items-center justify-center ml-0.5 cursor-pointer"
+              className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-9 h-9 md:w-6 md:h-6 flex items-center justify-center ml-0.5 cursor-pointer"
               title="Đóng [Esc]"
               type="button"
+              aria-label="Đóng"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5 md:w-4 md:h-4" />
             </button>
           </div>
         </header>
@@ -568,16 +569,16 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
         />
 
         {/* ===== Compact Modal Footer matching PickupDialog/FilterDialog ===== */}
-        <footer className="bg-neutral-100 px-3.5 py-2 flex items-center justify-between gap-3 border-t border-neutral-300 shrink-0 select-none text-xs">
+        <footer className="bg-neutral-100 px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 border-t border-neutral-300 shrink-0 select-none text-xs pb-safe">
           <div className="flex items-center gap-2 text-neutral-600 min-w-0 truncate">
             <span className="font-semibold text-neutral-800 shrink-0">
-              {entries.length} chứng từ
+              {entries.length} CT
             </span>
             {activeCode && (
               <>
                 <span className="text-neutral-300">|</span>
                 <span className="shrink-0">
-                  Giới hạn nợ:{" "}
+                  GH nợ:{" "}
                   <b
                     className={`font-mono ${
                       gioiHan !== null &&
@@ -607,11 +608,11 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <Button
               variant="outline"
               size="sm"
-              className="border-primary-300 bg-primary-50 hover:bg-primary-100 text-primary-800 disabled:opacity-45"
+              className="h-9 md:h-auto border-primary-300 bg-primary-50 hover:bg-primary-100 text-primary-800 disabled:opacity-45"
               disabled={!selectedEntry || loadingVoucher}
               onClick={() => void handleOpenEntryVoucher(selectedEntry)}
               type="button"
@@ -622,7 +623,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
               ) : (
                 <Eye className="w-3.5 h-3.5 text-primary-700" />
               )}
-              <span>Xem hóa đơn</span>
+              <span>Xem HĐ</span>
               <kbd className="text-[9px] py-0 px-1 ml-0.5 border-primary-300 bg-white text-primary-800">
                 F3
               </kbd>
@@ -630,13 +631,14 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             <Button
               variant="outline"
               size="sm"
-              className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+              className="h-9 md:h-auto border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
               onClick={handleExportExcel}
               type="button"
               title="Xuất Excel UTF-8 CSV (Ctrl+E)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Xuất CSV</span>
+              <span className="hidden sm:inline">Xuất CSV</span>
+              <span className="sm:hidden">CSV</span>
               <kbd className="text-[9px] py-0 px-1 ml-0.5 border-emerald-300 bg-white text-emerald-800">
                 Ctrl+E
               </kbd>
@@ -644,6 +646,7 @@ export const DebtPanel: React.FC<DebtPanelProps> = ({
             <Button
               variant="outline"
               size="sm"
+              className="h-9 md:h-auto"
               onClick={onClose}
               type="button"
               title="Đóng (Esc)"

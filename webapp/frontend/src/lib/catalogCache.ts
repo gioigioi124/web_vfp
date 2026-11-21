@@ -1,10 +1,15 @@
 import { AutocompleteOption } from "../components/ui/Autocomplete";
 import {
-  KhoItem,
-  XeItem,
   BoPhanItem,
+  ChungTuItem,
+  KhoanMucItem,
+  KhoItem,
+  NhapXuatItem,
+  SanPhamItem,
   TaiKhoanItem,
+  ThueItem,
   TienTeItem,
+  XeItem,
 } from "../types/lookup";
 
 import {
@@ -15,8 +20,8 @@ import {
 } from "./searchMatch";
 
 /**
- * Cache RAM cho các danh mục NHỎ (kho, xe, bộ phận, tài khoản, tiền tệ).
- * Tải MỘT lần khi mở form -> gợi ý/tra cứu tức thì, không chờ mạng mỗi lần gõ.
+ * Cache RAM cho các danh mục nhỏ (kho, xe, bộ phận, tài khoản, tiền tệ,
+ * chứng từ Document, nhập xuất DmNx, thuế DmThue, khoản mục, sản phẩm).
  */
 
 interface IndexedEntry<T> {
@@ -32,13 +37,19 @@ let kho: IndexedEntry<KhoItem>[] = [];
 let xe: IndexedEntry<XeItem>[] = [];
 let boPhan: IndexedEntry<BoPhanItem>[] = [];
 let taiKhoan: IndexedEntry<TaiKhoanItem>[] = [];
+let nhapXuat: IndexedEntry<NhapXuatItem>[] = [];
+let khoanMuc: IndexedEntry<KhoanMucItem>[] = [];
+let sanPham: IndexedEntry<SanPhamItem>[] = [];
 let tienTe: TienTeItem[] = [];
+let thueList: ThueItem[] = [];
+let chungTu: ChungTuItem[] = [];
 
 let khoByCode = new Map<string, KhoItem>();
 let xeByCode = new Map<string, XeItem>();
 let xeByName = new Map<string, XeItem>();
 let boPhanByCode = new Map<string, BoPhanItem>();
 let taiKhoanByCode = new Map<string, TaiKhoanItem>();
+let nhapXuatByCode = new Map<string, NhapXuatItem>();
 
 let loaded = false;
 let loadPromise: Promise<void> | null = null;
@@ -78,16 +89,20 @@ async function getJson<T>(url: string): Promise<T[] | null> {
 export function initCatalogCache(): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    const [k, x, b, t, tt] = await Promise.all([
+    const [k, x, b, t, tt, nx, th, ct, km, sp] = await Promise.all([
       getJson<KhoItem>("/api/lookups/kho"),
       getJson<XeItem>("/api/lookups/xe"),
       getJson<BoPhanItem>("/api/lookups/bo-phan"),
       getJson<TaiKhoanItem>("/api/lookups/tai-khoan"),
       getJson<TienTeItem>("/api/lookups/tien-te"),
+      getJson<NhapXuatItem>("/api/lookups/nhap-xuat"),
+      getJson<ThueItem>("/api/lookups/thue"),
+      getJson<ChungTuItem>("/api/lookups/chung-tu"),
+      getJson<KhoanMucItem>("/api/lookups/khoan-muc"),
+      getJson<SanPhamItem>("/api/lookups/san-pham"),
     ]);
 
-    if (!k && !x && !b && !t && !tt) {
-      // Mất mạng hoàn toàn -> reset để lần gọi sau thử lại
+    if (!k && !x && !b && !t && !tt && !nx && !ct) {
       loadPromise = null;
       return;
     }
@@ -96,13 +111,20 @@ export function initCatalogCache(): Promise<void> {
     const xList = x ?? [];
     const bList = b ?? [];
     const tList = t ?? [];
-    const ttList = tt ?? [];
+    const nxList = nx ?? [];
+    const kmList = km ?? [];
+    const spList = sp ?? [];
 
     kho = buildIndexed(kList, (i) => i.ma_kho, (i) => i.ten_kho || "");
     xe = buildIndexed(xList, (i) => i.ma_xe, (i) => i.ten_xe || "");
     boPhan = buildIndexed(bList, (i) => i.ma_bp, (i) => i.ten_bp || "");
     taiKhoan = buildIndexed(tList, (i) => i.tk, (i) => i.ten_tk || "");
-    tienTe = ttList;
+    nhapXuat = buildIndexed(nxList, (i) => i.ma_nx, (i) => i.ten_nx || "");
+    khoanMuc = buildIndexed(kmList, (i) => i.ma_km, (i) => i.ten_km || "");
+    sanPham = buildIndexed(spList, (i) => i.ma_sp, (i) => i.ten_sp || "");
+    tienTe = tt ?? [];
+    thueList = th ?? [];
+    chungTu = ct ?? [];
 
     khoByCode = new Map();
     for (const i of kList) {
@@ -129,6 +151,12 @@ export function initCatalogCache(): Promise<void> {
     for (const i of tList) {
       const key = (i.tk || "").trim().toUpperCase();
       if (key) taiKhoanByCode.set(key, i);
+    }
+
+    nhapXuatByCode = new Map();
+    for (const i of nxList) {
+      const key = (i.ma_nx || "").trim().toUpperCase();
+      if (key) nhapXuatByCode.set(key, i);
     }
 
     loaded = true;
@@ -184,6 +212,31 @@ export function searchTaiKhoan(q: string): AutocompleteOption[] {
   return filterIndexed(taiKhoan, q);
 }
 
+export function searchKhoanMuc(q: string): AutocompleteOption[] {
+  return filterIndexed(khoanMuc, q);
+}
+
+export function searchSanPham(q: string): AutocompleteOption[] {
+  return filterIndexed(sanPham, q);
+}
+
+export function searchNhapXuat(q: string, maCt?: string): AutocompleteOption[] {
+  const cleanCt = (maCt || "").trim().toUpperCase();
+  const scoped = cleanCt
+    ? nhapXuat.filter((e) => {
+        const allow = (e.item.ct_nx || "").toUpperCase();
+        return !allow || allow.includes(cleanCt);
+      })
+    : nhapXuat;
+  return filterIndexed(scoped, q);
+}
+
+export function getNhapXuat(maNx: string): NhapXuatItem | null {
+  const clean = (maNx || "").trim().toUpperCase();
+  if (!clean) return null;
+  return nhapXuatByCode.get(clean) || null;
+}
+
 export function getTaiKhoan(tk: string): TaiKhoanItem | null {
   const clean = (tk || "").trim().toUpperCase();
   if (!clean) return null;
@@ -204,4 +257,13 @@ export function getBoPhan(maBp: string): BoPhanItem | null {
 
 export function getTienTeList(): TienTeItem[] {
   return tienTe;
+}
+
+export function getThueList(): ThueItem[] {
+  return thueList;
+}
+
+export function getDocumentsByModule(moduleKey?: string): ChungTuItem[] {
+  if (!moduleKey) return chungTu;
+  return chungTu.filter((d) => d.module_key === moduleKey);
 }

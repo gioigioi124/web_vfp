@@ -37,31 +37,33 @@ export const Dialog: React.FC<DialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/40 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-neutral-900/40 backdrop-blur-sm">
       <div
         ref={containerRef}
         className={cn(
-          "w-full bg-white rounded-lg shadow-xl border border-neutral-400 flex flex-col max-h-[90vh] overflow-hidden",
+          "w-full bg-white rounded-none md:rounded-lg shadow-xl border-0 md:border border-neutral-400 flex flex-col h-[100dvh] md:h-auto md:max-h-[90vh] overflow-hidden pt-safe md:pt-0",
           width,
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 bg-neutral-100 border-b border-neutral-300">
-          <h3 className="text-sm font-bold text-neutral-800">{title}</h3>
+        <div className="flex items-center justify-between px-4 py-2.5 bg-neutral-100 border-b border-neutral-300 shrink-0">
+          <h3 className="text-sm font-bold text-neutral-800 truncate">{title}</h3>
           <button
+            type="button"
             onClick={onClose}
-            className="text-neutral-400 hover:text-neutral-600 p-1 rounded hover:bg-neutral-200 transition-colors"
+            aria-label="Đóng"
+            className="text-neutral-500 hover:text-neutral-800 w-9 h-9 md:w-auto md:h-auto md:p-1 flex items-center justify-center rounded hover:bg-neutral-200 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 p-4 overflow-y-auto">{children}</div>
+        <div className="flex-1 p-3.5 md:p-4 overflow-y-auto">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-2 px-4 py-2.5 bg-neutral-50 border-t border-neutral-300">
+          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-2.5 bg-neutral-50 border-t border-neutral-300 pb-safe shrink-0">
             {footer}
           </div>
         )}

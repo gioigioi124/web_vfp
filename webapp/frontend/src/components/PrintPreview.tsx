@@ -53,7 +53,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
   const [previewCopies, setPreviewCopies] = useState<number>(
     Math.min(4, Math.max(1, Math.floor(copies || 1))),
   );
-  const [fitToWidth, setFitToWidth] = useState<boolean>(false);
+  const [fitToWidth, setFitToWidth] = useState<boolean>(() =>
+    typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  );
   const [printingFromPreview, setPrintingFromPreview] = useState<boolean>(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const printAreaRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +77,9 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
       setPreviewInGia(inGia);
       setPreviewCopies(Math.min(4, Math.max(1, Math.floor(copies || 1))));
       setPrintingFromPreview(false);
+      if (window.innerWidth < 768) {
+        setFitToWidth(true);
+      }
     } else if (!isOpen) {
       setPrintingFromPreview(false);
     }
@@ -334,10 +339,10 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
 
   if (isPreviewMode && !printingFromPreview) {
     return (
-      <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-2 sm:p-4 print-preview-root">
+      <div className="fixed inset-0 z-[75] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-0 md:p-4 print-preview-root">
         <div
           ref={dialogRef}
-          className="bg-neutral-200 rounded shadow-2xl border border-neutral-400 w-full max-w-5xl h-[94vh] flex flex-col overflow-hidden print-preview-scroll animate-in fade-in zoom-in-95"
+          className="bg-neutral-200 rounded-none md:rounded shadow-2xl border-0 md:border border-neutral-400 w-full md:max-w-5xl h-[100dvh] md:h-[94vh] flex flex-col overflow-hidden print-preview-scroll animate-in fade-in zoom-in-95 pt-safe md:pt-0 pb-safe md:pb-0"
           role="dialog"
           aria-modal="true"
           aria-label="Xem trước khi in"
@@ -361,7 +366,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
           />
 
           {/* Paper Preview Body */}
-          <div className="flex-1 overflow-auto p-4 bg-neutral-300/80 print-preview-scroll">
+          <div className="flex-1 overflow-auto p-2 md:p-4 bg-neutral-300/80 print-preview-scroll">
             {isFetching && printDocs.length === 0 ? (
               <div className="py-16 text-center text-xs text-neutral-600">
                 Đang chuẩn bị bản xem trước...
@@ -373,7 +378,7 @@ export const PrintPreview: React.FC<PrintPreviewProps> = ({
             ) : (
               <div
                 ref={printAreaRef}
-                className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-[6mm] print-preview-sheet transition-all"
+                className="print-area mx-auto bg-white text-black shadow-lg border border-neutral-400 p-2 md:p-[6mm] print-preview-sheet transition-all"
                 style={{
                   width: fitToWidth ? "100%" : "210mm",
                   maxWidth: fitToWidth ? "100%" : undefined,

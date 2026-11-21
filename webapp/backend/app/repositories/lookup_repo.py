@@ -6,7 +6,7 @@ from app.config import settings
 from app.database import get_db_cursor
 from app.schemas.lookup import (
     VatTuLookup, KhachHangLookup, KhoLookup, ThueLookup,
-    TaiKhoanLookup, NhapXuatLookup, XeLookup, BoPhanLookup,
+    TaiKhoanLookup, NhapXuatLookup, ChungTuLookup, XeLookup, BoPhanLookup,
     HopDongLookup, TienTeLookup, KhoanMucLookup, SanPhamLookup
 )
 from app.utils.ttl_cache import TTLCache
@@ -228,18 +228,110 @@ class LookupRepository:
 
     def get_nhap_xuat(self) -> List[NhapXuatLookup]:
         def _load() -> List[NhapXuatLookup]:
-            sql = f"SELECT Ma_Nx, {self.fn_uni}(Ten_Nx) AS Ten_Nx, Dinh_Khoan FROM {self.sys_db}.dbo.DmNx WITH (NOLOCK) ORDER BY Ma_Nx"
+            sql = (
+                f"SELECT RTRIM(Ma_Nx), {self.fn_uni}(Ten_Nx) AS Ten_Nx, "
+                f"RTRIM(ISNULL(Dinh_Khoan, 'C')), RTRIM(ISNULL(Ct_Nx, '')), RTRIM(ISNULL(Tk, '')) "
+                f"FROM {self.sys_db}.dbo.DmNx WITH (NOLOCK) ORDER BY Ma_Nx"
+            )
             with get_db_cursor(self.sys_db) as cur:
                 cur.execute(sql)
                 return [
                     NhapXuatLookup(
                         ma_nx=(r[0] or "").strip(),
                         ten_nx=(r[1] or "").strip(),
-                        dinh_khoan=(r[2] or "C").strip()
+                        dinh_khoan=(r[2] or "C").strip(),
+                        ct_nx=(r[3] or "").strip(),
+                        tk=(r[4] or "").strip(),
                     )
                     for r in cur.fetchall()
                 ]
         return self._cache.get_or_set("nhap_xuat", _load, ttl=_STATIC_TTL, cache_empty=False)
+
+    @staticmethod
+    def _classify_document_module(
+        ma_ct: str,
+        ma_nvu: str,
+        nh_ct: str,
+        ct_hd: str,
+        ct_cp: str,
+        report: str,
+    ) -> str:
+        c = ma_ct.upper()
+        r = report.upper()
+        nvu = ma_nvu.upper()
+        if c in ("X1", "N5") or r in ("CTHD", "CTPX"):
+            return "sales"
+        if c in ("C1", "C2", "C3", "C4") or r in ("CTPT", "CTPC", "CTBC", "CT_UNC"):
+            return "cash"
+        if c in ("N1", "N2", "MH") or (nvu == "V" and ct_hd == "C" and nh_ct == "1" and c != "N5"):
+            return "purchase"
+        if r == "CTCK" or c in ("CK", "X2"):
+            return "inv-transfer"
+        if nvu == "V":
+            return "inv-io"
+        if nvu == "K":
+            return "gl-voucher"
+        return ""
+
+    def get_chung_tu(self, module_key: Optional[str] = None) -> List[ChungTuLookup]:
+        def _load() -> List[ChungTuLookup]:
+            sql = f"""
+                SELECT
+                    CtID,
+                    RTRIM(Ma_Ct),
+                    {self.fn_uni}(ISNULL(Ten_Ct, '')),
+                    RTRIM(ISNULL(Ma_Nvu, '')),
+                    RTRIM(ISNULL(Nh_Ct, '1')),
+                    RTRIM(ISNULL(Ct_HD, 'K')),
+                    RTRIM(ISNULL(Ct_CP, 'K')),
+                    RTRIM(ISNULL(No_Co, '')),
+                    RTRIM(ISNULL(Tk, '')),
+                    RTRIM(ISNULL(Report, '')),
+                    RTRIM(ISNULL(HD_Ck, 'K')),
+                    RTRIM(ISNULL(BP_Ck, 'K')),
+                    RTRIM(ISNULL(Thue, ''))
+                FROM {self.sys_db}.dbo.Document WITH (NOLOCK)
+                ORDER BY CtID
+            """
+            with get_db_cursor(self.sys_db) as cur:
+                cur.execute(sql)
+                out: List[ChungTuLookup] = []
+                for r in cur.fetchall():
+                    ma_ct = (r[1] or "").strip().upper()
+                    ma_nvu = (r[3] or "").strip().upper()
+                    nh_ct = (r[4] or "1").strip()
+                    ct_hd = (r[5] or "K").strip().upper()
+                    ct_cp = (r[6] or "K").strip().upper()
+                    report = (r[9] or "").strip()
+                    out.append(
+                        ChungTuLookup(
+                            ct_id=int(r[0] or 0),
+                            ma_ct=ma_ct,
+                            ten_ct=(r[2] or "").strip(),
+                            ma_nvu=ma_nvu,
+                            nh_ct=nh_ct,
+                            ct_hd=ct_hd,
+                            ct_cp=ct_cp,
+                            no_co=(r[7] or "").strip().upper(),
+                            tk=(r[8] or "").strip(),
+                            report=report,
+                            hd_ck=(r[10] or "K").strip().upper(),
+                            bp_ck=(r[11] or "K").strip().upper(),
+                            thue=(r[12] or "").strip(),
+                            module_key=self._classify_document_module(
+                                ma_ct, ma_nvu, nh_ct, ct_hd, ct_cp, report
+                            ),
+                        )
+                    )
+                return out
+
+        items: List[ChungTuLookup] = self._cache.get_or_set(
+            "chung_tu", _load, ttl=_STATIC_TTL, cache_empty=False
+        )
+        if module_key and module_key.strip():
+            key = module_key.strip()
+            return [it for it in items if it.module_key == key]
+        return items
 
     def get_xe(self, query: Optional[str] = None, limit: int = 200) -> List[XeLookup]:
         def _load() -> List[XeLookup]:

@@ -26,8 +26,8 @@ export const DOC_MODULE_CONFIGS: Record<DocModuleKey, DocModuleConfig> = {
     shortCode: "MH",
     route: "/purchases",
     sqlTables: "CtMH / CtMH0",
-    defaultMaCt: "MH",
-    defaultMainTk: "331",
+    defaultMaCt: "N1",
+    defaultMainTk: "3311",
     defaultOffsetTk: "1561",
     partnerLabel: "Nhà cung cấp",
     detailKind: "inventory",
@@ -42,8 +42,8 @@ export const DOC_MODULE_CONFIGS: Record<DocModuleKey, DocModuleConfig> = {
     route: "/inventory/other",
     sqlTables: "CtNX / CtNX0",
     defaultMaCt: "NX",
-    defaultMainTk: "1561",
-    defaultOffsetTk: "711",
+    defaultMainTk: "711",
+    defaultOffsetTk: "1561",
     partnerLabel: "Đối tượng / Bộ phận",
     detailKind: "inventory",
     showTaxFields: false,
@@ -59,7 +59,7 @@ export const DOC_MODULE_CONFIGS: Record<DocModuleKey, DocModuleConfig> = {
     defaultMaCt: "CK",
     defaultMainTk: "1561",
     defaultOffsetTk: "1561",
-    partnerLabel: "Người nhận / Kho nhận",
+    partnerLabel: "Người nhận / Đơn vị",
     detailKind: "transfer",
     showTaxFields: false,
     accentClass: "text-indigo-700 bg-indigo-50 border-indigo-200",
@@ -84,15 +84,26 @@ export const DOC_MODULE_CONFIGS: Record<DocModuleKey, DocModuleConfig> = {
 export interface ModuleVoucherDetailItem {
   stt0?: string | null;
   stt?: string | null;
+  stt_nv: number;
   ma_kho: string;
   ma_kho_n: string;
   ma_vt: string;
   ten_vt: string;
   dvt: string;
+  he_so9: number;
+  so_luong9: number;
+  gia_nt9: number;
+  gia9?: number;
+  tien_nt9: number;
+  tien9?: number;
   so_luong: number;
   gia_nt: number;
+  gia?: number;
   tien_nt: number;
+  tien?: number;
   tien_nt3: number;
+  tien3?: number;
+  gia_tb_tt: string;
   no_co: string;
   tk: string;
   tk_du: string;
@@ -118,6 +129,10 @@ export interface ModuleVoucherHeader {
   dien_giai0: string;
   ma_nx: string;
   tk: string;
+  ma_hd: string;
+  ma_bp: string;
+  ma_km: string;
+  ma_xe: string;
   ma_tte: string;
   ty_gia: number;
   ttien_nt0: number;
@@ -131,12 +146,16 @@ export interface ModuleVoucherHeader {
   so_seri0: string;
   ma_thue: string;
   thue_gtgt: number;
+  tk3: string;
+  tk_du3: string;
+  ma_dtgtgt: string;
+  ten_dtgtgt: string;
+  ct_di_kem: string;
   item_count: number;
 }
 
 export interface ModuleVoucherDetailResponse extends ModuleVoucherHeader {
   items: ModuleVoucherDetailItem[];
-  is_mock: boolean;
 }
 
 export interface ModuleVoucherPageResponse {
@@ -146,7 +165,6 @@ export interface ModuleVoucherPageResponse {
   page_size: number;
   total_pages: number;
   total_amount: number;
-  is_mock: boolean;
 }
 
 export interface ModuleVoucherSavePayload {
@@ -155,6 +173,7 @@ export interface ModuleVoucherSavePayload {
   nh_ct?: string;
   ngay_ct: string;
   so_ct: string;
+  custom_so_ct?: boolean;
   ma_dt?: string;
   ten_dt?: string;
   ong_ba?: string;
@@ -162,6 +181,10 @@ export interface ModuleVoucherSavePayload {
   dien_giai0?: string;
   ma_nx?: string;
   tk?: string;
+  ma_hd?: string;
+  ma_bp?: string;
+  ma_km?: string;
+  ma_xe?: string;
   ma_tte?: string;
   ty_gia?: number;
   posted?: boolean;
@@ -171,6 +194,11 @@ export interface ModuleVoucherSavePayload {
   so_seri0?: string;
   ma_thue?: string;
   thue_gtgt?: number;
+  tk3?: string;
+  tk_du3?: string;
+  ma_dtgtgt?: string;
+  ten_dtgtgt?: string;
+  ct_di_kem?: string;
   items: ModuleVoucherDetailItem[];
 }
 
@@ -200,7 +228,6 @@ export interface PartnerBalancePageResponse {
   sum_ps_co: number;
   sum_du_no_cuoi: number;
   sum_du_co_cuoi: number;
-  is_mock: boolean;
 }
 
 export interface PartnerLedgerRow {
@@ -223,7 +250,6 @@ export interface PartnerLedgerResponse {
   du_dau: number;
   du_cuoi: number;
   entries: PartnerLedgerRow[];
-  is_mock: boolean;
 }
 
 export interface TrialBalanceRow {
@@ -246,7 +272,6 @@ export interface TrialBalanceResponse {
   sum_ps_co: number;
   sum_du_no_cuoi: number;
   sum_du_co_cuoi: number;
-  is_mock: boolean;
 }
 
 export interface GlLedgerRow {
@@ -270,5 +295,78 @@ export interface GlLedgerResponse {
   du_dau: number;
   du_cuoi: number;
   entries: GlLedgerRow[];
-  is_mock: boolean;
+}
+
+export interface InventorySummaryRow {
+  ma_kho: string;
+  ten_kho: string;
+  ma_vt: string;
+  ten_vt: string;
+  dvt: string;
+  ton_dau: number;
+  tien_dau: number;
+  sl_nhap: number;
+  tien_nhap: number;
+  sl_xuat: number;
+  tien_xuat: number;
+  ton_cuoi: number;
+  tien_cuoi: number;
+}
+
+export interface InventorySummaryResponse {
+  from_date: string;
+  to_date: string;
+  ma_kho: string;
+  items: InventorySummaryRow[];
+  total_records: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  sum_ton_dau: number;
+  sum_tien_dau: number;
+  sum_sl_nhap: number;
+  sum_tien_nhap: number;
+  sum_sl_xuat: number;
+  sum_tien_xuat: number;
+  sum_ton_cuoi: number;
+  sum_tien_cuoi: number;
+}
+
+export interface StockCardEntry {
+  stt: string;
+  stt0: string;
+  ngay_ct: string;
+  ma_ct: string;
+  so_ct: string;
+  ma_dt: string;
+  ten_dt: string;
+  dien_giai: string;
+  ma_kho: string;
+  ma_kho_n: string;
+  sl_nhap: number;
+  tien_nhap: number;
+  sl_xuat: number;
+  tien_xuat: number;
+  don_gia: number;
+  ton_luy_ke: number;
+  tien_luy_ke: number;
+}
+
+export interface StockCardResponse {
+  from_date: string;
+  to_date: string;
+  ma_vt: string;
+  ten_vt: string;
+  dvt: string;
+  ma_kho: string;
+  ten_kho: string;
+  ton_dau: number;
+  tien_dau: number;
+  sum_sl_nhap: number;
+  sum_tien_nhap: number;
+  sum_sl_xuat: number;
+  sum_tien_xuat: number;
+  ton_cuoi: number;
+  tien_cuoi: number;
+  entries: StockCardEntry[];
 }

@@ -150,3 +150,17 @@ def get_san_pham(response: Response):
     except Exception as exc:
         raise _handle_lookup_error("sản phẩm", exc)
 
+
+@router.get("/chung-tu")
+def get_chung_tu(
+    response: Response,
+    module_key: Optional[str] = Query(None, description="Lọc theo phân hệ (purchase, inv-io, inv-transfer, gl-voucher, cash, sales)"),
+):
+    try:
+        items = lookup_repository.get_chung_tu(module_key=module_key)
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return {"success": True, "data": [item.model_dump() for item in items]}
+    except Exception as exc:
+        raise _handle_lookup_error("chứng từ (Document)", exc)
+
+

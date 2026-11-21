@@ -68,14 +68,14 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
           : isReturn
             ? "bg-gradient-to-r from-amber-900 via-amber-800 to-amber-900 border-amber-950"
             : "bg-gradient-to-r from-primary-800 via-primary-700 to-primary-800 border-primary-900")
-      } text-white px-4 py-2 flex items-center justify-between shadow-md shrink-0 border-b`}
+      } text-white px-3 md:px-4 py-2 flex items-center justify-between gap-2 shadow-md shrink-0 border-b`}
     >
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center w-7 h-7 rounded bg-white/15 text-primary-100 border border-white/20">
+      <div className="flex items-center gap-2 md:gap-3 min-w-0">
+        <div className="flex items-center justify-center w-7 h-7 rounded bg-white/15 text-primary-100 border border-white/20 shrink-0">
           <FileText className="w-4 h-4" />
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-sm tracking-wide uppercase text-white">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <span className="font-bold text-xs md:text-sm tracking-wide uppercase text-white truncate">
             {customTitle ||
               (isWarehouse
                 ? isReturn
@@ -101,7 +101,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
                       ? "Sửa Chứng Từ"
                       : "Xem Chứng Từ")}
           </span>
-          <span className="text-white/75 text-xs font-normal">
+          <span className="hidden md:inline text-white/75 text-xs font-normal">
             {customSubtitle ||
               (isWarehouse
                 ? isReturn
@@ -112,7 +112,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
                   : "/ Bán hàng công nợ")}
           </span>
           <span
-            className={`ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+            className={`hidden md:inline ml-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
               isCreate
                 ? "bg-success-600/30 text-success-200 border-success-400/40"
                 : isEdit
@@ -128,7 +128,7 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
           </span>
           {isDirty && (
             <span
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 border border-amber-300/40"
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-200 border border-amber-300/40 shrink-0"
               title="Có thay đổi chưa lưu — bản nháp được tự động lưu tạm sau 2 giây"
             >
               ● Chưa lưu
@@ -137,9 +137,9 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-4 text-xs">
-        <div className="flex items-center gap-1.5">
-          <span className="text-white/75">Người lập:</span>
+      <div className="flex items-center gap-2 md:gap-4 text-xs shrink-0">
+        <div className="hidden sm:flex items-center gap-1.5">
+          <span className="hidden md:inline text-white/75">Người lập:</span>
           <span
             className={`font-semibold px-2 py-0.5 rounded border ${
               isDifferentCreator && hasVoucher
@@ -162,26 +162,26 @@ export const VoucherFormHeaderBar: React.FC<VoucherFormHeaderBarProps> = ({
         <div className="flex items-center gap-1 pl-2 border-l border-white/20">
           {!isWarehouse && voucherStt && onPrint && (
             <button
-              className="p-1 px-2 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+              className="w-9 h-9 md:w-auto md:h-auto md:p-1 md:px-2 inline-flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
               title="In phiếu (F7)"
               onClick={onPrint}
               type="button"
             >
-              <Printer className="w-3.5 h-3.5" />
+              <Printer className="w-4 h-4 md:w-3.5 md:h-3.5" />
             </button>
           )}
           {!isWarehouse && maDt && onViewDebt && (
             <button
-              className="p-1 px-2 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+              className="w-9 h-9 md:w-auto md:h-auto md:p-1 md:px-2 inline-flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
               title="Chi tiết công nợ"
               onClick={() => onViewDebt(maDt)}
               type="button"
             >
-              <CreditCard className="w-3.5 h-3.5" />
+              <CreditCard className="w-4 h-4 md:w-3.5 md:h-3.5" />
             </button>
           )}
           <button
-            className="p-1 px-2 text-rose-200 hover:text-white hover:bg-danger-600 rounded transition-colors ml-1 cursor-pointer"
+            className="w-9 h-9 md:w-auto md:h-auto md:p-1 md:px-2 inline-flex items-center justify-center text-rose-200 hover:text-white hover:bg-danger-600 rounded transition-colors ml-0.5 md:ml-1 cursor-pointer"
             title="Đóng (Esc)"
             onClick={onRequestClose}
             type="button"

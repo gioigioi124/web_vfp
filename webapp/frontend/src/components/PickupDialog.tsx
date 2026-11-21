@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PickupSlip, PickupItem } from "../types/pickup";
-import { getTodayDate } from "../lib/format";
+import { formatDate, formatQuantity, getTodayDate } from "../lib/format";
 import { useModalLock } from "../lib/modalLock";
+import { useIsMobile } from "../hooks/useViewport";
 import { cachedFetch, peek, prime, invalidate } from "../lib/apiCache";
 import { arrowDir } from "./ui/excelCell";
-import { X, Minimize2, Square, RefreshCw, Search } from "lucide-react";
+import { X, Minimize2, Square, RefreshCw, Search, Check } from "lucide-react";
 import { PickupMasterTable } from "./pickup/PickupMasterTable";
 import { PickupDetailTable } from "./pickup/PickupDetailTable";
 import { PickupFooter } from "./pickup/PickupFooter";
@@ -74,6 +75,8 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
   refreshTrigger = 0,
   focusStt = null,
 }) => {
+  const isMobile = useIsMobile();
+  const [mobileTab, setMobileTab] = useState<"slips" | "items">("slips");
   const effectiveMaCt: "X1" | "N5" = maCt === "N5" ? "N5" : "X1";
   const isReturn = effectiveMaCt === "N5";
   const [rawSlips, setRawSlips] = useState<PickupSlip[]>([]);
@@ -817,7 +820,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label={
@@ -826,35 +829,35 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
     >
       <div
         ref={containerRef}
-        className={`flex flex-col w-full bg-white rounded-xl shadow-2xl border border-neutral-300 overflow-hidden transition-all animate-in fade-in zoom-in-95 ${
+        className={`flex flex-col w-full bg-white rounded-none md:rounded-xl shadow-2xl border-0 md:border border-neutral-300 overflow-hidden transition-all animate-in fade-in zoom-in-95 pt-safe md:pt-0 ${
           isMaximized
-            ? "max-w-[98vw] h-[96vh]"
-            : "max-w-6xl h-full max-h-[92vh]"
+            ? "md:max-w-[98vw] h-[100dvh] md:h-[96vh]"
+            : "md:max-w-6xl h-[100dvh] md:h-full md:max-h-[92vh]"
         }`}
       >
         {/* ===== Modal Header (navy / amber gradient) ===== */}
         <header
-          className={`flex items-center justify-between gap-3 px-4 py-2 text-white border-b shrink-0 ${
+          className={`flex flex-wrap items-center justify-between gap-2 px-3.5 md:px-4 py-2 text-white border-b shrink-0 ${
             isReturn
               ? "bg-gradient-to-r from-amber-900 via-amber-800 to-neutral-900 border-amber-900"
               : "bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 border-primary-900"
           }`}
         >
-          <div className="flex items-center space-x-2.5 shrink-0">
-            <div className="w-2 h-2 rounded-full bg-secondary-300" />
-            <h1 className="text-sm font-bold tracking-wide uppercase text-white">
+          <div className="flex items-center space-x-2 shrink-0 min-w-0">
+            <div className="w-2 h-2 rounded-full bg-secondary-300 shrink-0" />
+            <h1 className="text-xs sm:text-sm font-bold tracking-wide uppercase text-white truncate">
               {isReturn
                 ? "Chọn Phiếu Nhập Lại Kho (N5)"
                 : "Chọn Phiếu Xuất Kho"}
             </h1>
             {isReturn && (
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-white/15 text-amber-100 border border-white/20">
+              <span className="hidden sm:inline-block text-[11px] font-medium px-2 py-0.5 rounded bg-white/15 text-amber-100 border border-white/20">
                 Tháng {monthBounds.label} · Tất cả KH
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="relative">
+          <div className="flex items-center gap-1.5 min-w-0 w-full sm:w-auto justify-end">
+            <div className="relative flex-1 sm:flex-none">
               <Search className="w-3.5 h-3.5 text-neutral-300 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
@@ -866,7 +869,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                     ? "Lọc nhanh phiếu nhập lại kho"
                     : "Lọc nhanh phiếu xuất kho"
                 }
-                className="h-6 w-44 sm:w-56 pl-7 pr-6 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-xs outline-none focus:bg-white/20 focus:border-white/50"
+                className="h-9 md:h-6 w-full sm:w-56 pl-7 pr-6 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-xs outline-none focus:bg-white/20 focus:border-white/50"
               />
               {searchQuery && (
                 <button
@@ -875,7 +878,7 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
                   aria-label="Xóa từ khóa lọc"
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-300 hover:text-white cursor-pointer"
                 >
-                  <X className="w-3 h-3" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -885,18 +888,18 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
             <button
               onClick={() => loadSlips(activeStt)}
               disabled={loading}
-              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
+              className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-9 h-9 md:w-6 md:h-6 flex items-center justify-center cursor-pointer shrink-0"
               title="Làm mới"
               type="button"
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+                className={`w-4 h-4 md:w-3.5 md:h-3.5 ${loading ? "animate-spin" : ""}`}
               />
             </button>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-1 shrink-0">
               <button
                 onClick={() => setIsMaximized((prev) => !prev)}
-                className="p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
+                className="hidden md:flex p-1 text-neutral-300 hover:text-white hover:bg-white/10 rounded transition-colors w-6 h-6 items-center justify-center cursor-pointer"
                 title={isMaximized ? "Thu gọn" : "Phóng to"}
                 type="button"
               >
@@ -908,18 +911,47 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               </button>
               <button
                 onClick={onClose}
-                className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-6 h-6 flex items-center justify-center ml-1 cursor-pointer"
+                className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-9 h-9 md:w-6 md:h-6 flex items-center justify-center ml-0.5 cursor-pointer"
                 title="Đóng (Esc)"
                 type="button"
+                aria-label="Đóng"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5 md:w-4 md:h-4" />
               </button>
             </div>
           </div>
         </header>
 
+        {/* Mobile 2-Tab Bar (< md) */}
+        {isMobile && (
+          <div className="grid grid-cols-2 border-b border-neutral-200 bg-neutral-50 shrink-0 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setMobileTab("slips")}
+              className={`py-2.5 text-center border-b-2 transition-colors ${
+                mobileTab === "slips"
+                  ? "border-primary-700 text-primary-800 bg-white"
+                  : "border-transparent text-neutral-500"
+              }`}
+            >
+              Phiếu kho ({filteredSlips.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileTab("items")}
+              className={`py-2.5 text-center border-b-2 transition-colors ${
+                mobileTab === "items"
+                  ? "border-primary-700 text-primary-800 bg-white"
+                  : "border-transparent text-neutral-500"
+              }`}
+            >
+              Chi tiết hàng ({activeItems.length})
+            </button>
+          </div>
+        )}
+
         {/* ===== Master / Detail Body ===== */}
-        <main className="flex-1 flex flex-col overflow-hidden p-3 gap-3 bg-neutral-100/70">
+        <main className="flex-1 flex flex-col overflow-hidden p-2.5 md:p-3 gap-2.5 md:gap-3 bg-neutral-100/70">
           {errorMsg && (
             <div
               role="alert"
@@ -948,41 +980,191 @@ export const PickupDialog: React.FC<PickupDialogProps> = ({
               </div>
             </div>
           )}
-          {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU KHO */}
-          <PickupMasterTable
-            filteredSlips={filteredSlips}
-            totalSlipsCount={slips.length}
-            selectedStts={selectedStts}
-            activeStt={activeStt}
-            allSelected={allSelected}
-            loading={loading}
-            isReturn={isReturn}
-            searchQuery={searchQuery}
-            masterScrollRef={masterScrollRef}
-            masterHeadRef={masterHeadRef}
-            masterRowRefs={masterRowRefs}
-            masterActiveColRef={masterActiveColRef}
-            onSelectAll={selectAll}
-            onDeselectAll={deselectAll}
-            onSetActiveStt={setActiveStt}
-            onToggleSelect={toggleSelect}
-            onCellKeyDown={handleMasterCellKeyDown}
-            onCellCopy={handleCellCopy}
-          />
 
-          {/* TẦNG 2: BẢNG DETAIL — CHI TIẾT HÀNG HÓA VẬT TƯ */}
-          <PickupDetailTable
-            activeItems={activeItems}
-            activeDetailRow={activeDetailRow}
-            loadingDetail={loadingDetail}
-            detailSectionRef={detailSectionRef}
-            detailScrollRef={detailScrollRef}
-            detailHeadRef={detailHeadRef}
-            detailRowRefs={detailRowRefs}
-            onSetActiveDetailRow={setActiveDetailRow}
-            onCellKeyDown={handleDetailCellKeyDown}
-            onCellCopy={handleCellCopy}
-          />
+          {isMobile ? (
+            mobileTab === "slips" ? (
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {filteredSlips.length > 0 && (
+                  <div className="flex items-center justify-between px-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => (allSelected ? deselectAll() : selectAll())}
+                      className="text-primary-700 font-semibold py-1"
+                    >
+                      {allSelected ? "Bỏ chọn tất cả" : "Chọn tất cả"}
+                    </button>
+                    <span className="text-neutral-500">
+                      Chạm checkbox để chọn lấy · Chạm thẻ để xem hàng
+                    </span>
+                  </div>
+                )}
+                {loading && filteredSlips.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-neutral-500">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-primary-600" />
+                    Đang tải danh sách phiếu kho...
+                  </div>
+                ) : filteredSlips.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-neutral-500 bg-white rounded-lg border border-neutral-200">
+                    Không có phiếu kho nào phù hợp.
+                  </div>
+                ) : (
+                  filteredSlips.map((slip) => {
+                    const checked = selectedStts.has(slip.stt);
+                    const isActive = activeStt === slip.stt;
+                    return (
+                      <div
+                        key={slip.stt}
+                        onClick={() => {
+                          setActiveStt(slip.stt);
+                          setMobileTab("items");
+                        }}
+                        className={`bg-white rounded-xl border p-3 shadow-sm transition-colors ${
+                          isActive
+                            ? "border-primary-500 ring-1 ring-primary-400"
+                            : checked
+                              ? "border-emerald-400 bg-emerald-50/30"
+                              : "border-neutral-200"
+                        }`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSelect(slip.stt);
+                              setActiveStt(slip.stt);
+                            }}
+                            aria-label={`Chọn phiếu ${slip.so_ct}`}
+                            className={`w-7 h-7 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${
+                              checked
+                                ? "bg-primary-700 border-primary-700 text-white"
+                                : "bg-white border-neutral-300"
+                            }`}
+                          >
+                            {checked && <Check className="w-4 h-4" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono font-bold text-primary-800 text-sm">
+                                {slip.so_ct}
+                              </span>
+                              <span className="font-mono text-xs text-neutral-500">
+                                {formatDate(slip.ngay_ct)}
+                              </span>
+                            </div>
+                            <div className="text-xs font-semibold text-neutral-800 truncate mt-0.5">
+                              {slip.ten_dt || slip.ma_dt || "—"}
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-1 text-[11px] text-neutral-500">
+                              <span className="truncate">
+                                {slip.ma_xe ? `Xe: ${slip.ma_xe}` : slip.dia_chi || "—"}
+                              </span>
+                              <span className="font-mono font-semibold text-neutral-700 shrink-0">
+                                {slip.total_items} dòng ·{" "}
+                                {formatQuantity(slip.total_so_tam)} tấm
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {loadingDetail ? (
+                  <div className="py-12 text-center text-xs text-neutral-500">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-primary-600" />
+                    Đang tải chi tiết hàng hóa...
+                  </div>
+                ) : activeItems.length === 0 ? (
+                  <div className="py-12 text-center text-xs text-neutral-500 bg-white rounded-lg border border-neutral-200">
+                    Chưa có dòng hàng hóa cho phiếu đang chọn.
+                  </div>
+                ) : (
+                  activeItems.map((it, idx) => (
+                    <div
+                      key={`${it.stt}-${it.stt0}-${idx}`}
+                      className="bg-white rounded-xl border border-neutral-200 p-3 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-xs text-primary-800">
+                          #{idx + 1} · {it.ma_vt}
+                        </span>
+                        <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700">
+                          Kho: {it.ma_kho}
+                        </span>
+                      </div>
+                      <div className="text-xs font-semibold text-neutral-900 mt-1">
+                        {it.ten_vt}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-neutral-100 text-[11px]">
+                        <div>
+                          <div className="text-neutral-500">Số tấm</div>
+                          <div className="font-mono font-bold text-amber-800">
+                            {formatQuantity(it.so_tam)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-neutral-500">Hệ số</div>
+                          <div className="font-mono font-semibold text-neutral-800">
+                            {formatQuantity(it.he_so8)}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-neutral-500">
+                            SL ({it.dvt_ban || it.dvt})
+                          </div>
+                          <div className="font-mono font-bold text-primary-800">
+                            {formatQuantity(it.so_luong9)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )
+          ) : (
+            <>
+              {/* TẦNG 1: BẢNG MASTER — DANH SÁCH PHIẾU KHO */}
+              <PickupMasterTable
+                filteredSlips={filteredSlips}
+                totalSlipsCount={slips.length}
+                selectedStts={selectedStts}
+                activeStt={activeStt}
+                allSelected={allSelected}
+                loading={loading}
+                isReturn={isReturn}
+                searchQuery={searchQuery}
+                masterScrollRef={masterScrollRef}
+                masterHeadRef={masterHeadRef}
+                masterRowRefs={masterRowRefs}
+                masterActiveColRef={masterActiveColRef}
+                onSelectAll={selectAll}
+                onDeselectAll={deselectAll}
+                onSetActiveStt={setActiveStt}
+                onToggleSelect={toggleSelect}
+                onCellKeyDown={handleMasterCellKeyDown}
+                onCellCopy={handleCellCopy}
+              />
+
+              {/* TẦNG 2: BẢNG DETAIL — CHI TIẾT HÀNG HÓA VẬT TƯ */}
+              <PickupDetailTable
+                activeItems={activeItems}
+                activeDetailRow={activeDetailRow}
+                loadingDetail={loadingDetail}
+                detailSectionRef={detailSectionRef}
+                detailScrollRef={detailScrollRef}
+                detailHeadRef={detailHeadRef}
+                detailRowRefs={detailRowRefs}
+                onSetActiveDetailRow={setActiveDetailRow}
+                onCellKeyDown={handleDetailCellKeyDown}
+                onCellCopy={handleCellCopy}
+              />
+            </>
+          )}
         </main>
 
         {/* ===== Modal Footer ===== */}

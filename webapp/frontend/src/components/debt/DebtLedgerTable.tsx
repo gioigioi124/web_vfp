@@ -1,8 +1,9 @@
 import React from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, ChevronRight } from "lucide-react";
 import { DebtLedgerData, DebtLedgerEntry } from "../../types/debt";
 import { formatDate } from "../../lib/format";
 import { handleExcelMouseDown, selectAllLater } from "../ui/excelCell";
+import { useIsMobile } from "../../hooks/useViewport";
 import { formatSpaceNumber } from "./debtUtils";
 
 interface GridRowData {
@@ -59,6 +60,148 @@ export const DebtLedgerTable: React.FC<DebtLedgerTableProps> = ({
   onCellKeyDown,
   onCellCopy,
 }) => {
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    let running = ledger?.du_dau ?? 0;
+    return (
+      <div className="flex-1 min-h-0 flex flex-col bg-slate-50 overflow-hidden">
+        {ledger && (
+          <div className="p-2.5 grid grid-cols-2 gap-2 bg-white border-b border-neutral-200 shrink-0 text-xs">
+            <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-neutral-500">
+                Dư đầu kỳ
+              </div>
+              <div className="font-mono font-bold text-neutral-900">
+                {formatSpaceNumber(ledger.du_dau)} ₫
+              </div>
+            </div>
+            <div className="rounded-lg border border-primary-300 bg-primary-50 px-2.5 py-1.5">
+              <div className="text-[10px] font-bold uppercase text-primary-800">
+                Dư cuối kỳ
+              </div>
+              <div className="font-mono font-bold text-primary-900">
+                {formatSpaceNumber(ledger.du_cuoi)} ₫
+              </div>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50/50 px-2.5 py-1">
+              <div className="text-[10px] font-bold uppercase text-rose-700">
+                PS Tăng (Mua)
+              </div>
+              <div className="font-mono font-bold text-rose-800">
+                +{formatSpaceNumber(ledger.tong_ps_tang)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 px-2.5 py-1">
+              <div className="text-[10px] font-bold uppercase text-emerald-700">
+                PS Giảm (Thu)
+              </div>
+              <div className="font-mono font-bold text-emerald-800">
+                -{formatSpaceNumber(ledger.tong_ps_giam)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+          {loading ? (
+            <div className="py-12 text-center text-neutral-400 text-xs">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-1.5 text-primary-600" />
+              Đang tải sổ chi tiết công nợ...
+            </div>
+          ) : !inputMaDt.trim() && !ledger ? (
+            <div className="py-12 text-center text-neutral-400 italic text-xs">
+              Nhập Mã ĐT rồi bấm Tìm kiếm để tra cứu sổ chi tiết công nợ.
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="py-10 text-center text-neutral-400 italic text-xs bg-white rounded-xl border border-neutral-200">
+              Không có phát sinh trong khoảng thời gian đã chọn.
+            </div>
+          ) : (
+            entries.map((entry, idx) => {
+              const rowKey = `entry-${idx}`;
+              const maCtUpper = (entry.ma_ct || "").trim().toUpperCase();
+              const isDrillable = Boolean(
+                entry.stt && (maCtUpper === "X1" || maCtUpper === "N5"),
+              );
+              running =
+                entry.luy_ke !== undefined
+                  ? Number(entry.luy_ke)
+                  : running + (Number(entry.ps_tang) || 0) - (Number(entry.ps_giam) || 0);
+              const isCreditRow = entry.ps_giam > 0 && entry.ps_tang === 0;
+              return (
+                <div
+                  key={rowKey}
+                  onClick={() => {
+                    onSelectRowKey(rowKey);
+                    if (isDrillable) onOpenEntryVoucher(entry);
+                  }}
+                  className={`bg-white rounded-xl border p-3 shadow-sm ${
+                    selectedRowKey === rowKey
+                      ? "border-primary-500 ring-1 ring-primary-300"
+                      : isCreditRow
+                        ? "border-emerald-200 bg-emerald-50/20"
+                        : "border-neutral-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                          isDrillable
+                            ? "bg-primary-100 text-primary-800"
+                            : isCreditRow
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-neutral-100 text-neutral-700"
+                        }`}
+                      >
+                        {maCtUpper}
+                      </span>
+                      <span className="font-mono font-bold text-xs text-primary-800">
+                        {entry.so_ct || "—"}
+                      </span>
+                      {isDrillable && (
+                        <ChevronRight className="w-3.5 h-3.5 text-primary-600" />
+                      )}
+                    </div>
+                    <span className="font-mono text-xs text-neutral-500 shrink-0">
+                      {formatDate(entry.ngay_ct)}
+                    </span>
+                  </div>
+                  {entry.dien_giai && (
+                    <div className="text-xs text-neutral-700 mt-1 line-clamp-2">
+                      {entry.dien_giai}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-neutral-100 text-xs font-mono">
+                    <div>
+                      {entry.ps_tang !== 0 && (
+                        <span className="text-rose-700 font-bold">
+                          +{formatSpaceNumber(entry.ps_tang)}
+                        </span>
+                      )}
+                      {entry.ps_giam !== 0 && (
+                        <span className="text-emerald-700 font-bold ml-1">
+                          -{formatSpaceNumber(entry.ps_giam)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-neutral-600">
+                      LK:{" "}
+                      <b className="text-primary-900">
+                        {formatSpaceNumber(running)}
+                      </b>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const renderGridRow = (row: GridRowData) => {
     const isSelected = selectedRowKey === row.key;
     const boldSummary = row.isSummary ? "font-semibold text-neutral-900" : "";

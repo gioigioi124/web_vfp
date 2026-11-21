@@ -53,6 +53,26 @@ class NhapXuatLookup(BaseModel):
     ma_nx: str
     ten_nx: str
     dinh_khoan: Optional[str] = "C"
+    ct_nx: Optional[str] = ""
+    tk: Optional[str] = ""
+
+
+class ChungTuLookup(BaseModel):
+    ct_id: int
+    ma_ct: str
+    ten_ct: str
+    ma_nvu: str = ""
+    nh_ct: str = "1"
+    ct_hd: str = "K"
+    ct_cp: str = "K"
+    no_co: str = ""
+    tk: str = ""
+    report: str = ""
+    hd_ck: str = "K"
+    bp_ck: str = "K"
+    thue: str = ""
+    module_key: str = ""
+
 
 class XeLookup(BaseModel):
     ma_xe: str
@@ -82,4 +102,5 @@ class SanPhamLookup(BaseModel):
     ten_sp: str
     dvt: Optional[str] = ""
     loai_sp: Optional[str] = ""
+
 

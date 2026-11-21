@@ -82,6 +82,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     top: number;
     left: number;
     width: number;
+    maxHeight: number;
   } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -102,23 +103,46 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
   const updateDropdownPosition = () => {
     if (!internalInputRef.current) return;
     const rect = internalInputRef.current.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const vpWidth = vv?.width ?? window.innerWidth;
+    const vpHeight = vv?.height ?? window.innerHeight;
+    const vpTop = vv?.offsetTop ?? 0;
+
     const width = Math.min(
       Math.max(rect.width, dropdownMinWidth),
-      Math.max(200, window.innerWidth - 16),
+      Math.max(200, vpWidth - 16),
     );
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const spaceBelow = window.innerHeight - rect.bottom;
+    const left = Math.max(8, Math.min(rect.left, vpWidth - width - 8));
+    const spaceBelow = vpTop + vpHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - vpTop - 8;
     const dropdownEstHeight = 230;
-    const top =
-      spaceBelow < dropdownEstHeight && rect.top > dropdownEstHeight
-        ? Math.max(8, rect.top - dropdownEstHeight - 2)
-        : rect.bottom + 2;
+    const placeAbove = spaceBelow < 160 && spaceAbove > spaceBelow;
+    const availHeight = placeAbove ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(120, Math.min(240, availHeight));
+    const top = placeAbove
+      ? Math.max(vpTop + 8, rect.top - Math.min(dropdownEstHeight, maxHeight) - 2)
+      : rect.bottom + 2;
     setDropdownRect({
       top,
       left,
       width,
+      maxHeight,
     });
   };
+
+  useEffect(() => {
+    if (!open) return;
+    const vv = window.visualViewport;
+    const onVpChange = () => updateDropdownPosition();
+    vv?.addEventListener("resize", onVpChange);
+    vv?.addEventListener("scroll", onVpChange);
+    window.addEventListener("resize", onVpChange);
+    return () => {
+      vv?.removeEventListener("resize", onVpChange);
+      vv?.removeEventListener("scroll", onVpChange);
+      window.removeEventListener("resize", onVpChange);
+    };
+  }, [open]);
 
   // Debounce tải danh mục khi `value`/`open` đổi.
   useEffect(() => {
@@ -148,16 +172,20 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
     return () => clearTimeout(timer);
   }, [value, open, fetcher, minChars, debounceMs, maxResults]);
 
-  // Đóng dropdown khi click ra ngoài (chỉ gắn listener khi đang mở)
+  // Đóng dropdown khi click/tap ra ngoài (chỉ gắn listener khi đang mở)
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+    const handler = (e: PointerEvent) => {
+      if (
+        wrapRef.current &&
+        !wrapRef.current.contains(e.target as Node) &&
+        !listRef.current?.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
   }, [open]);
 
   // Cuộn dòng đang sáng vào vùng nhìn thấy của dropdown khi nhấn phím lên/xuống
@@ -268,7 +296,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
             onFocus?.(e);
           }}
           onBlur={(e) => {
-            setTimeout(() => setOpen(false), 150);
+            setTimeout(() => setOpen(false), 220);
             onBlur?.(e);
           }}
           onKeyDown={handleKeyDown}
@@ -297,8 +325,9 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
             top: dropdownRect.top,
             left: dropdownRect.left,
             width: dropdownRect.width,
+            maxHeight: dropdownRect.maxHeight,
           }}
-          className="z-[9999] max-h-56 overflow-y-auto bg-white border border-neutral-300 rounded shadow-xl text-xs divide-y divide-neutral-100"
+          className="z-[9999] overflow-y-auto overscroll-contain bg-white border border-neutral-300 rounded-md shadow-xl text-xs divide-y divide-neutral-100"
         >
           {options.map((opt, i) => (
             <li
@@ -309,13 +338,13 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
                 choose(opt);
               }}
               className={cn(
-                "px-2.5 py-1.5 cursor-pointer flex items-center justify-between gap-2",
+                "px-3 md:px-2.5 py-2.5 md:py-1.5 min-h-[44px] md:min-h-0 cursor-pointer flex flex-col md:flex-row md:items-center md:justify-between gap-0.5 md:gap-2",
                 i === highlight
                   ? "bg-primary-50 text-primary-900 font-medium"
-                  : "hover:bg-neutral-50",
+                  : "hover:bg-neutral-50 active:bg-primary-50",
               )}
             >
-              <span className="font-mono font-bold text-primary-800 shrink-0 min-w-[76px]">
+              <span className="font-mono font-bold text-primary-800 shrink-0 min-w-[76px] text-[13px] md:text-xs">
                 <HighlightText
                   text={opt.label}
                   query={value}
@@ -325,10 +354,10 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
               {opt.hint && (
                 <span
                   className={cn(
-                    "text-neutral-800 font-sans truncate",
+                    "text-neutral-800 font-sans truncate text-[12px] md:text-xs",
                     opt.extra !== undefined
-                      ? "text-left flex-1 min-w-[160px]"
-                      : "text-right flex-1",
+                      ? "text-left md:flex-1 md:min-w-[160px]"
+                      : "md:text-right md:flex-1",
                   )}
                   title={opt.hint}
                 >
@@ -337,7 +366,7 @@ export const Autocomplete: React.FC<AutocompleteProps> = ({
               )}
               {opt.extra !== undefined && (
                 <span
-                  className="text-neutral-500 font-sans truncate text-left flex-1 min-w-[140px] pl-2 border-l border-neutral-200 text-[11px]"
+                  className="text-neutral-500 font-sans truncate text-left md:flex-1 md:min-w-[140px] md:pl-2 md:border-l border-neutral-200 text-[11px]"
                   title={opt.extra}
                 >
                   {opt.extra ? (

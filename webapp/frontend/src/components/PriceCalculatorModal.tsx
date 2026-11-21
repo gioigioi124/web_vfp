@@ -662,10 +662,10 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
           </div>
 
           {/* Keypad */}
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-1">
             {KEYPAD_BUTTONS.map((btn) => {
               const base =
-                "h-7 rounded text-xs font-semibold border transition cursor-pointer select-none flex items-center justify-center";
+                "h-11 sm:h-7 rounded text-sm sm:text-xs font-semibold border transition cursor-pointer select-none flex items-center justify-center";
               const style =
                 btn.action === "eq"
                   ? "bg-primary-100 hover:bg-primary-200 text-primary-900 border-primary-300 font-mono"
@@ -693,11 +693,11 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
         </div>
 
         {/* Footer actions */}
-        <div className="bg-neutral-100 px-2 py-1.5 border-t border-neutral-200 flex items-center justify-between gap-1.5">
+        <div className="bg-neutral-100 px-3 sm:px-2 py-2 sm:py-1.5 border-t border-neutral-200 flex items-center justify-between gap-2 sm:gap-1.5">
           <button
             type="button"
             onClick={onClose}
-            className="px-2 py-0.5 bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-300 rounded text-[11px] font-medium cursor-pointer"
+            className="h-9 sm:h-auto px-3 sm:px-2 py-1 sm:py-0.5 bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-300 rounded text-xs sm:text-[11px] font-medium cursor-pointer"
           >
             Hủy <kbd className="ml-0.5 text-[9px]">Esc</kbd>
           </button>
@@ -705,7 +705,7 @@ export const PriceCalculatorModal: React.FC<PriceCalculatorModalProps> = ({
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={handleApply}
-            className="px-2.5 py-0.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-[11px] font-semibold cursor-pointer shadow-sm"
+            className="h-9 sm:h-auto px-3.5 sm:px-2.5 py-1 sm:py-0.5 bg-primary-700 hover:bg-primary-800 text-white rounded text-xs sm:text-[11px] font-semibold cursor-pointer shadow-sm"
           >
             Điền đơn giá{" "}
             <kbd className="ml-0.5 bg-primary-900/40 text-primary-100 border-primary-600 text-[9px]">

@@ -28,6 +28,23 @@ def _ensure_module_key(module_key: str) -> str:
     return module_key
 
 
+@router.get("/api/modules/{module_key}/next-number")
+def get_module_next_number(
+    module_key: str,
+    ma_ct: Optional[str] = Query(None),
+    ngay_ct: Optional[str] = Query(None),
+    ma_dvcs: str = Query("S1"),
+):
+    _ensure_module_key(module_key)
+    so_ct = module_voucher_repository.get_next_voucher_number(
+        module_key=module_key,
+        ma_ct=ma_ct,
+        ngay_ct=ngay_ct,
+        ma_dvcs=ma_dvcs,
+    )
+    return {"success": True, "so_ct": so_ct}
+
+
 @router.get(
     "/api/modules/{module_key}/vouchers",
     response_model=ModuleVoucherPageResponse,
@@ -36,6 +53,7 @@ def list_module_vouchers(
     module_key: str,
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
+    ma_ct: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
@@ -45,6 +63,7 @@ def list_module_vouchers(
         module_key=module_key,
         from_date=from_date,
         to_date=to_date,
+        ma_ct=ma_ct,
         q=q,
         page=page,
         page_size=page_size,
@@ -92,9 +111,18 @@ def update_module_voucher(
 
 
 @router.delete("/api/modules/{module_key}/vouchers/{stt}")
-def delete_module_voucher(module_key: str, stt: str):
+def delete_module_voucher(
+    module_key: str,
+    stt: str,
+    user_name: str = Query("ADMIN"),
+):
     _ensure_module_key(module_key)
-    return module_voucher_repository.delete_voucher(module_key=module_key, stt=stt)
+    try:
+        return module_voucher_repository.delete_voucher(
+            module_key=module_key, stt=stt, user_name=user_name
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(

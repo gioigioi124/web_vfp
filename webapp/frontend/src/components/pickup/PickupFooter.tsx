@@ -42,12 +42,12 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
   onClose,
   onAccept,
 }) => (
-  <footer className="px-3 py-2 bg-neutral-100 border-t border-neutral-300 flex items-center justify-between gap-2 shrink-0">
+  <footer className="px-3 py-2 bg-neutral-100 border-t border-neutral-300 flex flex-wrap items-center justify-between gap-2 shrink-0 pb-safe">
     {/* Bộ đếm phiếu đã chọn + tóm tắt phiếu đang xem */}
     <div className="flex items-center gap-2 min-w-0">
       <div className="flex items-center bg-white px-2.5 py-1 rounded border border-neutral-300 shadow-sm shrink-0">
         <label className="text-xs font-semibold text-neutral-700 mr-2 whitespace-nowrap">
-          Số phiếu đã chọn
+          Đã chọn
         </label>
         <div className="flex items-center font-mono font-bold text-xs">
           <input
@@ -83,14 +83,14 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
     </div>
 
     {/* Nhóm nút thao tác nhỏ gọn */}
-    <div className="flex items-center justify-end gap-1.5 shrink-0">
+    <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
       {onCreateWarehouseSlip && (
         <Button
           variant="outline"
           size="sm"
           onClick={onCreateWarehouseSlip}
           type="button"
-          className="border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
+          className="h-9 md:h-auto border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900"
           title={
             isReturn
               ? "Thêm mới phiếu nhập lại kho (N5) (F2)"
@@ -98,7 +98,10 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           }
         >
           <Plus className="w-3.5 h-3.5 text-emerald-700" />
-          {isReturn ? "Thêm phiếu nhập lại" : "Thêm phiếu kho"}
+          <span className="hidden sm:inline">
+            {isReturn ? "Thêm phiếu nhập lại" : "Thêm phiếu kho"}
+          </span>
+          <span className="sm:hidden">Thêm kho</span>
         </Button>
       )}
 
@@ -116,7 +119,7 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           }}
           disabled={!activeStt}
           type="button"
-          className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"
+          className="h-9 md:h-auto border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 disabled:opacity-50"
           title={
             isReturn
               ? "Sửa phiếu nhập lại kho đang chọn (F3)"
@@ -124,7 +127,10 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           }
         >
           <Edit3 className="w-3.5 h-3.5 text-amber-700" />
-          {isReturn ? "Sửa phiếu nhập lại" : "Sửa phiếu kho"}
+          <span className="hidden sm:inline">
+            {isReturn ? "Sửa phiếu nhập lại" : "Sửa phiếu kho"}
+          </span>
+          <span className="sm:hidden">Sửa</span>
         </Button>
       )}
 
@@ -138,7 +144,7 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           }}
           disabled={!activeStt}
           type="button"
-          className="border-danger-300 bg-danger-50 hover:bg-danger-100 text-danger-800 disabled:opacity-50"
+          className="h-9 md:h-auto border-danger-300 bg-danger-50 hover:bg-danger-100 text-danger-800 disabled:opacity-50"
           title={
             isReturn
               ? "Xóa phiếu nhập lại kho đang chọn (F8)"
@@ -146,14 +152,17 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
           }
         >
           <Trash2 className="w-3.5 h-3.5 text-danger-600" />
-          {isReturn ? "Xóa phiếu nhập lại" : "Xóa phiếu kho"}
+          <span className="hidden sm:inline">
+            {isReturn ? "Xóa phiếu nhập lại" : "Xóa phiếu kho"}
+          </span>
+          <span className="sm:hidden">Xóa</span>
         </Button>
       )}
 
       {(onCreateWarehouseSlip ||
         onEditWarehouseSlip ||
         onDeleteWarehouseSlip) && (
-        <div className="h-4 w-px bg-neutral-300 mx-0.5" />
+        <div className="hidden md:block h-4 w-px bg-neutral-300 mx-0.5" />
       )}
 
       <Button
@@ -161,6 +170,7 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
         data-autofocus={totalSlipsCount === 0 ? true : undefined}
         variant="outline"
         size="sm"
+        className="h-9 md:h-auto"
         onClick={onClose}
         type="button"
       >
@@ -170,6 +180,7 @@ export const PickupFooter: React.FC<PickupFooterProps> = ({
       <Button
         variant="primary"
         size="sm"
+        className="h-9 md:h-auto"
         onClick={onAccept}
         disabled={selectedCount === 0}
         type="button"

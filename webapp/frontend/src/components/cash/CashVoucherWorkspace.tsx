@@ -548,6 +548,7 @@ export const CashVoucherWorkspace: React.FC<CashVoucherWorkspaceProps> = ({
             detailLoading={listDetailLoading}
             onSelectStt={setSelectedStt}
             onEditVoucher={navToDetail}
+            onDeleteVoucher={(v) => setDeleteTarget(v)}
             onToggleMark={(stt) =>
               setMarked((prev) => {
                 const next = new Set(prev);
@@ -566,8 +567,40 @@ export const CashVoucherWorkspace: React.FC<CashVoucherWorkspaceProps> = ({
 
       {/* Bottom Hotkey Toolbar */}
       {!sttParam && (
-        <footer className="bg-neutral-900 text-neutral-200 border-t border-neutral-800 px-3 py-1 shrink-0 z-20 text-[11px]">
-          <div className="flex items-center justify-between flex-wrap gap-2">
+        <footer className="bg-neutral-900 text-neutral-200 border-t border-neutral-800 px-3 py-1.5 md:py-1 pb-safe shrink-0 z-20 text-[11px]">
+          {/* Mobile Compact Action Bar (< md) */}
+          <div className="flex md:hidden items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={navToNew}
+                className="h-10 px-3.5 rounded-lg bg-primary-700 hover:bg-primary-800 text-white text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+              >
+                <span>+ Thêm {config.shortCode}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFilterOpen(true)}
+                className="h-10 px-3 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Filter className="w-3.5 h-3.5" />
+                <span>Lọc</span>
+              </button>
+            </div>
+            {config.supportsExcelImport && (
+              <button
+                type="button"
+                onClick={() => setIsImportOpen(true)}
+                className="h-10 px-3 rounded-lg bg-sky-700 hover:bg-sky-600 text-white border border-sky-500 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Import Excel</span>
+              </button>
+            )}
+          </div>
+
+          {/* Desktop Action Bar (>= md) */}
+          <div className="hidden md:flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center flex-wrap gap-1">
               <button
                 type="button"

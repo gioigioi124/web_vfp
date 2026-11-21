@@ -36,13 +36,13 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
   onOpenPriceCalc,
 }) => (
   <footer
-    className="bg-white border-t border-neutral-300 px-3 py-1 flex flex-wrap items-center justify-between gap-1.5 shrink-0 text-xs"
+    className="bg-white border-t border-neutral-300 px-3 py-2 md:py-1 pb-safe flex flex-col-reverse md:flex-row md:flex-wrap md:items-center md:justify-between gap-2 md:gap-1.5 shrink-0 text-xs"
     data-purpose="footer-controls"
   >
     <div className="flex items-center gap-1.5">
       {isEditable ? (
         <button
-          className={`inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded shadow-sm transition-all ${
+          className={`flex-1 md:flex-none inline-flex items-center justify-center px-3 md:px-2.5 h-10 md:h-auto md:py-1 text-xs font-semibold rounded shadow-sm transition-all ${
             isDifferentCreator
               ? "bg-neutral-200 text-neutral-500 cursor-not-allowed opacity-70"
               : "bg-primary-700 hover:bg-primary-800 text-white disabled:opacity-50 cursor-pointer"
@@ -74,7 +74,7 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
         </button>
       ) : (
         <button
-          className="inline-flex items-center px-2.5 py-1 bg-neutral-200 text-neutral-500 text-xs font-semibold rounded shadow-sm cursor-not-allowed"
+          className="flex-1 md:flex-none inline-flex items-center justify-center px-3 md:px-2.5 h-10 md:h-auto md:py-1 bg-neutral-200 text-neutral-500 text-xs font-semibold rounded shadow-sm cursor-not-allowed"
           type="button"
           disabled
         >
@@ -84,7 +84,7 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
       )}
 
       <button
-        className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-medium rounded border border-neutral-300 transition-all cursor-pointer"
+        className="inline-flex items-center justify-center px-3 md:px-2.5 h-10 md:h-auto md:py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-medium rounded border border-neutral-300 transition-all cursor-pointer"
         type="button"
         onClick={onRequestClose}
       >
@@ -95,7 +95,7 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
 
       {!isWarehouse && !hidePriceCalc && isEditable && onOpenPriceCalc && (
         <button
-          className="inline-flex items-center px-2.5 py-1 bg-neutral-100 hover:bg-primary-50 text-neutral-700 hover:text-primary-800 text-xs font-medium rounded border border-neutral-300 hover:border-primary-300 transition-all cursor-pointer"
+          className="inline-flex items-center justify-center px-3 md:px-2.5 h-10 md:h-auto md:py-1 bg-neutral-100 hover:bg-primary-50 text-neutral-700 hover:text-primary-800 text-xs font-medium rounded border border-neutral-300 hover:border-primary-300 transition-all cursor-pointer"
           type="button"
           onClick={onOpenPriceCalc}
           title="Mở máy tính tính đơn giá cho dòng đang chọn (F5)"
@@ -111,20 +111,20 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
       customTotalsNode
     ) : (
       !isWarehouse && (
-        <div className="flex items-center gap-2 text-neutral-600">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+        <div className="flex items-center justify-between md:justify-end gap-2 text-neutral-600">
+          <div className="flex flex-wrap items-center justify-between md:justify-end w-full md:w-auto gap-x-2.5 gap-y-1 text-xs">
             <div className="flex items-center gap-1">
-              <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
+              <span className="text-[11px] md:text-xs font-semibold text-neutral-600 uppercase tracking-tight">
                 Tiền hàng:
               </span>
-              <div className="flex items-center bg-white border border-neutral-200 rounded px-2 py-0.5 shadow-sm">
+              <div className="flex items-center bg-white border border-neutral-200 rounded px-1.5 md:px-2 py-0.5 shadow-sm">
                 <span className="font-mono font-bold text-neutral-900 text-xs">
                   {/* Tiền hàng trước chiết khấu = tổng thành tiền bán (Tien_Nt9) từ calcVoucherTotals */}
                   {formatCurrency(totals.ttien_nt, maTte)}
                 </span>
               </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="hidden sm:flex items-center gap-1">
               <span className="text-xs font-semibold text-neutral-600 uppercase tracking-tight">
                 Tiền CK:
               </span>
@@ -134,10 +134,10 @@ export const VoucherFormFooter: React.FC<VoucherFormFooterProps> = ({
                 </span>
               </div>
             </div>
-            <div className="h-4 w-px bg-neutral-300"></div>
+            <div className="hidden md:block h-4 w-px bg-neutral-300"></div>
             <div className="flex items-center gap-1">
-              <span className="text-xs uppercase font-bold text-neutral-600 tracking-tight">
-                Tổng thanh toán:
+              <span className="text-[11px] md:text-xs uppercase font-bold text-neutral-600 tracking-tight">
+                Tổng TT:
               </span>
               <div className="flex items-center gap-1 bg-primary-50 border border-primary-300 rounded px-2 py-0.5 shadow-sm">
                 <span className="font-mono font-bold text-primary-900 tracking-tight text-xs">

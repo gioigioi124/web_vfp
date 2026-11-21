@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Tag,
   Trash2,
   Upload,
@@ -24,6 +25,8 @@ import {
   PriceListPageResponse,
 } from "../../types/priceList";
 import { formatCurrency, formatDate, getTodayDate } from "../../lib/format";
+import { useIsMobile } from "../../hooks/useViewport";
+import { MobileSheet } from "../ui/MobileSheet";
 import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
 import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 import {
@@ -37,6 +40,9 @@ type SortKey = "so_ct" | "ngay_ct" | "ma_dt" | "ma_vm" | "user_name" | "item_cou
 const DETAIL_CHUNK_SIZE = 500;
 
 export const PriceListWorkspace: React.FC = () => {
+  const isMobile = useIsMobile();
+  const [showMobileFilter, setShowMobileFilter] = useState(false);
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
   const today = getTodayDate();
   const [fromDate, setFromDate] = useState(`${today.slice(0, 7)}-01`);
   const [toDate, setToDate] = useState(today);
@@ -306,18 +312,20 @@ export const PriceListWorkspace: React.FC = () => {
   // Drag split handler
   useEffect(() => {
     if (!draggingSplit) return;
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent) => {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect || rect.height <= 0) return;
       const pct = ((e.clientY - rect.top) / rect.height) * 100;
       setTopPct(Math.max(25, Math.min(75, pct)));
     };
     const onUp = () => setDraggingSplit(false);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [draggingSplit]);
 
@@ -562,120 +570,201 @@ export const PriceListWorkspace: React.FC = () => {
     }
   };
 
+  const activeFilterCount =
+    (filterSoCt.trim() ? 1 : 0) +
+    (filterMaVm.trim() ? 1 : 0) +
+    (filterMaDt.trim() ? 1 : 0);
+
   return (
     <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
       {/* Top Toolbar */}
-      <header className="shrink-0 bg-white border-b border-slate-200 px-4 py-2.5 space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-700">
-              <Tag className="w-4 h-4" />
+      <header className="shrink-0 bg-white border-b border-slate-200 px-3 md:px-4 py-2 md:py-2.5 space-y-2">
+        {isMobile ? (
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-700 shrink-0">
+                  <Tag className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-[13px] font-bold text-slate-900 truncate">
+                    Bảng giá (BG / BG0)
+                  </h1>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    {filteredHeaders.length}/{totalRecords} bảng · {formatDate(fromDate)} – {formatDate(toDate)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowMobileFilter(true)}
+                  className="relative inline-flex items-center gap-1 px-2.5 h-9 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Lọc</span>
+                  {activeFilterCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-primary text-white text-[10px] font-bold">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadHeaders()}
+                  disabled={loadingList}
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-300 bg-white text-slate-700"
+                  title="Tải lại"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingList ? "animate-spin" : ""}`} />
+                </button>
+              </div>
             </div>
-            <div>
-              <h1 className="text-[14px] font-bold text-slate-900 leading-tight">
-                Quản Lý Bảng Giá Bán (BG / BG0)
-              </h1>
-              <p className="text-[11px] text-slate-500">
-                Import Excel tạo mới, cập nhật giá, xóa hàng hóa hàng loạt, đổi ngày & nhân bản bảng giá
-              </p>
+
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={filterMaDt}
+                  onChange={(e) => setFilterMaDt(e.target.value)}
+                  placeholder="Tìm mã / tên KH..."
+                  className="erp-input h-9 pl-8 w-full text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormModal({ open: true, stt: null })}
+                className="inline-flex items-center gap-1 px-3 h-9 rounded-lg bg-primary text-white text-[12px] font-semibold shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tạo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setExcelModal({ open: true, mode: "import-new" })}
+                className="inline-flex items-center gap-1 px-2.5 h-9 rounded-lg bg-emerald-600 text-white text-[12px] font-semibold shrink-0"
+                title="Import Tạo Mới Excel"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Excel</span>
+              </button>
             </div>
-          </div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-700">
+                  <Tag className="w-4 h-4" />
+                </div>
+                <div>
+                  <h1 className="text-[14px] font-bold text-slate-900 leading-tight">
+                    Quản Lý Bảng Giá Bán (BG / BG0)
+                  </h1>
+                  <p className="text-[11px] text-slate-500">
+                    Import Excel tạo mới, cập nhật giá, xóa hàng hóa hàng loạt, đổi ngày & nhân bản bảng giá
+                  </p>
+                </div>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => void loadHeaders()}
-              disabled={loadingList}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? "animate-spin" : ""}`} />
-              <span>Tải lại</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormModal({ open: true, stt: null })}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Tạo bảng giá</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setExcelModal({ open: true, mode: "import-new" })}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[12px] font-semibold hover:bg-emerald-700 shadow-sm"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Import Tạo Mới Excel</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportCsv()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="w-3.5 h-3.5 text-sky-600" />
-              <span>Xuất CSV</span>
-            </button>
-          </div>
-        </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void loadHeaders()}
+                  disabled={loadingList}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? "animate-spin" : ""}`} />
+                  <span>Tải lại</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormModal({ open: true, stt: null })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-[12px] font-semibold hover:bg-primary/90 shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Tạo bảng giá</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExcelModal({ open: true, mode: "import-new" })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[12px] font-semibold hover:bg-emerald-700 shadow-sm"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Import Tạo Mới Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportCsv()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="w-3.5 h-3.5 text-sky-600" />
+                  <span>Xuất CSV</span>
+                </button>
+              </div>
+            </div>
 
-        {/* Filter Bar */}
-        <div className="flex flex-wrap items-center gap-2 text-[12px]">
-          <label className="inline-flex items-center gap-1.5">
-            <span className="text-slate-500">Từ:</span>
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="erp-input h-7 text-[12px]"
-            />
-          </label>
-          <label className="inline-flex items-center gap-1.5">
-            <span className="text-slate-500">Đến:</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="erp-input h-7 text-[12px]"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => void loadHeaders()}
-            className="px-2.5 h-7 rounded border border-primary/30 bg-primary/10 text-primary font-semibold hover:bg-primary/15"
-          >
-            Lọc ngày
-          </button>
+            {/* Filter Bar */}
+            <div className="flex flex-wrap items-center gap-2 text-[12px]">
+              <label className="inline-flex items-center gap-1.5">
+                <span className="text-slate-500">Từ:</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="erp-input h-7 text-[12px]"
+                />
+              </label>
+              <label className="inline-flex items-center gap-1.5">
+                <span className="text-slate-500">Đến:</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="erp-input h-7 text-[12px]"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void loadHeaders()}
+                className="px-2.5 h-7 rounded border border-primary/30 bg-primary/10 text-primary font-semibold hover:bg-primary/15"
+              >
+                Lọc ngày
+              </button>
 
-          <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
+              <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={filterSoCt}
-              onChange={(e) => setFilterSoCt(e.target.value)}
-              placeholder="Lọc Số CT..."
-              className="erp-input h-7 pl-7 w-32 text-[12px]"
-            />
-          </div>
-          <input
-            type="text"
-            value={filterMaVm}
-            onChange={(e) => setFilterMaVm(e.target.value)}
-            placeholder="Lọc Mã vùng..."
-            className="erp-input h-7 w-28 text-[12px]"
-          />
-          <input
-            type="text"
-            value={filterMaDt}
-            onChange={(e) => setFilterMaDt(e.target.value)}
-            placeholder="Lọc Mã / Tên KH..."
-            className="erp-input h-7 w-40 text-[12px]"
-          />
-          <span className="ml-auto text-[11px] text-slate-500">
-            Trang <strong>{page}/{totalPages}</strong> · <strong>{filteredHeaders.length}</strong> / {totalRecords} bảng giá
-          </span>
-        </div>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={filterSoCt}
+                  onChange={(e) => setFilterSoCt(e.target.value)}
+                  placeholder="Lọc Số CT..."
+                  className="erp-input h-7 pl-7 w-32 text-[12px]"
+                />
+              </div>
+              <input
+                type="text"
+                value={filterMaVm}
+                onChange={(e) => setFilterMaVm(e.target.value)}
+                placeholder="Lọc Mã vùng..."
+                className="erp-input h-7 w-28 text-[12px]"
+              />
+              <input
+                type="text"
+                value={filterMaDt}
+                onChange={(e) => setFilterMaDt(e.target.value)}
+                placeholder="Lọc Mã / Tên KH..."
+                className="erp-input h-7 w-40 text-[12px]"
+              />
+              <span className="ml-auto text-[11px] text-slate-500">
+                Trang <strong>{page}/{totalPages}</strong> · <strong>{filteredHeaders.length}</strong> / {totalRecords} bảng giá
+              </span>
+            </div>
+          </>
+        )}
 
         {/* Bulk Action Bar */}
         {selectedHeaders.length > 0 && (
@@ -770,8 +859,149 @@ export const PriceListWorkspace: React.FC = () => {
         )}
       </header>
 
-      {/* Split Pane Body */}
-      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Split Pane Body (Desktop) / Card List (Mobile) */}
+      {isMobile ? (
+        <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2 pb-safe">
+          {loadingList && headers.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-400">
+              Đang tải dữ liệu bảng giá...
+            </div>
+          ) : filteredHeaders.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-400">
+              Không có bảng giá nào trong khoảng thời gian / điều kiện lọc này.
+            </div>
+          ) : (
+            <>
+              {filteredHeaders.map((h) => {
+                const isActive = h.stt === activeStt;
+                const isChecked = checkedStts.has(h.stt);
+                const isClosed = h.closed === "1";
+                const isExpired = Boolean(h.ngay_ct2 && h.ngay_ct2 < today);
+                const statusLabel = isClosed
+                  ? "Đã đóng"
+                  : isExpired
+                    ? "Hết hạn"
+                    : "Đang áp dụng";
+                return (
+                  <div
+                    key={h.stt}
+                    onClick={() => {
+                      setActiveStt(h.stt);
+                      setShowMobileDetail(true);
+                    }}
+                    className={`rounded-xl border bg-white p-3 shadow-xs transition-colors active:bg-slate-50 ${
+                      isActive ? "border-primary ring-1 ring-primary/30" : "border-slate-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleRowCheck(h.stt);
+                          }}
+                          className="mt-0.5 w-6 h-6 rounded border border-slate-300 flex items-center justify-center shrink-0 bg-white"
+                          aria-label="Chọn bảng giá"
+                        >
+                          {isChecked && (
+                            <span className="w-3.5 h-3.5 rounded-sm bg-primary block" />
+                          )}
+                        </button>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[13px] font-bold text-primary-700">
+                              {h.so_ct || "(Trống)"}
+                            </span>
+                            <span
+                              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                isClosed
+                                  ? "bg-slate-100 text-slate-600"
+                                  : isExpired
+                                    ? "bg-amber-50 text-amber-700"
+                                    : "bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <div className="text-[12px] text-slate-700 font-medium truncate mt-0.5">
+                            {h.ma_dt
+                              ? `${h.ma_dt}${h.ten_dt ? ` · ${h.ten_dt}` : ""}`
+                              : h.ma_vm
+                                ? `Vùng: ${h.ma_vm}`
+                                : "Bảng giá chung"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-[11px] font-mono text-slate-500">
+                          {formatDate(h.ngay_ct)}
+                        </div>
+                        <div className="text-[11px] font-mono font-semibold text-slate-800 mt-0.5">
+                          {h.item_count ?? 0} HH
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                      <span className="truncate">
+                        {h.ngay_ct2 ? `Hết hạn: ${formatDate(h.ngay_ct2)}` : "Vô thời hạn"}
+                        {h.ma_vm ? ` · Vùng ${h.ma_vm}` : ""}
+                      </span>
+                      <div
+                        className="flex items-center gap-1.5 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setFormModal({ open: true, stt: h.stt })}
+                          className="inline-flex items-center gap-1 px-2.5 h-8 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 font-medium"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-primary" />
+                          <span>Sửa</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteOne(h)}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-200 bg-rose-50 text-rose-600"
+                          title="Xóa bảng giá"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between gap-2 py-2 px-1 text-[12px] text-slate-600">
+                  <button
+                    type="button"
+                    disabled={page <= 1 || loadingList}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="px-3 h-9 rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Trang trước
+                  </button>
+                  <span className="font-mono">
+                    Trang {page}/{totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={page >= totalPages || loadingList}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="px-3 h-9 rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Trang sau
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {/* Top Pane: BG Headers */}
         <section
           style={{ height: `${topPct}%` }}
@@ -1096,8 +1326,8 @@ export const PriceListWorkspace: React.FC = () => {
 
         {/* Draggable Splitter */}
         <div
-          onMouseDown={() => setDraggingSplit(true)}
-          className="h-1.5 shrink-0 bg-slate-200 hover:bg-primary/40 cursor-row-resize flex items-center justify-center transition-colors"
+          onPointerDown={() => setDraggingSplit(true)}
+          className="h-1.5 shrink-0 bg-slate-200 hover:bg-primary/40 cursor-row-resize touch-none flex items-center justify-center transition-colors"
           title="Kéo để thay đổi kích thước bảng chi tiết"
         >
           <div className="w-10 h-0.5 rounded-full bg-slate-400" />
@@ -1288,10 +1518,222 @@ export const PriceListWorkspace: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Mobile Filter Sheet */}
+      <MobileSheet
+        isOpen={showMobileFilter}
+        onClose={() => setShowMobileFilter(false)}
+        title="Lọc bảng giá (BG / BG0)"
+        variant="bottom"
+        footer={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setFilterSoCt("");
+                setFilterMaVm("");
+                setFilterMaDt("");
+              }}
+              className="flex-1 h-10 rounded-lg border border-slate-300 bg-white text-[13px] font-medium text-slate-700"
+            >
+              Xóa lọc chữ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowMobileFilter(false);
+                void loadHeaders();
+              }}
+              className="flex-1 h-10 rounded-lg bg-primary text-white text-[13px] font-semibold"
+            >
+              Áp dụng & Tải lại
+            </button>
+          </div>
+        }
+      >
+        <div className="p-4 space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-2.5">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-600">Từ ngày</span>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="erp-input h-10"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-600">Đến ngày</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="erp-input h-10"
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">Số chứng từ</span>
+            <input
+              type="text"
+              value={filterSoCt}
+              onChange={(e) => setFilterSoCt(e.target.value)}
+              placeholder="VD: BG001..."
+              className="erp-input h-10"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">Mã vùng (Ma_Vm)</span>
+            <input
+              type="text"
+              value={filterMaVm}
+              onChange={(e) => setFilterMaVm(e.target.value)}
+              placeholder="VD: KV1..."
+              className="erp-input h-10"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-600">Mã / Tên khách hàng</span>
+            <input
+              type="text"
+              value={filterMaDt}
+              onChange={(e) => setFilterMaDt(e.target.value)}
+              placeholder="Tìm mã hoặc tên KH..."
+              className="erp-input h-10"
+            />
+          </label>
+          <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowMobileFilter(false);
+                void handleExportCsv();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-600" />
+              <span>Xuất CSV</span>
+            </button>
+          </div>
+        </div>
+      </MobileSheet>
+
+      {/* Mobile Detail Sheet (BG0) */}
+      <MobileSheet
+        isOpen={isMobile && showMobileDetail && Boolean(activeHeader)}
+        onClose={() => setShowMobileDetail(false)}
+        title={activeHeader ? `Bảng giá ${activeHeader.so_ct || "(Trống)"}` : "Chi tiết bảng giá"}
+        subtitle={
+          activeHeader
+            ? `${formatDate(activeHeader.ngay_ct)} · ${
+                activeHeader.ma_dt
+                  ? `${activeHeader.ma_dt}${activeHeader.ten_dt ? ` (${activeHeader.ten_dt})` : ""}`
+                  : activeHeader.ma_vm
+                    ? `Vùng: ${activeHeader.ma_vm}`
+                    : "Chung"
+              }`
+            : undefined
+        }
+        variant="fullscreen"
+        footer={
+          activeHeader && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileDetail(false);
+                  setFormModal({ open: true, stt: activeHeader.stt });
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-10 rounded-lg bg-primary text-white text-[13px] font-semibold"
+              >
+                <Pencil className="w-4 h-4" />
+                <span>Sửa bảng giá</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowMobileDetail(false)}
+                className="px-4 h-10 rounded-lg border border-slate-300 bg-white text-[13px] font-medium text-slate-700"
+              >
+                Đóng
+              </button>
+            </div>
+          )
+        }
+      >
+        <div className="flex flex-col h-full">
+          <div className="shrink-0 p-3 bg-slate-50 border-b border-slate-200 space-y-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={detailSearch}
+                onChange={(e) => setDetailSearch(e.target.value)}
+                placeholder="Tìm mã / tên hàng hóa (SQL server)..."
+                className="erp-input h-10 pl-9 w-full"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-slate-600">
+              <span>
+                Đã tải <strong>{activeItems.length}</strong> /{" "}
+                <strong>{detailFilteredCount}</strong>
+                {detailFilteredCount !== detailTotalCount ? ` (tổng ${detailTotalCount})` : ""} mặt hàng
+              </span>
+              {detailHasMore && (
+                <button
+                  type="button"
+                  disabled={loadingMoreDetail}
+                  onClick={handleLoadMoreDetail}
+                  className="px-2.5 py-1 rounded bg-sky-50 border border-sky-200 text-xs font-semibold text-sky-700 disabled:opacity-50"
+                >
+                  {loadingMoreDetail ? "Đang tải..." : `+ Tải thêm (${DETAIL_CHUNK_SIZE})`}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {loadingDetail ? (
+              <div className="py-10 text-center text-sm text-slate-400">
+                Đang tải danh sách hàng hóa...
+              </div>
+            ) : filteredDetailItems.length === 0 ? (
+              <div className="py-10 text-center text-sm text-slate-400">
+                Không có dòng hàng hóa phù hợp.
+              </div>
+            ) : (
+              filteredDetailItems.map((it, idx) => (
+                <div
+                  key={`${it.ma_vt}-${idx}`}
+                  className="rounded-xl border border-slate-200 bg-white p-2.5 text-xs space-y-1"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-mono font-bold text-primary-800">
+                        {it.ma_vt || "—"}
+                      </div>
+                      <div className="text-slate-900 font-medium line-clamp-2">
+                        {it.ten_vt || "—"}
+                      </div>
+                    </div>
+                    <span className="font-mono font-bold text-emerald-700 text-[13px] shrink-0">
+                      {formatCurrency(it.gia)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                    <span>ĐVT: {it.dvt || "—"}</span>
+                    <span>CK: {it.ck ? `${it.ck}%` : "0%"}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </MobileSheet>
 
       {/* Inline Bulk Date / Bulk Copy Dialog */}
       {bulkActionDialog.type && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[1px] flex items-center justify-center p-4 pt-safe pb-safe">
           <form
             onSubmit={(e) => void handleBulkActionSubmit(e)}
             className="w-full max-w-md bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden"

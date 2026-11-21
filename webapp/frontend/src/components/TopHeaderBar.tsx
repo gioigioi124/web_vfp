@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Autocomplete } from "./ui/Autocomplete";
 import { Badge } from "./ui/Badge";
+import { MobileSheet } from "./ui/MobileSheet";
+import { useIsMobile } from "../hooks/useViewport";
 import {
   initCustomerIndex,
   searchCustomers,
   getCustomer,
 } from "../lib/customerIndex";
 import { VoucherFilterParams, VoucherMode } from "../types/voucher";
-import { User, RefreshCw, X } from "lucide-react";
+import { User, RefreshCw, X, SlidersHorizontal, Search } from "lucide-react";
 
 interface TopHeaderBarProps {
   voucherMode?: VoucherMode;
@@ -42,6 +44,9 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
     hideModeSwitcher = false,
     extraRightActions,
   }) => {
+    const isMobile = useIsMobile();
+    const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+
     const [headerNgayCt1, setHeaderNgayCt1] = useState<string>(
       filters?.ngay_ct1 || "",
     );
@@ -136,6 +141,285 @@ export const TopHeaderBar: React.FC<TopHeaderBarProps> = React.memo(
         : voucherMode === "return"
           ? "bg-amber-700"
           : "bg-primary-700");
+
+    const activeFilterCount =
+      (filters?.ma_dt ? 1 : 0) +
+      (filters?.dien_giai ? 1 : 0) +
+      (filters?.ngay_ct1 || filters?.ngay_ct2 ? 1 : 0);
+
+    if (isMobile) {
+      return (
+        <>
+          <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 flex-shrink-0 z-20">
+            <div className="px-2.5 py-1.5 flex items-center justify-between gap-2">
+              {hideModeSwitcher && moduleTitle ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={`w-6 h-6 rounded text-white font-bold text-[11px] font-mono flex items-center justify-center shrink-0 ${badgeBg}`}
+                  >
+                    {badgeText}
+                  </span>
+                  <span className="text-xs font-bold text-white truncate">
+                    {moduleTitle}
+                  </span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center bg-neutral-800 p-0.5 rounded-lg border border-neutral-700 overflow-x-auto">
+                  <button
+                    type="button"
+                    onClick={() => onChangeVoucherMode?.("sales")}
+                    className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                      voucherMode === "sales"
+                        ? "bg-primary-700 text-white shadow-sm"
+                        : "text-neutral-400"
+                    }`}
+                  >
+                    Xuất bán
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeVoucherMode?.("return")}
+                    className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                      voucherMode === "return"
+                        ? "bg-amber-700 text-white shadow-sm"
+                        : "text-neutral-400"
+                    }`}
+                  >
+                    Nhập lại
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeVoucherMode?.("warehouse")}
+                    className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                      voucherMode === "warehouse"
+                        ? "bg-emerald-700 text-white shadow-sm"
+                        : "text-neutral-400"
+                    }`}
+                  >
+                    Phiếu kho
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {extraRightActions}
+                <button
+                  type="button"
+                  onClick={() => setMobileFilterOpen(true)}
+                  className={`h-9 px-2.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer ${
+                    filters?.ma_dt || filters?.dien_giai
+                      ? "bg-primary-700 border-primary-500 text-white"
+                      : "bg-neutral-800 border-neutral-700 text-neutral-200"
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Lọc</span>
+                  {activeFilterCount > 0 && (
+                    <span className="px-1.5 py-0 rounded-full bg-white/20 text-[10px] font-mono">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  disabled={loading}
+                  aria-label="Làm mới"
+                  className="w-9 h-9 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 flex items-center justify-center cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {(filters?.ngay_ct1 ||
+              filters?.ngay_ct2 ||
+              filters?.ma_dt ||
+              filters?.dien_giai) && (
+              <div className="px-2.5 pb-1.5 flex items-center gap-1.5 overflow-x-auto text-[11px]">
+                {(filters?.ngay_ct1 || filters?.ngay_ct2) && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileFilterOpen(true)}
+                    className="px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700 text-neutral-200 font-mono whitespace-nowrap cursor-pointer"
+                  >
+                    {filters.ngay_ct1 || "..."} → {filters.ngay_ct2 || "..."}
+                  </button>
+                )}
+                {filters?.ma_dt && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-900/70 border border-primary-600/60 text-primary-100 whitespace-nowrap">
+                    KH: <b className="font-mono">{filters.ma_dt}</b>
+                    <button
+                      type="button"
+                      onClick={() => void handleHeaderSearchSubmit("")}
+                      aria-label="Xóa lọc KH"
+                      className="p-0.5"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {filters?.dien_giai && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-600 text-neutral-100 whitespace-nowrap max-w-[180px]">
+                    <span className="truncate">"{filters.dien_giai}"</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleHeaderSearchSubmit(undefined, "")}
+                      aria-label="Xóa lọc diễn giải"
+                      className="p-0.5"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
+          </header>
+
+          <MobileSheet
+            isOpen={mobileFilterOpen}
+            onClose={() => setMobileFilterOpen(false)}
+            title="Tìm kiếm & Lọc nhanh"
+            variant="bottom"
+            footer={
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    headerCustomerRef.current = "";
+                    headerDienGiaiRef.current = "";
+                    setHeaderCustomerQuery("");
+                    setHeaderDienGiai("");
+                    onApplyFilter({
+                      ngay_ct1: headerNgayCt1,
+                      ngay_ct2: headerNgayCt2,
+                      ma_dt: "",
+                      dien_giai: "",
+                    });
+                    setMobileFilterOpen(false);
+                  }}
+                  className="h-11 px-4 rounded-lg border border-neutral-300 bg-white text-neutral-700 text-sm font-semibold cursor-pointer"
+                >
+                  Xóa lọc chữ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleHeaderSearchSubmit().then(() =>
+                      setMobileFilterOpen(false),
+                    );
+                  }}
+                  className="flex-1 h-11 px-4 rounded-lg bg-primary-700 hover:bg-primary-800 text-white text-sm font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Search className="w-4 h-4" />
+                  <span>Áp dụng lọc</span>
+                </button>
+              </div>
+            }
+          >
+            <div className="p-4 space-y-3.5">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                    Từ ngày
+                  </label>
+                  <input
+                    type="date"
+                    value={headerNgayCt1}
+                    onChange={(e) => setHeaderNgayCt1(e.target.value)}
+                    className="erp-input w-full font-mono bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                    Đến ngày
+                  </label>
+                  <input
+                    type="date"
+                    value={headerNgayCt2}
+                    onChange={(e) => setHeaderNgayCt2(e.target.value)}
+                    className="erp-input w-full font-mono bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                  Mã / Tên khách hàng
+                </label>
+                <div className="relative">
+                  <Autocomplete
+                    value={headerCustomerQuery}
+                    onChange={(val) => {
+                      headerCustomerRef.current = val;
+                      setHeaderCustomerQuery(val);
+                    }}
+                    fetcher={fetchHeaderKhachHangOptions}
+                    openOnTypeOnly
+                    debounceMs={30}
+                    maxResults={30}
+                    dropdownMinWidth={320}
+                    hideIcon={!!headerCustomerQuery}
+                    placeholder="Nhập mã hoặc tên KH..."
+                    className="w-full !pr-9 bg-white text-neutral-900 border-neutral-300"
+                    onSelect={(opt) => {
+                      headerCustomerRef.current = opt.value;
+                      setHeaderCustomerQuery(opt.value);
+                    }}
+                  />
+                  {headerCustomerQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        headerCustomerRef.current = "";
+                        setHeaderCustomerQuery("");
+                      }}
+                      className="absolute inset-y-0 right-2 flex items-center text-neutral-400 hover:text-neutral-700 z-10"
+                      aria-label="Xóa khách hàng"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                  Diễn giải chứng từ
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={headerDienGiai}
+                    onChange={(e) => {
+                      headerDienGiaiRef.current = e.target.value;
+                      setHeaderDienGiai(e.target.value);
+                    }}
+                    placeholder="Tìm theo diễn giải..."
+                    className="erp-input w-full !pr-9 bg-white text-neutral-900 border-neutral-300"
+                  />
+                  {headerDienGiai && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        headerDienGiaiRef.current = "";
+                        setHeaderDienGiai("");
+                      }}
+                      className="absolute inset-y-0 right-2 flex items-center text-neutral-400 hover:text-neutral-700 z-10"
+                      aria-label="Xóa diễn giải"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </MobileSheet>
+        </>
+      );
+    }
 
     return (
       <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 flex-shrink-0 z-30">

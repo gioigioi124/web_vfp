@@ -64,6 +64,25 @@ export interface NhapXuatItem {
   ma_nx: string;
   ten_nx: string;
   dinh_khoan?: string;
+  ct_nx?: string;
+  tk?: string;
+}
+
+export interface ChungTuItem {
+  ct_id: number;
+  ma_ct: string;
+  ten_ct: string;
+  ma_nvu: string;
+  nh_ct: string;
+  ct_hd: string;
+  ct_cp: string;
+  no_co: string;
+  tk: string;
+  report: string;
+  hd_ck: string;
+  bp_ck: string;
+  thue: string;
+  module_key: string;
 }
 
 export interface XeItem {
@@ -86,3 +105,16 @@ export interface TienTeItem {
   ten_tte?: string;
   ty_gia: number;
 }
+
+export interface KhoanMucItem {
+  ma_km: string;
+  ten_km: string;
+}
+
+export interface SanPhamItem {
+  ma_sp: string;
+  ten_sp: string;
+  dvt?: string;
+  loai_sp?: string;
+}
+

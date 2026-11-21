@@ -7,15 +7,26 @@ class ModuleVoucherDetailSchema(BaseModel):
 
     stt0: Optional[str] = None
     stt: Optional[str] = None
+    stt_nv: int = 1
     ma_kho: str = ""
     ma_kho_n: str = ""
     ma_vt: str = ""
     ten_vt: str = ""
     dvt: str = ""
+    he_so9: float = 1.0
+    so_luong9: float = 0.0
+    gia_nt9: float = 0.0
+    gia9: float = 0.0
+    tien_nt9: float = 0.0
+    tien9: float = 0.0
     so_luong: float = 0.0
     gia_nt: float = 0.0
+    gia: float = 0.0
     tien_nt: float = 0.0
+    tien: float = 0.0
     tien_nt3: float = 0.0
+    tien3: float = 0.0
+    gia_tb_tt: str = " "
     no_co: str = "N"
     tk: str = ""
     tk_du: str = ""
@@ -43,6 +54,10 @@ class ModuleVoucherHeaderSchema(BaseModel):
     dien_giai0: str = ""
     ma_nx: str = ""
     tk: str = ""
+    ma_hd: str = ""
+    ma_bp: str = ""
+    ma_km: str = ""
+    ma_xe: str = ""
     ma_tte: str = "VND"
     ty_gia: float = 1.0
     ttien_nt0: float = 0.0
@@ -56,12 +71,16 @@ class ModuleVoucherHeaderSchema(BaseModel):
     so_seri0: str = ""
     ma_thue: str = ""
     thue_gtgt: float = 0.0
+    tk3: str = ""
+    tk_du3: str = ""
+    ma_dtgtgt: str = ""
+    ten_dtgtgt: str = ""
+    ct_di_kem: str = ""
     item_count: int = 0
 
 
 class ModuleVoucherDetailResponse(ModuleVoucherHeaderSchema):
     items: List[ModuleVoucherDetailSchema] = []
-    is_mock: bool = False
 
 
 class ModuleVoucherPageResponse(BaseModel):
@@ -71,7 +90,6 @@ class ModuleVoucherPageResponse(BaseModel):
     page_size: int
     total_pages: int
     total_amount: float = 0.0
-    is_mock: bool = False
 
 
 class ModuleVoucherSaveRequest(BaseModel):
@@ -79,7 +97,8 @@ class ModuleVoucherSaveRequest(BaseModel):
     ma_ct: Optional[str] = ""
     nh_ct: Optional[str] = "1"
     ngay_ct: str
-    so_ct: str
+    so_ct: str = ""
+    custom_so_ct: bool = False
     ma_dt: Optional[str] = ""
     ten_dt: Optional[str] = ""
     ong_ba: Optional[str] = ""
@@ -87,6 +106,10 @@ class ModuleVoucherSaveRequest(BaseModel):
     dien_giai0: Optional[str] = ""
     ma_nx: Optional[str] = ""
     tk: Optional[str] = ""
+    ma_hd: Optional[str] = ""
+    ma_bp: Optional[str] = ""
+    ma_km: Optional[str] = ""
+    ma_xe: Optional[str] = ""
     ma_tte: Optional[str] = "VND"
     ty_gia: Optional[float] = 1.0
     posted: Optional[bool] = True
@@ -96,6 +119,11 @@ class ModuleVoucherSaveRequest(BaseModel):
     so_seri0: Optional[str] = ""
     ma_thue: Optional[str] = ""
     thue_gtgt: Optional[float] = 0.0
+    tk3: Optional[str] = ""
+    tk_du3: Optional[str] = ""
+    ma_dtgtgt: Optional[str] = ""
+    ten_dtgtgt: Optional[str] = ""
+    ct_di_kem: Optional[str] = ""
     items: List[ModuleVoucherDetailSchema] = []
 
 
@@ -125,7 +153,6 @@ class PartnerBalancePageResponse(BaseModel):
     sum_ps_co: float = 0.0
     sum_du_no_cuoi: float = 0.0
     sum_du_co_cuoi: float = 0.0
-    is_mock: bool = False
 
 
 class PartnerLedgerRow(BaseModel):
@@ -148,7 +175,6 @@ class PartnerLedgerResponse(BaseModel):
     du_dau: float = 0.0
     du_cuoi: float = 0.0
     entries: List[PartnerLedgerRow] = []
-    is_mock: bool = False
 
 
 class TrialBalanceRow(BaseModel):
@@ -171,7 +197,6 @@ class TrialBalanceResponse(BaseModel):
     sum_ps_co: float = 0.0
     sum_du_no_cuoi: float = 0.0
     sum_du_co_cuoi: float = 0.0
-    is_mock: bool = False
 
 
 class GlLedgerRow(BaseModel):
@@ -195,4 +220,3 @@ class GlLedgerResponse(BaseModel):
     du_dau: float = 0.0
     du_cuoi: float = 0.0
     entries: List[GlLedgerRow] = []
-    is_mock: bool = False

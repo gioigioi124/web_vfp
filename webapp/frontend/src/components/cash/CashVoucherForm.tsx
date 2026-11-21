@@ -622,7 +622,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
   }, []);
 
   return (
-    <div className="h-full w-full flex flex-col bg-surface overflow-hidden">
+    <div className="h-[100dvh] lg:h-full w-full flex flex-col bg-surface overflow-hidden">
       <VoucherFormHeaderBar
         isWarehouse={false}
         isCreate={isCreate}
@@ -654,15 +654,16 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
         onClearError={() => setErrorMessage(null)}
       />
 
+      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto md:overflow-hidden">
       {/* Master Section */}
       <section
         className="bg-neutral-50/90 border-b border-neutral-200 px-3 py-2 shrink-0"
         data-purpose="master-form"
       >
-        <div className="max-w-[1600px] mx-auto grid grid-cols-12 gap-x-3 gap-y-1.5 text-xs">
+        <div className="max-w-[1600px] mx-auto grid grid-cols-12 gap-x-2 md:gap-x-3 gap-y-2 md:gap-y-1.5 text-xs">
           {/* Row 1 */}
-          <div className="col-span-12 md:col-span-3 flex items-center gap-2">
-            <label className="erp-label w-20 shrink-0">Ngày CT:</label>
+          <div className="col-span-6 md:col-span-3 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-20 shrink-0">Ngày CT:</label>
             <input
               ref={ngayCtInputRef}
               type="date"
@@ -675,12 +676,12 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
                   soCtInputRef.current?.select();
                 }
               }}
-              className="erp-input flex-1 font-mono font-semibold"
+              className="erp-input flex-1 h-9 md:h-auto font-mono font-semibold"
             />
           </div>
 
-          <div className="col-span-12 md:col-span-3 flex items-center gap-2">
-            <label className="erp-label w-16 shrink-0">Số CT:</label>
+          <div className="col-span-6 md:col-span-3 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-16 shrink-0">Số CT:</label>
             <input
               ref={soCtInputRef}
               type="text"
@@ -699,139 +700,148 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
                 }
               }}
               placeholder="Tự động..."
-              className="erp-input flex-1 font-mono font-bold text-primary-800 uppercase"
+              className="erp-input flex-1 h-9 md:h-auto font-mono font-bold text-primary-800 uppercase"
             />
           </div>
 
-          <div className="col-span-12 md:col-span-4 flex items-center gap-2">
-            <label className="erp-label w-28 shrink-0">
+          <div className="col-span-8 md:col-span-4 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-28 shrink-0">
               {config.mainAccountLabel}:
             </label>
-            <div className="w-24 shrink-0">
-              <Autocomplete
-                selectOnFocus
-                openOnTypeOnly
-                debounceMs={20}
-                dropdownMinWidth={360}
-                value={mainTk}
-                fetcher={fetchTkOptions}
-                onChange={(v) => setMainTk(v)}
-                onSelect={(opt) => {
-                  handleChangeMainTk(opt.value);
-                  setMainTkName(opt.hint || "");
-                }}
-                className="erp-input w-full font-mono font-bold text-emerald-800"
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <div className="w-20 md:w-24 shrink-0">
+                <Autocomplete
+                  selectOnFocus
+                  openOnTypeOnly
+                  debounceMs={20}
+                  dropdownMinWidth={360}
+                  value={mainTk}
+                  fetcher={fetchTkOptions}
+                  onChange={(v) => setMainTk(v)}
+                  onSelect={(opt) => {
+                    handleChangeMainTk(opt.value);
+                    setMainTkName(opt.hint || "");
+                  }}
+                  className="erp-input w-full h-9 md:h-auto font-mono font-bold text-emerald-800"
+                />
+              </div>
+              <input
+                type="text"
+                readOnly
+                tabIndex={-1}
+                value={mainTkName}
+                placeholder="Tên tài khoản quỹ/NH"
+                className="erp-input flex-1 h-9 md:h-auto min-w-0 bg-neutral-100 text-neutral-600 border-neutral-200 truncate"
               />
             </div>
-            <input
-              type="text"
-              readOnly
-              tabIndex={-1}
-              value={mainTkName}
-              placeholder="Tên tài khoản quỹ/NH"
-              className="erp-input flex-1 bg-neutral-100 text-neutral-600 border-neutral-200 truncate"
-            />
           </div>
 
-          <div className="col-span-12 md:col-span-2 flex items-center gap-2">
+          <div className="col-span-4 md:col-span-2 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
             <label className="erp-label shrink-0">Tiền tệ:</label>
-            <select
-              value={maTte}
-              onChange={(e) => {
-                const next = e.target.value;
-                setMaTte(next);
-                if (next === "VND") setTyGia(1);
-              }}
-              className="erp-input w-16 font-mono font-semibold bg-white"
-            >
-              <option value="VND">VND</option>
-              <option value="USD">USD</option>
-            </select>
-            {maTte !== "VND" && (
-              <input
-                type="number"
-                value={tyGia}
-                onChange={(e) => setTyGia(Number(e.target.value) || 1)}
-                className="erp-input w-20 font-mono text-right"
-                title="Tỷ giá quy đổi"
-              />
-            )}
+            <div className="flex items-center gap-1.5">
+              <select
+                value={maTte}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setMaTte(next);
+                  if (next === "VND") setTyGia(1);
+                }}
+                className="erp-input w-full md:w-16 h-9 md:h-auto font-mono font-semibold bg-white"
+              >
+                <option value="VND">VND</option>
+                <option value="USD">USD</option>
+              </select>
+              {maTte !== "VND" && (
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={tyGia}
+                  onChange={(e) => setTyGia(Number(e.target.value) || 1)}
+                  className="erp-input w-16 md:w-20 h-9 md:h-auto font-mono text-right"
+                  title="Tỷ giá quy đổi"
+                />
+              )}
+            </div>
           </div>
 
           {/* Row 2: Đối tượng */}
-          <div className="col-span-12 md:col-span-6 flex items-center gap-2">
-            <label className="erp-label w-20 shrink-0">Đối tượng:</label>
-            <div className="w-32 shrink-0">
-              <Autocomplete
-                inputRef={maDtInputRef}
-                selectOnFocus
-                openOnTypeOnly
-                debounceMs={25}
-                dropdownMinWidth={560}
-                value={maDt0}
-                fetcher={fetchDtOptions}
-                onChange={(v) => {
-                  setMaDt0(v);
-                  if (!v.trim()) setTenDt0("");
-                }}
-                onSelect={(opt) => {
-                  void handlePickCustomer(opt.value).then(() => {
-                    ongBaInputRef.current?.focus();
-                    ongBaInputRef.current?.select();
-                  });
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.defaultPrevented) {
-                    e.preventDefault();
-                    void handlePickCustomer(e.currentTarget.value).then(() => {
+          <div className="col-span-12 md:col-span-6 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-20 shrink-0">Đối tượng:</label>
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <div className="w-28 md:w-32 shrink-0">
+                <Autocomplete
+                  inputRef={maDtInputRef}
+                  selectOnFocus
+                  openOnTypeOnly
+                  debounceMs={25}
+                  dropdownMinWidth={560}
+                  value={maDt0}
+                  fetcher={fetchDtOptions}
+                  onChange={(v) => {
+                    setMaDt0(v);
+                    if (!v.trim()) setTenDt0("");
+                  }}
+                  onSelect={(opt) => {
+                    void handlePickCustomer(opt.value).then(() => {
                       ongBaInputRef.current?.focus();
                       ongBaInputRef.current?.select();
                     });
-                  }
-                }}
-                placeholder="Mã KH/NCC"
-                className="erp-input w-full font-mono font-bold uppercase"
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.defaultPrevented) {
+                      e.preventDefault();
+                      void handlePickCustomer(e.currentTarget.value).then(() => {
+                        ongBaInputRef.current?.focus();
+                        ongBaInputRef.current?.select();
+                      });
+                    }
+                  }}
+                  placeholder="Mã KH/NCC"
+                  className="erp-input w-full h-9 md:h-auto font-mono font-bold uppercase"
+                />
+              </div>
+              <input
+                type="text"
+                readOnly
+                tabIndex={-1}
+                value={tenDt0}
+                placeholder="Tên đối tượng (tự động từ DmDt)"
+                className="erp-input flex-1 h-9 md:h-auto min-w-0 bg-neutral-100 text-neutral-700 border-neutral-200 truncate"
               />
             </div>
-            <input
-              type="text"
-              readOnly
-              tabIndex={-1}
-              value={tenDt0}
-              placeholder="Tên đối tượng (tự động từ DmDt)"
-              className="erp-input flex-1 bg-neutral-100 text-neutral-700 border-neutral-200 truncate"
-            />
           </div>
 
-          <div className="col-span-12 md:col-span-6 flex items-center gap-2">
-            <label className="erp-label w-28 shrink-0">{config.personLabel}:</label>
-            <input
-              ref={ongBaInputRef}
-              type="text"
-              value={ongBa}
-              onChange={(e) => setOngBa(clampField(e.target.value, 64))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  dienGiaiInputRef.current?.focus();
-                  dienGiaiInputRef.current?.select();
-                }
-              }}
-              placeholder={config.personLabel}
-              className="erp-input flex-1"
-            />
-            <input
-              type="text"
-              value={diaChi}
-              onChange={(e) => setDiaChi(clampField(e.target.value, 64))}
-              placeholder="Địa chỉ"
-              className="erp-input flex-1"
-            />
+          <div className="col-span-12 md:col-span-6 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-28 shrink-0">{config.personLabel}:</label>
+            <div className="grid grid-cols-2 md:flex md:flex-1 gap-1.5 min-w-0">
+              <input
+                ref={ongBaInputRef}
+                type="text"
+                value={ongBa}
+                onChange={(e) => setOngBa(clampField(e.target.value, 64))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    dienGiaiInputRef.current?.focus();
+                    dienGiaiInputRef.current?.select();
+                  }
+                }}
+                placeholder={config.personLabel}
+                className="erp-input flex-1 h-9 md:h-auto min-w-0"
+              />
+              <input
+                type="text"
+                value={diaChi}
+                onChange={(e) => setDiaChi(clampField(e.target.value, 64))}
+                placeholder="Địa chỉ"
+                className="erp-input flex-1 h-9 md:h-auto min-w-0"
+              />
+            </div>
           </div>
 
           {/* Row 3: Diễn giải & Chứng từ kèm theo */}
-          <div className="col-span-12 md:col-span-8 flex items-center gap-2">
-            <label className="erp-label w-20 shrink-0">Diễn giải:</label>
+          <div className="col-span-12 md:col-span-8 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-20 shrink-0">Diễn giải:</label>
             <input
               ref={dienGiaiInputRef}
               type="text"
@@ -845,30 +855,30 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
                 }
               }}
               placeholder="Nội dung thu / chi..."
-              className="erp-input flex-1"
+              className="erp-input flex-1 h-9 md:h-auto"
             />
           </div>
 
-          <div className="col-span-12 md:col-span-4 flex items-center gap-2">
-            <label className="erp-label w-24 shrink-0">Kèm theo:</label>
+          <div className="col-span-12 md:col-span-4 flex flex-col md:flex-row md:items-center gap-0.5 md:gap-2">
+            <label className="erp-label md:w-24 shrink-0">Kèm theo:</label>
             <input
               type="text"
               value={ctDiKem}
               onChange={(e) => setCtDiKem(clampField(e.target.value, 128))}
               placeholder="Số chứng từ gốc kèm theo..."
-              className="erp-input flex-1"
+              className="erp-input flex-1 h-9 md:h-auto"
             />
           </div>
         </div>
       </section>
 
       {/* Detail Toolbar */}
-      <div className="bg-neutral-100 border-b border-neutral-300 px-3 py-1 flex items-center justify-between text-xs shrink-0">
+      <div className="bg-neutral-100 border-b border-neutral-300 px-3 py-1.5 md:py-1 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={handleAddItem}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white hover:bg-primary-50 border border-neutral-300 hover:border-primary-300 text-neutral-700 hover:text-primary-800 font-medium cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 md:px-2 py-1 md:py-0.5 rounded bg-white hover:bg-primary-50 border border-neutral-300 hover:border-primary-300 text-neutral-700 hover:text-primary-800 font-medium cursor-pointer"
             title="Thêm dòng hạch toán (Ctrl +)"
           >
             <Plus className="w-3.5 h-3.5 text-primary-700" />
@@ -877,7 +887,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
           <button
             type="button"
             onClick={() => handleDuplicateRow(activeRowIndex)}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white hover:bg-primary-50 border border-neutral-300 text-neutral-700 font-medium cursor-pointer"
+            className="inline-flex items-center gap-1 px-2.5 md:px-2 py-1 md:py-0.5 rounded bg-white hover:bg-primary-50 border border-neutral-300 text-neutral-700 font-medium cursor-pointer"
             title="Nhân đôi dòng đang chọn (Ctrl+Shift+D)"
           >
             <CopyPlus className="w-3.5 h-3.5 text-neutral-600" />
@@ -888,7 +898,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
             type="button"
             disabled={historyCounts.undo === 0}
             onClick={handleUndo}
-            className="p-1 rounded bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+            className="p-1.5 md:p-1 rounded bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
             title="Hoàn tác (Ctrl+Z)"
           >
             <Undo2 className="w-3.5 h-3.5" />
@@ -897,20 +907,20 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
             type="button"
             disabled={historyCounts.redo === 0}
             onClick={handleRedo}
-            className="p-1 rounded bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+            className="p-1.5 md:p-1 rounded bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
             title="Làm lại (Ctrl+Y)"
           >
             <Redo2 className="w-3.5 h-3.5" />
           </button>
         </div>
-        <div className="text-[11px] text-neutral-500">
+        <div className="hidden md:block text-[11px] text-neutral-500">
           {config.mainAccountLabel}: <b className="font-mono text-emerald-800">{mainTk}</b> ·{" "}
           {config.offsetAccountLabel} · Phím tắt: <kbd className="text-[9px] py-0">F8</kbd> Xóa dòng
         </div>
       </div>
 
       {/* Detail Grid */}
-      <main className="flex-1 min-h-0 flex flex-col overflow-hidden bg-white">
+      <main className="flex-1 md:min-h-0 flex flex-col md:overflow-hidden bg-white">
         <CashDetailGrid
           items={items}
           config={config}
@@ -927,6 +937,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
           firstInputRef={firstGridInputRef}
         />
       </main>
+      </div>
 
       <VoucherFormFooter
         isEditable
@@ -957,7 +968,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
 
       {/* Unsaved confirmation modal */}
       {showUnsavedConfirm && (
-        <div className="fixed inset-0 z-[80] bg-neutral-900/50 backdrop-blur-[1px] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[80] bg-neutral-900/50 backdrop-blur-[1px] flex items-center justify-center p-4 pt-safe pb-safe">
           <div className="bg-white rounded-md shadow-2xl border border-neutral-300 max-w-sm w-full overflow-hidden">
             <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 font-bold text-xs text-amber-900">
               Xác nhận thoát biểu mẫu
@@ -965,11 +976,11 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
             <div className="p-4 text-xs text-neutral-700">
               Chứng từ đang có thay đổi chưa lưu. Bạn có chắc muốn hủy bỏ và quay về danh sách?
             </div>
-            <div className="px-4 py-2 bg-neutral-50 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="px-4 py-2.5 bg-neutral-50 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowUnsavedConfirm(false)}
-                className="px-3 py-1 rounded border border-neutral-300 bg-white hover:bg-neutral-100 text-xs font-medium cursor-pointer"
+                className="px-3 py-1.5 md:py-1 rounded border border-neutral-300 bg-white hover:bg-neutral-100 text-xs font-medium cursor-pointer"
               >
                 Tiếp tục nhập
               </button>
@@ -980,7 +991,7 @@ export const CashVoucherForm: React.FC<CashVoucherFormProps> = ({
                   clearDraft();
                   onBack();
                 }}
-                className="px-3 py-1 rounded bg-danger-600 hover:bg-danger-700 text-white text-xs font-semibold cursor-pointer"
+                className="px-3 py-1.5 md:py-1 rounded bg-danger-600 hover:bg-danger-700 text-white text-xs font-semibold cursor-pointer"
               >
                 Bỏ thay đổi
               </button>

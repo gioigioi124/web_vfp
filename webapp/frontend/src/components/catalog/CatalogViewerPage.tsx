@@ -21,6 +21,8 @@ import {
 import { cachedFetch, invalidate, peek } from "../../lib/apiCache";
 import { formatCurrency, formatNumber2 } from "../../lib/format";
 import { normalizeSearchText, parseSearchQuery } from "../../lib/searchMatch";
+import { useIsMobile } from "../../hooks/useViewport";
+import { MobileSheet } from "../ui/MobileSheet";
 import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
 import { useVirtualExcelGrid } from "../ui/useVirtualExcelGrid";
 
@@ -54,6 +56,7 @@ export const CatalogViewerPage: React.FC = () => {
   const activeConfig: CatalogConfig =
     (catalogId && CATALOG_CONFIG_MAP[catalogId]) || CATALOG_CONFIGS[0];
 
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export const CatalogViewerPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(999999);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [mobileInspectRow, setMobileInspectRow] = useState<CatalogRow | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
@@ -74,6 +78,7 @@ export const CatalogViewerPage: React.FC = () => {
     setSortDir("asc");
     setPage(1);
     setSelectedIndex(0);
+    setMobileInspectRow(null);
     setError(null);
   }, [activeConfig.id, activeConfig.defaultSortKey]);
 
@@ -207,33 +212,60 @@ export const CatalogViewerPage: React.FC = () => {
   return (
     <div className="h-full w-full flex flex-col bg-surface overflow-hidden">
       {/* Dark Header Bar */}
-      <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <div
-            className={`w-7 h-7 rounded text-white font-mono font-bold text-[11px] flex items-center justify-center shadow shrink-0 ${activeConfig.badgeColor}`}
-          >
-            {activeConfig.shortCode}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold text-white truncate">
-                {activeConfig.title}
-              </h1>
-              <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
-                <Database className="w-3 h-3 text-sky-400" />
-                {activeConfig.tableName}
-              </span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-200 border border-amber-700/60">
-                <Eye className="w-3 h-3" />
-                Chỉ xem (Read-only)
-              </span>
+      <header className="bg-neutral-900 text-neutral-200 border-b border-neutral-700 px-3 md:px-3.5 py-2 md:py-1.5 flex flex-col md:flex-row md:flex-wrap md:items-center md:justify-between gap-2 md:gap-3 shrink-0">
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className={`w-7 h-7 rounded text-white font-mono font-bold text-[11px] flex items-center justify-center shadow shrink-0 ${activeConfig.badgeColor}`}
+            >
+              {activeConfig.shortCode}
             </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-sm font-bold text-white truncate">
+                  {activeConfig.title}
+                </h1>
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-300 border border-neutral-700">
+                  <Database className="w-3 h-3 text-sky-400" />
+                  {activeConfig.tableName}
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-200 border border-amber-700/60">
+                  <Eye className="w-3 h-3" />
+                  Chỉ xem (Read-only)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex md:hidden items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={filteredAndSorted.length === 0}
+              className="inline-flex items-center gap-1 px-2.5 h-8 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-medium disabled:opacity-40"
+              title="Xuất CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                invalidate(`catalog:${activeConfig.id}`);
+                void loadCatalog({ force: true });
+              }}
+              disabled={loading}
+              className="w-8 h-8 inline-flex items-center justify-center rounded bg-neutral-800 border border-neutral-700 text-neutral-300"
+              title="Tải lại danh mục"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
           </div>
         </div>
 
         {/* Search + Actions */}
-        <div className="flex items-center gap-2">
-          <div className="relative w-72">
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="relative w-full md:w-72">
             <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               ref={searchInputRef}
@@ -241,7 +273,7 @@ export const CatalogViewerPage: React.FC = () => {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Tìm mã, tên, địa chỉ... (Ctrl+F)"
-              className="w-full bg-white text-neutral-900 placeholder-neutral-400 rounded pl-8 pr-7 py-1 text-xs font-medium outline-none border border-neutral-300 focus:border-primary-500"
+              className="w-full bg-white text-neutral-900 placeholder-neutral-400 rounded pl-8 pr-7 py-1.5 md:py-1 text-sm md:text-xs font-medium outline-none border border-neutral-300 focus:border-primary-500"
             />
             {query && (
               <button
@@ -259,7 +291,7 @@ export const CatalogViewerPage: React.FC = () => {
             type="button"
             onClick={handleExportCsv}
             disabled={filteredAndSorted.length === 0}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium disabled:opacity-40 cursor-pointer"
+            className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-xs font-medium disabled:opacity-40 cursor-pointer"
             title="Xuất danh sách đang lọc ra file CSV"
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
@@ -273,7 +305,7 @@ export const CatalogViewerPage: React.FC = () => {
               void loadCatalog({ force: true });
             }}
             disabled={loading}
-            className="p-1.5 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 hover:text-white cursor-pointer"
+            className="hidden md:inline-flex p-1.5 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 hover:text-white cursor-pointer"
             title="Tải lại danh mục (F5)"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -323,9 +355,79 @@ export const CatalogViewerPage: React.FC = () => {
         </div>
       )}
 
-      {/* Main Dense Table */}
+      {/* Main Dense Table / Mobile Cards */}
       <main ref={tableScrollRef} className="flex-1 min-h-0 overflow-auto bg-white">
-        <table className="w-full border-collapse xl-grid table-sticky-header text-xs">
+        {isMobile ? (
+          <div className="p-2.5 space-y-2 bg-slate-50 min-h-full">
+            {loading && rows.length === 0 ? (
+              <div className="py-12 text-center text-sm text-neutral-500">
+                Đang tải dữ liệu danh mục...
+              </div>
+            ) : pagedRows.length === 0 ? (
+              <div className="py-12 text-center text-sm text-neutral-500">
+                {query
+                  ? `Không tìm thấy dòng nào khớp "${query}"`
+                  : "Danh mục chưa có dữ liệu."}
+              </div>
+            ) : (
+              pagedRows.map((row, idx) => {
+                const primaryCol = activeConfig.columns[0];
+                const secondaryCol = activeConfig.columns[1];
+                const extraCols = activeConfig.columns.slice(2, 5);
+                const primaryVal = primaryCol ? formatCellValue(row[primaryCol.key], primaryCol) : "";
+                const secondaryVal = secondaryCol
+                  ? formatCellValue(row[secondaryCol.key], secondaryCol)
+                  : "";
+                return (
+                  <button
+                    key={String(row[activeConfig.columns[0]?.key] ?? idx) + "-" + idx}
+                    type="button"
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      setMobileInspectRow(row);
+                    }}
+                    className={`w-full text-left rounded-xl border bg-white p-3 shadow-xs active:bg-slate-50 transition-colors ${
+                      idx === selectedIndex ? "border-primary-500 ring-1 ring-primary-200" : "border-neutral-200"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        {primaryCol && (
+                          <div className="font-mono text-[13px] font-bold text-primary-700 truncate">
+                            {primaryVal || "—"}
+                          </div>
+                        )}
+                        {secondaryCol && (
+                          <div className="text-[13px] font-medium text-neutral-900 line-clamp-2 mt-0.5">
+                            {secondaryVal || "—"}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-mono text-neutral-400 shrink-0">
+                        #{(safePage - 1) * pageSize + idx + 1}
+                      </span>
+                    </div>
+                    {extraCols.some((c) => formatCellValue(row[c.key], c)) && (
+                      <div className="mt-2 pt-2 border-t border-neutral-100 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                        {extraCols.map((col) => {
+                          const v = formatCellValue(row[col.key], col);
+                          if (!v) return null;
+                          return (
+                            <div key={col.key} className="truncate">
+                              <span className="text-neutral-400">{col.label}: </span>
+                              <span className="text-neutral-700 font-medium">{v}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        ) : (
+        <table className="w-full border-collapse xl-grid table-sticky-header mobile-table-sticky text-xs">
           <thead>
             <tr>
               <th className="vfp-header w-12 text-center">#</th>
@@ -454,10 +556,11 @@ export const CatalogViewerPage: React.FC = () => {
             )}
           </tbody>
         </table>
+        )}
       </main>
 
       {/* Selected Row Inspector Strip + Pagination Footer */}
-      <footer className="bg-neutral-100 border-t border-neutral-300 px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-3 text-[11px] shrink-0">
+      <footer className="bg-neutral-100 border-t border-neutral-300 px-3 md:px-3.5 py-1.5 pb-safe flex flex-wrap items-center justify-between gap-2 md:gap-3 text-[11px] shrink-0">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <span className="text-neutral-700 shrink-0">
             Hiển thị{" "}
@@ -490,14 +593,14 @@ export const CatalogViewerPage: React.FC = () => {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
           <select
             value={pageSize}
             onChange={(e) => {
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="bg-white border border-neutral-300 rounded px-1.5 py-0.5 font-mono text-[11px] text-neutral-700"
+            className="bg-white border border-neutral-300 rounded px-1.5 py-1 md:py-0.5 font-mono text-[11px] text-neutral-700"
             title="Số dòng mỗi trang"
           >
             <option value={999999}>Tất cả (Ảo hóa)</option>
@@ -513,13 +616,13 @@ export const CatalogViewerPage: React.FC = () => {
               setPage((p) => Math.max(1, p - 1));
               setSelectedIndex(0);
             }}
-            className="p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+            className="p-1.5 md:p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
             title="Trang trước"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
           <span className="font-mono text-neutral-700 px-1">
-            Trang {safePage}/{totalPages}
+            {safePage}/{totalPages}
           </span>
           <button
             type="button"
@@ -528,13 +631,47 @@ export const CatalogViewerPage: React.FC = () => {
               setPage((p) => Math.min(totalPages, p + 1));
               setSelectedIndex(0);
             }}
-            className="p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
+            className="p-1.5 md:p-1 rounded border border-neutral-300 bg-white hover:bg-neutral-50 disabled:opacity-40 cursor-pointer"
             title="Trang sau"
           >
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </footer>
+
+      {/* Mobile Full Row Inspector Sheet */}
+      <MobileSheet
+        isOpen={Boolean(mobileInspectRow)}
+        onClose={() => setMobileInspectRow(null)}
+        title={activeConfig.title}
+        subtitle={`${activeConfig.tableName} · Chi tiết bản ghi`}
+        variant="bottom"
+      >
+        {mobileInspectRow && (
+          <div className="p-3 space-y-2 pb-safe">
+            {activeConfig.columns.map((col) => {
+              const formatted = formatCellValue(mobileInspectRow[col.key], col);
+              return (
+                <div
+                  key={col.key}
+                  className="flex items-start justify-between gap-3 py-1.5 border-b border-neutral-100 last:border-0 text-xs"
+                >
+                  <span className="text-neutral-500 shrink-0">{col.label}</span>
+                  <span
+                    className={`text-right break-words font-medium text-neutral-900 ${
+                      col.type === "mono" || col.type === "currency" || col.type === "number"
+                        ? "font-mono"
+                        : ""
+                    }`}
+                  >
+                    {formatted || "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </MobileSheet>
     </div>
   );
 };

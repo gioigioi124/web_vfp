@@ -54,7 +54,7 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center pt-[12vh] p-4 bg-neutral-900/50 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[70] flex items-start justify-center pt-0 md:pt-[12vh] p-0 md:p-4 bg-neutral-900/50 backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -64,9 +64,9 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label="Nhảy nhanh phần hành kế toán"
-        className="w-full max-w-lg bg-white rounded-lg shadow-2xl border border-neutral-300 overflow-hidden animate-in fade-in zoom-in-95"
+        className="w-full md:max-w-lg h-[100dvh] md:h-auto bg-white rounded-none md:rounded-lg shadow-2xl border-0 md:border border-neutral-300 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 pt-safe md:pt-0 pb-safe md:pb-0"
       >
-        <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-neutral-200 bg-neutral-50">
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-neutral-200 bg-neutral-50 shrink-0">
           <Search className="w-4 h-4 text-primary-700 shrink-0" />
           <input
             ref={inputRef}
@@ -93,19 +93,20 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
                 if (matches[activeIndex]) selectItem(matches[activeIndex]);
               }
             }}
-            placeholder="Gõ tên hoặc mã phần hành (VD: thu, chi, báo có, C3, X1, sổ quỹ)..."
-            className="flex-1 bg-transparent text-sm text-neutral-900 placeholder-neutral-400 outline-none"
+            placeholder="Tìm phần hành (VD: thu, chi, X1, sổ quỹ)..."
+            className="flex-1 bg-transparent text-base md:text-sm text-neutral-900 placeholder-neutral-400 outline-none"
           />
           <button
             type="button"
             onClick={onClose}
-            className="text-neutral-400 hover:text-neutral-700 p-0.5 rounded cursor-pointer"
+            aria-label="Đóng"
+            className="text-neutral-500 hover:text-neutral-800 w-10 h-10 md:w-auto md:h-auto md:p-0.5 flex items-center justify-center rounded cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </div>
 
-        <div className="max-h-80 overflow-y-auto divide-y divide-neutral-100">
+        <div className="flex-1 md:flex-none md:max-h-80 overflow-y-auto divide-y divide-neutral-100">
           {matches.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-neutral-500">
               Không tìm thấy phần hành phù hợp với "{query}"
@@ -119,7 +120,7 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
                   type="button"
                   onMouseEnter={() => setActiveIndex(idx)}
                   onClick={() => selectItem(item)}
-                  className={`w-full px-3.5 py-2 flex items-center justify-between text-left transition-colors cursor-pointer ${
+                  className={`w-full px-3.5 min-h-[48px] md:min-h-0 py-2.5 md:py-2 flex items-center justify-between text-left transition-colors cursor-pointer ${
                     active ? "bg-primary-50 text-primary-900" : "hover:bg-neutral-50"
                   }`}
                 >
@@ -130,7 +131,7 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
                         active ? "text-primary-700" : "text-neutral-500"
                       }`}
                     />
-                    <span className="text-xs font-semibold truncate">
+                    <span className="text-[13px] md:text-xs font-semibold truncate">
                       {item.label}
                     </span>
                     {!item.implemented && (
@@ -139,7 +140,7 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
                       </span>
                     )}
                   </div>
-                  <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 border border-neutral-200">
+                  <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 border border-neutral-200 shrink-0 ml-2">
                     {item.shortCode}
                   </span>
                 </button>
@@ -148,7 +149,7 @@ export const QuickJumpModal: React.FC<QuickJumpModalProps> = ({
           )}
         </div>
 
-        <div className="px-3.5 py-1.5 bg-neutral-50 border-t border-neutral-200 text-[11px] text-neutral-500 flex items-center justify-between">
+        <div className="hidden md:flex px-3.5 py-1.5 bg-neutral-50 border-t border-neutral-200 text-[11px] text-neutral-500 items-center justify-between">
           <span>↑/↓ để chọn · Enter để mở</span>
           <span>Esc để đóng</span>
         </div>

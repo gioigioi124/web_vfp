@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import settings
 from app.database import get_db_cursor, get_db_transaction
+from app.repositories.ledger_posting import ensure_cash_voucher_socai
 from app.repositories.voucher.helpers import increment_voucher_number
 from app.repositories.voucher_repo import voucher_repository
 from app.schemas.cash_voucher import (
@@ -742,6 +743,25 @@ class CashVoucherRepository:
             logger.warning(f"CtT_Post warning ({stt}): {e}")
             if mode == "S":
                 raise
+
+        ensure_cash_voucher_socai(
+            cur,
+            self.vp_db,
+            self.fn_tcvn,
+            ma_dvcs=data.ma_dvcs or "S1",
+            stt=stt,
+            ma_ct=clean_ma_ct,
+            nh_ct=nh_ct,
+            ngay_ct=data.ngay_ct,
+            so_ct=final_so_ct,
+            ma_dt0=data.ma_dt0 or "",
+            ong_ba=data.ong_ba or "",
+            dien_giai0=data.dien_giai0 or "",
+            ma_tte=safe_ma_tte,
+            ty_gia=safe_ty_gia,
+            posted=(data.posted is not False),
+            items=data.items,
+        )
 
         try:
             cur.execute(

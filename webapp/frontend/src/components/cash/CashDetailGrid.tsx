@@ -19,6 +19,8 @@ import { VfpLookupCell, VfpNavDir } from "../ui/VfpLookupCell";
 import { NumCell } from "../detail-grid/NumCell";
 import { ReadOnlyGridInput } from "../detail-grid/ReadOnlyGridCell";
 import { arrowDir } from "../ui/excelCell";
+import { useIsMobile } from "../../hooks/useViewport";
+import { MobileCashDetailList } from "./MobileCashDetailList";
 
 export interface CashDetailGridHandle {
   focusFirstCell: (rowIndex: number) => void;
@@ -56,6 +58,7 @@ export const CashDetailGrid: React.FC<CashDetailGridProps> = React.memo(
     gridRef,
     firstInputRef,
   }) => {
+    const isMobile = useIsMobile();
     const isForm = variant === "form";
     const isVnd = (currency || "VND").toUpperCase() === "VND";
     const tableRef = useRef<HTMLTableElement | null>(null);
@@ -205,6 +208,26 @@ export const CashDetailGrid: React.FC<CashDetailGridProps> = React.memo(
     );
 
     const isDebitMain = config.fixedSide === "debit";
+
+    if (isMobile && isForm) {
+      return (
+        <MobileCashDetailList
+          items={items}
+          config={config}
+          currency={currency}
+          editable={editable}
+          activeRowIndex={currentActiveRow}
+          onSelectRow={handleSelectRow}
+          onChangeItem={onChangeItem}
+          onDeleteItem={onDeleteItem}
+          onAddItem={onAddItem}
+          firstInputRef={firstInputRef}
+          fetchTkOptions={fetchTkOptions}
+          fetchDtOptions={fetchDtOptions}
+          fetchBpOptions={fetchBpOptions}
+        />
+      );
+    }
 
     return (
       <div

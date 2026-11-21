@@ -9,7 +9,9 @@ import {
 } from "../types/voucher";
 import { Button } from "./ui/Button";
 import { DetailGrid } from "./DetailGrid";
-import { formatCurrency, formatDate } from "../lib/format";
+import { MobileSheet } from "./ui/MobileSheet";
+import { useIsMobile } from "../hooks/useViewport";
+import { formatCurrency, formatDate, formatQuantity } from "../lib/format";
 import { isModalOpen } from "../lib/modalLock";
 import {
   arrowDir,
@@ -22,6 +24,12 @@ import {
   ChevronRight,
   Info,
   GripHorizontal,
+  Check,
+  Pencil,
+  Printer,
+  Eye,
+  Trash2,
+  CreditCard,
 } from "lucide-react";
 
 const SPLIT_STORAGE_KEY = "voucherList.splitRatio";
@@ -80,10 +88,12 @@ interface VoucherListProps {
   voucherMode?: VoucherMode;
   onSelectStt: (stt: string) => void;
   onEditVoucher?: (stt: string) => void;
+  onDeleteVoucher?: (v: VoucherHeader) => void;
   onToggleMark?: (stt: string) => void;
   onToggleSelectAll?: (selectAll: boolean) => void;
   onOpenFilter: () => void;
   onOpenPrint: (stt: string | string[]) => void;
+  onOpenPreview?: (stt: string | string[]) => void;
   onOpenPickup?: () => void;
   onOpenDebt?: (maDt: string) => void;
   onRefresh: () => void;
@@ -104,11 +114,16 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   voucherMode = "sales",
   onSelectStt,
   onEditVoucher,
+  onDeleteVoucher,
   onToggleMark,
   onToggleSelectAll,
+  onOpenPrint,
+  onOpenPreview,
   onOpenDebt,
   onChangePage,
 }) => {
+  const isMobile = useIsMobile();
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const isWarehouse = voucherMode === "warehouse";
   const activeVoucher =
     vouchers.find((v) => v.stt === selectedStt) ||
@@ -119,7 +134,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
   const [splitRatio, setSplitRatio] = useState<number>(loadSplitRatio);
   const [isDraggingSplit, setIsDraggingSplit] = useState(false);
 
-  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+  const handleSplitterPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     const root = rootContainerRef.current;
     if (!root) return;
@@ -127,11 +142,11 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
     const rect = root.getBoundingClientRect();
     const totalH = Math.max(200, rect.height);
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const next = Math.min(0.8, Math.max(0.25, (ev.clientY - rect.top) / totalH));
       setSplitRatio(next);
     };
-    const onUp = (ev: MouseEvent) => {
+    const onUp = (ev: PointerEvent) => {
       const finalRatio = Math.min(0.8, Math.max(0.25, (ev.clientY - rect.top) / totalH));
       setSplitRatio(finalRatio);
       setIsDraggingSplit(false);
@@ -140,11 +155,13 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
       } catch {
         /* ignore */
       }
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }, []);
 
   const masterScrollRef = useRef<HTMLDivElement | null>(null);
@@ -454,6 +471,347 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
     vouchers.length > 0 &&
     Boolean(markedStts && vouchers.every((v) => markedStts.has(v.stt)));
 
+  if (isMobile) {
+    return (
+      <div className="flex flex-col h-full w-full bg-slate-50 min-h-0">
+        {/* Top Summary & Select All Strip */}
+        <div className="px-3 py-2 bg-white border-b border-neutral-200 flex items-center justify-between gap-2 text-xs shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {onToggleSelectAll && vouchers.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onToggleSelectAll(!allVisibleMarked)}
+                className="text-primary-700 font-semibold whitespace-nowrap cursor-pointer"
+              >
+                {allVisibleMarked ? "Bỏ chọn" : "Chọn tất"}
+              </button>
+            )}
+            <span className="text-neutral-600 truncate">
+              <b className="font-mono text-neutral-900">{pagination.total_records}</b> CT
+              {!isWarehouse && summary && pagination.total_records > 0 && (
+                <>
+                  {" · "}
+                  <b className="font-mono text-primary-800">
+                    {formatCurrency(summary.total_ttien0 || summary.total_ttien_nt0, "VND")} ₫
+                  </b>
+                </>
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[11px] font-mono text-neutral-600">
+              {pagination.page}/{pagination.total_pages || 1}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChangePage(pagination.page - 1)}
+              disabled={pagination.page <= 1 || loading}
+              aria-label="Trang trước"
+              className="w-8 h-8 rounded-lg border border-neutral-300 bg-white disabled:opacity-40 flex items-center justify-center"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onChangePage(pagination.page + 1)}
+              disabled={!pagination.has_next || loading}
+              aria-label="Trang sau"
+              className="w-8 h-8 rounded-lg border border-neutral-300 bg-white disabled:opacity-40 flex items-center justify-center"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable Card List */}
+        <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+          {loading ? (
+            <div className="py-14 text-center text-neutral-400 text-xs">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-600" />
+              Đang tải danh sách chứng từ...
+            </div>
+          ) : vouchers.length === 0 ? (
+            <div className="py-12 text-center text-neutral-400 italic text-xs bg-white rounded-xl border border-neutral-200">
+              Không tìm thấy chứng từ nào phù hợp bộ lọc.
+            </div>
+          ) : (
+            vouchers.map((v) => {
+              const isSelected = selectedStt === v.stt;
+              const isMarked = markedStts?.has(v.stt) ?? false;
+              const isFlashed = flashStt === v.stt;
+              const maCt = (v.ma_ct || "").trim().toUpperCase();
+              return (
+                <div
+                  key={v.stt}
+                  onClick={() => {
+                    userSelectedSttRef.current = v.stt;
+                    onSelectStt(v.stt);
+                    setMobileDetailOpen(true);
+                  }}
+                  className={`bg-white rounded-xl border p-3 shadow-sm transition-colors cursor-pointer ${
+                    isFlashed
+                      ? "ring-2 ring-emerald-500 border-emerald-400 bg-emerald-50/40"
+                      : isSelected
+                        ? "border-primary-500 ring-1 ring-primary-300"
+                        : isMarked
+                          ? "border-amber-400 bg-amber-50/40"
+                          : "border-neutral-200 active:bg-neutral-50"
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {onToggleMark && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleMark(v.stt);
+                        }}
+                        aria-label={`Đánh dấu ${v.so_ct}`}
+                        className={`w-7 h-7 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${
+                          isMarked
+                            ? "bg-tertiary-500 border-tertiary-600 text-white"
+                            : "bg-white border-neutral-300"
+                        }`}
+                      >
+                        {isMarked && <Check className="w-4 h-4" />}
+                      </button>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              maCt === "N5"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-primary-100 text-primary-800"
+                            }`}
+                          >
+                            {maCt || "CT"}
+                          </span>
+                          <span className="font-mono font-bold text-sm text-primary-800 truncate">
+                            {v.so_ct || v.stt}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs text-neutral-500 shrink-0">
+                          {formatDate(v.ngay_ct)}
+                        </span>
+                      </div>
+
+                      <div className="text-[13px] font-semibold text-neutral-900 truncate mt-1">
+                        {v.ten_dt || v.ma_dt || "—"}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <span className="text-xs text-neutral-500 truncate">
+                          {v.dien_giai0 || (v.user_name ? `Lập: ${v.user_name}` : "—")}
+                        </span>
+                        {!isWarehouse && (
+                          <span className="font-mono font-bold text-sm text-neutral-900 shrink-0">
+                            {formatCurrency(v.ttien_nt0, v.ma_tte)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Mobile Voucher Detail Drawer */}
+        <MobileSheet
+          isOpen={mobileDetailOpen && Boolean(activeVoucher)}
+          onClose={() => setMobileDetailOpen(false)}
+          variant="bottom"
+          title={
+            activeVoucher ? (
+              <span className="flex items-center gap-2">
+                <span className="font-mono text-primary-800">
+                  {activeVoucher.ma_ct} · {activeVoucher.so_ct}
+                </span>
+                <span className="text-xs font-normal text-neutral-500 font-mono">
+                  {formatDate(activeVoucher.ngay_ct)}
+                </span>
+              </span>
+            ) : undefined
+          }
+          subtitle={
+            activeVoucher
+              ? `${activeVoucher.ma_dt ? `[${activeVoucher.ma_dt}] ` : ""}${
+                  activeVoucher.ten_dt || ""
+                }`
+              : undefined
+          }
+          footer={
+            activeVoucher && (
+              <div className="grid grid-cols-4 gap-1.5">
+                {onEditVoucher && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDetailOpen(false);
+                      onEditVoucher(activeVoucher.stt);
+                    }}
+                    className="h-11 rounded-lg bg-primary-700 hover:bg-primary-800 text-white text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Sửa</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDetailOpen(false);
+                    onOpenPrint(activeVoucher.stt);
+                  }}
+                  className="h-11 rounded-lg bg-neutral-800 text-white text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>In</span>
+                </button>
+                {onOpenPreview && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDetailOpen(false);
+                      onOpenPreview(activeVoucher.stt);
+                    }}
+                    className="h-11 rounded-lg border border-neutral-300 bg-white text-neutral-800 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Xem in</span>
+                  </button>
+                )}
+                {onDeleteVoucher && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileDetailOpen(false);
+                      onDeleteVoucher(activeVoucher);
+                    }}
+                    className="h-11 rounded-lg border border-danger-300 bg-danger-50 text-danger-700 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa</span>
+                  </button>
+                )}
+              </div>
+            )
+          }
+        >
+          {activeVoucher && (
+            <div className="p-3.5 space-y-3 bg-slate-50">
+              {/* Summary Strip */}
+              <div className="bg-white rounded-xl border border-neutral-200 p-3 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-neutral-500">Diễn giải:</span>
+                  <span className="font-medium text-neutral-900 text-right">
+                    {activeVoucher.dien_giai0 || "—"}
+                  </span>
+                </div>
+                {!isWarehouse && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-neutral-500">Tổng thanh toán:</span>
+                      <span className="font-mono font-bold text-sm text-primary-800">
+                        {formatCurrency(activeVoucher.ttien_nt0, detailCurrency)} ₫
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-100">
+                      <span className="text-neutral-500">Dư nợ KH:</span>
+                      {activeVoucher.ma_dt && onOpenDebt ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMobileDetailOpen(false);
+                            onOpenDebt(activeVoucher.ma_dt);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-tertiary-100 border border-tertiary-200 text-tertiary-800 font-mono font-bold text-xs cursor-pointer"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>
+                            {debtAmount != null
+                              ? `${formatCurrency(debtAmount, "VND")} ₫`
+                              : "Xem sổ nợ"}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="font-mono font-bold text-tertiary-700">
+                          {debtAmount != null
+                            ? `${formatCurrency(debtAmount, "VND")} ₫`
+                            : "—"}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Detail Line Items */}
+              <div>
+                <div className="text-[11px] font-bold uppercase text-neutral-500 px-1 mb-1.5">
+                  Chi tiết vật tư ({detailItems.length} dòng)
+                </div>
+                {detailLoading ? (
+                  <div className="py-8 text-center text-xs text-neutral-500">
+                    <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-primary-600" />
+                    Đang tải chi tiết...
+                  </div>
+                ) : detailItems.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-neutral-400 bg-white rounded-xl border border-neutral-200">
+                    Không có dòng hàng hóa.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {detailItems.map((it, idx) => (
+                      <div
+                        key={`${it.stt0}-${idx}`}
+                        className="bg-white rounded-xl border border-neutral-200 p-2.5 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono font-bold text-primary-800">
+                            #{idx + 1} · {it.ma_vt}
+                          </span>
+                          <span className="font-mono text-[11px] text-neutral-500">
+                            Kho: {it.ma_kho}
+                          </span>
+                        </div>
+                        <div className="font-semibold text-neutral-900 mt-0.5">
+                          {it.ten_vt}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-neutral-100 text-[11px]">
+                          <span className="text-neutral-600 font-mono">
+                            {it.so_tam ? `${formatQuantity(it.so_tam)} tấm · ` : ""}
+                            SL:{" "}
+                            <b className="text-neutral-900">
+                              {formatQuantity(it.so_luong9 || it.so_luong)}
+                            </b>{" "}
+                            {it.dvt_ban || it.dvt}
+                          </span>
+                          {!isWarehouse && (
+                            <span className="font-mono font-bold text-primary-800">
+                              {formatCurrency(
+                                (it.tien_nt9 ?? it.tien_nt ?? 0) - (it.tien_nt4 ?? 0),
+                                detailCurrency,
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </MobileSheet>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootContainerRef}
@@ -754,7 +1112,7 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
 
       {/* ===== THANH SPLITTER KÉO GIÃN & THÔNG TIN DƯ NỢ KHÁCH HÀNG ===== */}
       <div
-        onMouseDown={handleSplitterMouseDown}
+        onPointerDown={handleSplitterPointerDown}
         onDoubleClick={() => {
           setSplitRatio(DEFAULT_SPLIT_RATIO);
           try {
@@ -767,11 +1125,11 @@ export const VoucherList: React.FC<VoucherListProps> = React.memo(({
           }
         }}
         title="Kéo lên/xuống để thay đổi tỷ lệ bảng (nhấp đúp để đặt lại mặc định)"
-        className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 hover:from-primary-100 hover:via-neutral-100 hover:to-primary-100 px-2.5 py-0.5 flex items-center justify-between gap-2 border-y border-neutral-300 flex-shrink-0 cursor-row-resize transition-colors"
+        className="bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 hover:from-primary-100 hover:via-neutral-100 hover:to-primary-100 px-2.5 py-0.5 flex items-center justify-between gap-2 border-y border-neutral-300 flex-shrink-0 cursor-row-resize touch-none transition-colors"
       >
         <div
           className="flex items-center gap-1.5 min-w-0 cursor-default"
-          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <GripHorizontal className="w-3.5 h-3.5 text-neutral-400 shrink-0 cursor-row-resize" />
           <div className="flex items-center justify-center w-4 h-4 rounded-full bg-info-100 text-primary-700 shrink-0">

@@ -45,12 +45,13 @@ interface SidebarItemRowProps {
   item: NavModuleItem;
   isActive: boolean;
   isPinned: boolean;
+  compact?: boolean;
   onNavigate: (item: NavModuleItem) => void;
   onTogglePin: (id: string, e: React.MouseEvent) => void;
 }
 
 const SidebarItemRow: React.FC<SidebarItemRowProps> = React.memo(
-  ({ item, isActive, isPinned, onNavigate, onTogglePin }) => {
+  ({ item, isActive, isPinned, compact = false, onNavigate, onTogglePin }) => {
     const badgeClass =
       BADGE_CLASSES[item.badgeTone || (item.implemented ? "primary" : "neutral")];
 
@@ -66,18 +67,20 @@ const SidebarItemRow: React.FC<SidebarItemRowProps> = React.memo(
           }
         }}
         title={item.label}
-        className={`group relative flex items-center justify-between px-2.5 py-1.5 rounded text-xs transition-colors cursor-pointer select-none ${
+        className={`group relative flex items-center justify-between px-2.5 rounded transition-colors cursor-pointer select-none ${
+          compact ? "min-h-[44px] py-2 text-[13px]" : "py-1.5 text-xs"
+        } ${
           isActive
             ? "bg-primary-700 text-white font-semibold shadow-sm"
             : item.implemented
-              ? "text-neutral-300 hover:bg-neutral-800/90 hover:text-white"
+              ? "text-neutral-300 hover:bg-neutral-800/90 hover:text-white active:bg-neutral-800"
               : "text-neutral-500 hover:bg-neutral-800/50 hover:text-neutral-300"
         }`}
       >
         {isActive && (
           <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r bg-sky-400" />
         )}
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <ModuleIcon
             name={item.iconName}
             className={`w-4 h-4 shrink-0 ${
@@ -97,16 +100,20 @@ const SidebarItemRow: React.FC<SidebarItemRowProps> = React.memo(
               type="button"
               onClick={(e) => onTogglePin(item.id, e)}
               title={isPinned ? "Bỏ ghim khỏi mục Hay dùng" : "Ghim lên mục Hay dùng"}
-              className={`p-0.5 rounded transition-opacity cursor-pointer ${
+              className={`rounded transition-opacity cursor-pointer ${
+                compact ? "p-2 -my-1" : "p-0.5"
+              } ${
                 isPinned
-                  ? "opacity-75 hover:opacity-100 text-amber-300"
-                  : "opacity-0 group-hover:opacity-80 hover:opacity-100 text-neutral-400 hover:text-amber-300"
+                  ? "opacity-85 hover:opacity-100 text-amber-300"
+                  : compact
+                    ? "opacity-65 text-neutral-400 hover:text-amber-300"
+                    : "opacity-0 group-hover:opacity-80 hover:opacity-100 text-neutral-400 hover:text-amber-300"
               }`}
             >
               {isPinned ? (
-                <PinOff className="w-3 h-3" />
+                <PinOff className={compact ? "w-3.5 h-3.5" : "w-3 h-3"} />
               ) : (
-                <Pin className="w-3 h-3" />
+                <Pin className={compact ? "w-3.5 h-3.5" : "w-3 h-3"} />
               )}
             </button>
           )}
@@ -136,6 +143,7 @@ interface AccountingSidebarProps {
   width: number;
   innerWidth: number;
   isDragging: boolean;
+  isOverlay?: boolean;
   onCollapse: () => void;
   onOpenQuickJump: () => void;
   onStartResizeFromRightEdge: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -145,6 +153,7 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
   width,
   innerWidth,
   isDragging,
+  isOverlay = false,
   onCollapse,
   onOpenQuickJump,
   onStartResizeFromRightEdge,
@@ -164,7 +173,7 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
     ]),
   );
 
-  const isFullyClosed = width <= 0;
+  const isFullyClosed = !isOverlay && width <= 0;
 
   const isItemActive = (item: NavModuleItem) =>
     location.pathname === item.route ||
@@ -227,18 +236,18 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
     <aside
       aria-label="Thanh điều hướng phần hành kế toán"
       aria-hidden={isFullyClosed}
-      style={{ width: `${width}px` }}
+      style={isOverlay ? { width: "100%" } : { width: `${width}px` }}
       className={`relative shrink-0 h-full overflow-hidden select-none z-30 bg-neutral-950 text-neutral-200 ${
         isFullyClosed ? "border-r-0 pointer-events-none" : "border-r border-neutral-800"
-      } ${isDragging ? "" : "transition-[width] duration-200 ease-out"}`}
+      } ${isDragging || isOverlay ? "" : "transition-[width] duration-200 ease-out"}`}
     >
       {/* Inner fixed-width drawer so dragging from 0px reveals smoothly without text reflow */}
       <div
-        style={{ width: `${innerWidth}px` }}
+        style={isOverlay ? { width: "100%" } : { width: `${innerWidth}px` }}
         className={`h-full flex flex-col ${isFullyClosed ? "invisible" : "visible"}`}
       >
         {/* Brand + Collapse toggle */}
-        <div className="h-11 border-b border-neutral-800 flex items-center justify-between px-3 shrink-0">
+        <div className="h-12 lg:h-11 border-b border-neutral-800 flex items-center justify-between px-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-6 h-6 rounded bg-primary-700 border border-primary-500/60 flex items-center justify-center font-mono font-bold text-xs text-white shrink-0 shadow">
               1S
@@ -255,10 +264,12 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
           <button
             type="button"
             onClick={onCollapse}
-            title="Thu gọn hoàn toàn Sidebar (Ctrl+B hoặc kéo mép sang trái)"
-            className="p-1.5 rounded text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+            title={isOverlay ? "Đóng menu" : "Thu gọn hoàn toàn Sidebar (Ctrl+B hoặc kéo mép sang trái)"}
+            className={`${
+              isOverlay ? "w-10 h-10 -mr-1.5" : "p-1.5"
+            } rounded flex items-center justify-center text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer`}
           >
-            <PanelLeftClose className="w-4 h-4" />
+            {isOverlay ? <X className="w-5 h-5" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
@@ -271,18 +282,20 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Lọc phần hành..."
-              className="w-full bg-neutral-900 text-neutral-100 placeholder-neutral-500 border border-neutral-800 focus:border-primary-500 rounded pl-8 pr-14 py-1 text-xs outline-none"
+              className={`w-full bg-neutral-900 text-neutral-100 placeholder-neutral-500 border border-neutral-800 focus:border-primary-500 rounded pl-8 ${
+                isOverlay ? "pr-9 py-2 text-sm" : "pr-14 py-1 text-xs"
+              } outline-none`}
             />
             {searchQuery ? (
               <button
                 type="button"
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white cursor-pointer p-1"
                 title="Xóa tìm kiếm"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
-            ) : (
+            ) : !isOverlay ? (
               <button
                 type="button"
                 onClick={onOpenQuickJump}
@@ -291,7 +304,7 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
               >
                 Ctrl+K
               </button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -311,6 +324,7 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
                     item={item}
                     isActive={isItemActive(item)}
                     isPinned
+                    compact={isOverlay}
                     onNavigate={handleNavigate}
                     onTogglePin={handleTogglePin}
                   />
@@ -328,7 +342,9 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.id)}
-                  className="w-full flex items-center justify-between px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400 hover:text-neutral-200 cursor-pointer"
+                  className={`w-full flex items-center justify-between px-2 ${
+                    isOverlay ? "py-2 text-[11px]" : "py-1 text-[10px]"
+                  } font-bold uppercase tracking-wider text-neutral-400 hover:text-neutral-200 cursor-pointer`}
                 >
                   <span className="truncate">{group.title}</span>
                   {isGroupCollapsed ? (
@@ -346,6 +362,7 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
                         item={item}
                         isActive={isItemActive(item)}
                         isPinned={pinnedIds.includes(item.id)}
+                        compact={isOverlay}
                         onNavigate={handleNavigate}
                         onTogglePin={handleTogglePin}
                       />
@@ -357,15 +374,17 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
           })}
         </nav>
 
-        {/* Bottom footer hint */}
-        <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-neutral-500 flex items-center justify-between shrink-0">
-          <span>Ẩn/Hiện: Ctrl+B</span>
-          <span>Nhảy nhanh: Ctrl+K</span>
-        </div>
+        {/* Bottom footer hint (desktop only) */}
+        {!isOverlay && (
+          <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-neutral-500 flex items-center justify-between shrink-0">
+            <span>Ẩn/Hiện: Ctrl+B</span>
+            <span>Nhảy nhanh: Ctrl+K</span>
+          </div>
+        )}
       </div>
 
-      {/* Right-edge resize / drag-left-to-collapse handle */}
-      {!isFullyClosed && (
+      {/* Right-edge resize / drag-left-to-collapse handle (desktop only) */}
+      {!isOverlay && !isFullyClosed && (
         <div
           onPointerDown={onStartResizeFromRightEdge}
           title="Kéo để chỉnh độ rộng hoặc kéo sát mép trái để thu gọn hoàn toàn"
@@ -375,3 +394,4 @@ export const AccountingSidebar: React.FC<AccountingSidebarProps> = ({
     </aside>
   );
 };
+

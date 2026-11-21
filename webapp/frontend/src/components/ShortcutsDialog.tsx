@@ -163,7 +163,7 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[75] flex items-center justify-center p-2 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[75] flex items-center justify-center p-0 sm:p-4 bg-neutral-900/60 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label="Danh sách phím tắt ứng dụng"
@@ -173,19 +173,19 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
     >
       <div
         ref={containerRef}
-        className="flex flex-col w-full max-w-5xl bg-white rounded-xl shadow-2xl border border-neutral-300 overflow-hidden max-h-[90vh]"
+        className="flex flex-col w-full h-[100dvh] sm:h-auto max-w-5xl bg-white rounded-none sm:rounded-xl shadow-2xl border-0 sm:border border-neutral-300 overflow-hidden sm:max-h-[90vh] pt-safe sm:pt-0"
       >
         {/* Header */}
-        <header className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0 select-none">
-          <div className="flex items-center gap-2.5">
-            <Keyboard className="w-4 h-4 text-secondary-300" />
-            <h2 className="text-sm font-bold tracking-wide uppercase">
+        <header className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 bg-gradient-to-r from-primary-900 via-primary-800 to-neutral-900 text-white border-b border-primary-900 shrink-0 select-none">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Keyboard className="w-4 h-4 text-secondary-300 shrink-0" />
+            <h2 className="text-sm font-bold tracking-wide uppercase truncate">
               Hướng Dẫn Phím Tắt Hệ Thống
             </h2>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-none">
               <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 data-autofocus
@@ -193,13 +193,13 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Tìm phím tắt..."
-                className="h-7 w-48 pl-7 pr-2 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-xs outline-none focus:bg-white/20 focus:border-white/50"
+                className="h-8 sm:h-7 w-full sm:w-48 pl-7 pr-2 rounded bg-white/15 text-white placeholder-neutral-300 border border-white/20 text-sm sm:text-xs outline-none focus:bg-white/20 focus:border-white/50"
               />
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-6 h-6 flex items-center justify-center cursor-pointer"
+              className="p-1.5 sm:p-1 text-neutral-200 hover:text-white hover:bg-danger-600 rounded transition-colors w-8 h-8 sm:w-6 sm:h-6 flex items-center justify-center cursor-pointer shrink-0"
               title="Đóng (Esc)"
             >
               <X className="w-4 h-4" />
@@ -208,7 +208,7 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
         </header>
 
         {/* Body */}
-        <div className="flex-1 overflow-auto p-3.5 bg-neutral-50">
+        <div className="flex-1 overflow-auto p-3 sm:p-3.5 bg-neutral-50">
           {filteredSections.length === 0 ? (
             <div className="py-12 text-center text-xs text-neutral-400 italic">
               Không tìm thấy phím tắt phù hợp với "{query}".
@@ -258,14 +258,14 @@ export const ShortcutsDialog: React.FC<ShortcutsDialogProps> = ({
         </div>
 
         {/* Footer */}
-        <footer className="bg-neutral-100 px-3.5 py-2 flex items-center justify-between border-t border-neutral-300 shrink-0 select-none text-xs">
-          <span className="text-neutral-500 text-[11px]">
+        <footer className="bg-neutral-100 px-3.5 py-2 pb-safe flex items-center justify-between gap-2 border-t border-neutral-300 shrink-0 select-none text-xs">
+          <span className="hidden sm:inline text-neutral-500 text-[11px]">
             Mẹo: Gõ từ khóa ở góc trên để lọc nhanh phím tắt hoặc chức năng cần tìm.
           </span>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 bg-white hover:bg-neutral-200 text-neutral-700 border border-neutral-300 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+            className="ml-auto px-3.5 py-1.5 sm:py-1 bg-white hover:bg-neutral-200 text-neutral-700 border border-neutral-300 rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
           >
             <X className="w-3.5 h-3.5 text-neutral-500" />
             <span>Đóng</span>

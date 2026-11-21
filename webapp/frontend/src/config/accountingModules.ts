@@ -195,6 +195,16 @@ export const NAV_GROUPS: NavModuleGroup[] = [
         badgeTone: "primary",
         keywords: "chuyen kho noi bo ctck",
       },
+      {
+        id: "inv-reports",
+        label: "Báo cáo Kho (NXT & Thẻ kho)",
+        shortCode: "NXT",
+        route: "/inventory/reports",
+        iconName: "bar-chart-3",
+        implemented: true,
+        badgeTone: "emerald",
+        keywords: "bao cao kho nhap xuat ton the kho socaivt vcd01 vct01",
+      },
     ],
   },
   {

@@ -146,26 +146,26 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
       .reduce((s, r) => s + (r.so_tien || 0), 0) || 0;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-neutral-900/50 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-0 md:p-4 bg-neutral-900/50 backdrop-blur-[2px]">
       <div
         ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-label="Import Báo Có từ Excel"
-        className="w-full max-w-4xl max-h-[88vh] bg-white rounded-lg shadow-2xl border border-neutral-300 flex flex-col overflow-hidden"
+        className="w-full h-[100dvh] md:h-auto max-w-4xl md:max-h-[88vh] bg-white rounded-none md:rounded-lg shadow-2xl border-0 md:border border-neutral-300 flex flex-col overflow-hidden pt-safe md:pt-0"
       >
         {/* Header */}
         <header className="bg-sky-900 text-white px-4 py-2.5 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="w-4 h-4 text-sky-300" />
-            <span className="text-xs font-bold uppercase tracking-wide">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileSpreadsheet className="w-4 h-4 text-sky-300 shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wide truncate">
               Import Giấy Báo Có (C3) từ Excel · CtT / CtT0
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-sky-200 hover:text-white p-1 rounded hover:bg-white/10 cursor-pointer"
+            className="text-sky-200 hover:text-white p-1.5 rounded hover:bg-white/10 cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -264,7 +264,7 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
               <span>Chọn file Excel báo có để xem trước dữ liệu trước khi ghi sổ.</span>
             </div>
           ) : (
-            <table className="w-full border-collapse xl-grid table-sticky-header text-xs">
+            <table className="w-full border-collapse xl-grid table-sticky-header mobile-table-sticky text-xs">
               <thead>
                 <tr>
                   <th className="vfp-header w-12 text-center">Dòng</th>
@@ -365,8 +365,8 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
         </div>
 
         {/* Footer */}
-        <footer className="px-4 py-2.5 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between text-xs shrink-0">
-          <div className="flex items-center gap-3 text-neutral-700">
+        <footer className="px-4 py-2.5 pb-safe bg-neutral-100 border-t border-neutral-200 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3 text-neutral-700">
             {preview && (
               <>
                 <span>
@@ -390,11 +390,11 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 font-medium cursor-pointer"
+              className="px-3 py-2 md:py-1.5 rounded bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 font-medium cursor-pointer"
             >
               Đóng
             </button>
@@ -402,7 +402,7 @@ export const BaoCoImportModal: React.FC<BaoCoImportModalProps> = ({
               type="button"
               disabled={!preview || preview.valid_rows === 0 || committing}
               onClick={() => void handleCommit()}
-              className="px-4 py-1.5 rounded bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm disabled:opacity-40 inline-flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 md:py-1.5 rounded bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-sm disabled:opacity-40 inline-flex items-center gap-1.5 cursor-pointer"
             >
               {committing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
               <span>

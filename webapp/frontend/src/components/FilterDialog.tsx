@@ -365,19 +365,19 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-900/45 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-3 bg-neutral-900/45 backdrop-blur-[2px]">
       <div
         ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-label="Tìm kiếm đơn hàng"
-        className="w-full max-w-xl bg-white rounded-md shadow-2xl border border-neutral-400 flex flex-col overflow-hidden animate-in fade-in zoom-in-95"
+        className="w-full md:max-w-xl h-[100dvh] md:h-auto md:max-h-[92vh] bg-white rounded-none md:rounded-md shadow-2xl border-0 md:border border-neutral-400 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 pt-safe md:pt-0"
       >
         {/* Header đồng bộ font & phong cách ERP */}
-        <header className="h-10 bg-primary-800 px-4 flex items-center justify-between select-none">
-          <div className="flex items-center gap-2 text-white">
-            <Filter className="w-4 h-4" />
-            <span className="text-xs font-bold tracking-wide uppercase">
+        <header className="h-12 md:h-10 bg-primary-800 px-4 flex items-center justify-between select-none shrink-0">
+          <div className="flex items-center gap-2 text-white min-w-0">
+            <Filter className="w-4 h-4 shrink-0" />
+            <span className="text-xs font-bold tracking-wide uppercase truncate">
               {customTitle || "Tìm kiếm đơn hàng (F9)"}
             </span>
           </div>
@@ -386,9 +386,9 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
             tabIndex={-1}
             aria-label="Đóng cửa sổ"
             onClick={onClose}
-            className="text-neutral-200 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+            className="text-neutral-200 hover:text-white w-10 h-10 md:w-auto md:h-auto md:p-1 flex items-center justify-center rounded hover:bg-white/10 transition-colors cursor-pointer shrink-0"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </header>
 
@@ -397,7 +397,7 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
           onSubmit={(e) => {
             e.preventDefault();
           }}
-          className="p-4 flex flex-col gap-3 bg-white"
+          className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 bg-white"
         >
           {/* Quick Date Presets */}
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -789,12 +789,12 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
         </form>
 
         {/* Footer */}
-        <footer className="bg-neutral-50 px-4 py-2.5 flex items-center justify-end gap-2 border-t border-neutral-200 select-none">
+        <footer className="bg-neutral-50 px-4 py-2.5 flex items-center justify-end gap-2 border-t border-neutral-200 select-none shrink-0 pb-safe">
           <button
             type="button"
             tabIndex={-1}
             onClick={onClose}
-            className="h-8 px-3 rounded bg-white text-neutral-700 hover:bg-neutral-100 transition-colors flex items-center gap-1.5 text-xs font-semibold shadow-sm border border-neutral-300 cursor-pointer"
+            className="h-10 md:h-8 px-4 md:px-3 rounded-lg md:rounded bg-white text-neutral-700 hover:bg-neutral-100 transition-colors flex items-center gap-1.5 text-xs font-semibold shadow-sm border border-neutral-300 cursor-pointer"
           >
             <kbd className="text-[10px] py-0 px-1">Esc</kbd>
             <span>Hủy bỏ</span>
@@ -805,7 +805,7 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
             type="button"
             onClick={() => void handleSubmit()}
             onKeyDown={(e) => handleFieldArrowNav(e)}
-            className="h-8 px-4 rounded bg-primary-800 text-white hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-600 transition-colors flex items-center gap-2 text-xs font-semibold shadow-sm cursor-pointer"
+            className="h-10 md:h-8 px-5 md:px-4 rounded-lg md:rounded bg-primary-800 text-white hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-600 transition-colors flex items-center gap-2 text-xs font-semibold shadow-sm cursor-pointer"
           >
             <Search className="w-3.5 h-3.5" />
             <span>Đồng ý</span>
