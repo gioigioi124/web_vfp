@@ -8,10 +8,10 @@ export interface TruckSpec {
 
 export const TRUCK_CLASS_META: Record<TruckSizeClass, TruckDimensions> = {
   mini: {
-    length: 2.7,
-    width: 1.32,
-    height: 1.55,
-    cabLength: 0.85,
+    length: 2.55,
+    width: 1.28,
+    height: 1.5,
+    cabLength: 0.8,
     axleCount: 2,
     accentHex: "#0d9488", // teal-600
     badgeClass: "bg-teal-50 text-teal-700 border-teal-200",
@@ -20,10 +20,10 @@ export const TRUCK_CLASS_META: Record<TruckSizeClass, TruckDimensions> = {
     capacityCm: 120,
   },
   light: {
-    length: 3.6,
-    width: 1.55,
-    height: 1.85,
-    cabLength: 1.05,
+    length: 3.55,
+    width: 1.52,
+    height: 1.82,
+    cabLength: 1.0,
     axleCount: 2,
     accentHex: "#0284c7", // sky-600
     badgeClass: "bg-sky-50 text-sky-700 border-sky-200",
@@ -44,7 +44,7 @@ export const TRUCK_CLASS_META: Record<TruckSizeClass, TruckDimensions> = {
     capacityCm: 420,
   },
   heavy: {
-    length: 6.45,
+    length: 6.65,
     width: 2.02,
     height: 2.55,
     cabLength: 1.45,
@@ -56,7 +56,7 @@ export const TRUCK_CLASS_META: Record<TruckSizeClass, TruckDimensions> = {
     capacityCm: 720,
   },
   container: {
-    length: 8.2,
+    length: 8.35,
     width: 2.15,
     height: 2.78,
     cabLength: 1.75,
@@ -79,73 +79,76 @@ export const TRUCK_CLASS_ORDER: TruckSizeClass[] = [
 
 /**
  * Resolve 3D physical proportions and styling class from vehicle weight string.
+ * Uses strict regex boundaries so "1.25t", "3.5t", and "5 ta" never collide with "5t".
  */
 export function resolveTruckSpec(weightRaw?: string): TruckSpec {
   const norm = normalizeSearchText(weightRaw || "");
 
-  if (norm.includes("cont 40") || norm.includes("cont40")) {
+  // 1. Container (Cont 40 / Cont 20 / HN ngoài)
+  if (/\bcont\s*40\b/.test(norm)) {
     return {
       sizeClass: "container",
       dimensions: {
         ...TRUCK_CLASS_META.container,
-        length: 9.2,
+        length: 9.25,
         axleCount: 5,
       },
     };
   }
-  if (
-    norm.includes("cont") ||
-    norm.includes("dau keo") ||
-    norm.includes("hn ngoai")
-  ) {
+  if (/\bcont\b|\bcont\s*20\b|dau keo|hn ngoai/.test(norm)) {
     return {
       sizeClass: "container",
       dimensions: { ...TRUCK_CLASS_META.container },
     };
   }
 
-  if (
-    norm.includes("10t") ||
-    norm.includes("7t") ||
-    norm.includes("xe sg") ||
-    norm.includes("xe khach") ||
-    norm.includes("8t") ||
-    norm.includes("9t") ||
-    norm.includes("15t")
-  ) {
-    const isExtraLong = norm.includes("10t") || norm.includes("xe sg");
+  // 2. Heavy (10T, 7T, 8T, 9T, 15T, Xe SG, Xe khách)
+  if (/\b(7|8|9|10|15)\s*t\b|xe sg|xe khach/.test(norm)) {
+    const isExtraLong = /\b(10|15)\s*t\b|xe sg/.test(norm);
     return {
       sizeClass: "heavy",
       dimensions: {
         ...TRUCK_CLASS_META.heavy,
-        length: isExtraLong ? 6.7 : 6.1,
+        length: isExtraLong ? 6.85 : 6.15,
       },
     };
   }
 
-  if (norm.includes("5t") || norm.includes("3.5t") || norm.includes("3,5t") || norm.includes("2.5t")) {
-    const is5T = norm.includes("5t");
+  // 3. Mini (5 tạ, 0.5T, CPN) — checked BEFORE medium so "5 ta" never matches "5t"
+  if (/\b5\s*ta\b|\b0[.,]5\s*t\b|\bcpn\b/.test(norm)) {
     return {
-      sizeClass: "medium",
-      dimensions: {
-        ...TRUCK_CLASS_META.medium,
-        length: is5T ? 5.25 : 4.55,
-        height: is5T ? 2.32 : 2.12,
-      },
+      sizeClass: "mini",
+      dimensions: { ...TRUCK_CLASS_META.mini },
     };
   }
 
-  if (norm.includes("1.25") || norm.includes("1,25") || norm.includes("1.5t") || norm.includes("livax")) {
+  // 4. Light (1.25T, 1.25T Livax, 1.5T) — checked BEFORE medium so "1.25t" never matches "5t"
+  if (/\b1[.,](25|5)\s*t\b|livax/.test(norm)) {
     return {
       sizeClass: "light",
       dimensions: { ...TRUCK_CLASS_META.light },
     };
   }
 
-  if (norm.includes("5 ta") || norm.includes("5ta") || norm.includes("cpn") || norm.includes("0.5")) {
+  // 5. Medium (3.5T, 2.5T, 5T)
+  if (/\b3[.,]5\s*t\b|\b2[.,]5\s*t\b/.test(norm)) {
     return {
-      sizeClass: "mini",
-      dimensions: { ...TRUCK_CLASS_META.mini },
+      sizeClass: "medium",
+      dimensions: {
+        ...TRUCK_CLASS_META.medium,
+        length: 4.5,
+        height: 2.1,
+      },
+    };
+  }
+  if (/\b5\s*t\b/.test(norm)) {
+    return {
+      sizeClass: "medium",
+      dimensions: {
+        ...TRUCK_CLASS_META.medium,
+        length: 5.4,
+        height: 2.34,
+      },
     };
   }
 

@@ -244,23 +244,23 @@ const YardPad3D: React.FC<{
         </group>
       ))}
 
-      {/* Painted floor zone stencil on the apron directly in front of the yard */}
+      {/* Painted floor zone stencil right inside the front entrance of the concrete pad */}
       <mesh
-        position={[centerX, 0.055, centerZ + depth / 2 + 1.05]}
+        position={[centerX, 0.066, centerZ + depth / 2 - 0.85]}
         rotation={[-Math.PI / 2, 0, 0]}
       >
-        <planeGeometry args={[7.2, 1.4]} />
-        <meshStandardMaterial map={stencilTexture} transparent opacity={0.88} roughness={0.85} />
+        <planeGeometry args={[6.4, 1.15]} />
+        <meshStandardMaterial map={stencilTexture} transparent opacity={0.85} roughness={0.85} />
       </mesh>
 
-      {/* Standing architectural yard sign with live vehicle count */}
+      {/* Standing architectural yard sign positioned cleanly near the center aisle entrance */}
       <YardEntranceSign
         position={[
           zoneLayout.zone === "waiting"
-            ? centerX - width / 2 + 2.5
-            : centerX + width / 2 - 2.5,
+            ? centerX + width / 2 - 2.3
+            : centerX - width / 2 + 2.3,
           0.04,
-          centerZ + depth / 2 + 1.35,
+          centerZ - depth / 2 - 0.55,
         ]}
         title={title}
         count={count}
@@ -506,9 +506,9 @@ export const WarehouseAndYards3D: React.FC<WarehouseAndYards3DProps> = ({
                 <boxGeometry args={[1.4, 0.08, 0.12]} />
                 <meshStandardMaterial color="#fffbeb" emissive="#fde68a" emissiveIntensity={0.45} />
               </mesh>
-              {/* Mounted crisp bay plaque (K01..K04) */}
-              <mesh position={[0, 1.98, 0.14]}>
-                <planeGeometry args={[1.15, 0.56]} />
+              {/* Mounted crisp bay plaque (K01..K04) on front edge of loading canopy */}
+              <mesh position={[0, 2.36, 2.32]}>
+                <planeGeometry args={[1.35, 0.64]} />
                 <meshStandardMaterial map={bayPlaqueTextures[idx]} roughness={0.35} />
               </mesh>
               {/* Twin black rubber dock bumpers + yellow safety bollards */}

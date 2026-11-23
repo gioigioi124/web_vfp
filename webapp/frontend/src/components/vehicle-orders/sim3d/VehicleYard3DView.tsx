@@ -257,27 +257,27 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
         )}
 
         {/* Chú giải góc dưới trái */}
-        <div className="hidden md:flex absolute bottom-3 left-3 pointer-events-none bg-white/88 backdrop-blur-sm border border-gray-200/90 rounded-lg px-2.5 py-1.5 shadow-sm items-center gap-3 text-[11px] text-gray-600">
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-slate-500" />
+        <div className="hidden lg:flex absolute bottom-3 left-3 pointer-events-none bg-slate-900/88 text-slate-200 backdrop-blur-md border border-white/10 rounded-xl px-3 py-1.5 shadow-lg items-center gap-3 text-[11px]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-slate-400" />
             Chờ xếp
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-amber-500" />
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-amber-400" />
             Đã in
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-emerald-400" />
             Đã xếp xong
           </span>
-          <span className="text-gray-400">|</span>
-          <span className="text-gray-500">
-            Kéo chuột xoay · Cuộn để zoom · Click xe để xem đơn
+          <span className="text-slate-500">|</span>
+          <span className="text-slate-400">
+            Kéo xoay · Cuộn zoom · Click xe xem đơn
           </span>
         </div>
 
-        {/* Thanh điều khiển góc nhìn & hiển thị (giữa đáy) */}
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-3 flex flex-wrap items-center justify-center gap-1 bg-slate-900/88 text-white backdrop-blur-md px-2 py-1.5 rounded-xl shadow-lg border border-white/10">
+        {/* Thanh điều khiển góc nhìn & hiển thị */}
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-3 flex flex-wrap items-center justify-center gap-1 bg-slate-900/94 text-white backdrop-blur-md px-2 py-1.5 rounded-xl shadow-lg border border-white/15">
           <button
             type="button"
             onClick={() => jumpCamera("overview")}
@@ -333,7 +333,7 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
             onClick={() => setSortBySize((s) => !s)}
             className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
               sortBySize
-                ? "bg-white/20 text-white"
+                ? "bg-sky-500/25 text-sky-200 border border-sky-400/40"
                 : "text-slate-300 hover:bg-white/10"
             }`}
             title="Xếp xe từ lớn đến nhỏ trong từng bãi để dễ so sánh"
@@ -347,17 +347,17 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
             onClick={() => setShowLabels((s) => !s)}
             className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
               showLabels
-                ? "bg-white/20 text-white"
+                ? "bg-sky-500/25 text-sky-200 border border-sky-400/40"
                 : "text-slate-300 hover:bg-white/10"
             }`}
-            title="Ẩn/hiện nhãn tải trọng trên từng xe"
+            title="Ẩn/hiện nhãn tải trọng trên nóc từng xe"
           >
             {showLabels ? (
               <Eye className="w-3.5 h-3.5" />
             ) : (
               <EyeOff className="w-3.5 h-3.5" />
             )}
-            <span className="hidden sm:inline">Nhãn</span>
+            <span className="hidden sm:inline">Nhãn nóc</span>
           </button>
         </div>
 

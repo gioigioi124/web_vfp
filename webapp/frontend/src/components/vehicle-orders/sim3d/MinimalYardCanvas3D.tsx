@@ -96,16 +96,16 @@ const CameraRig: React.FC<{
         layout.completedZone.centerZ - 0.8,
       );
     } else if (cameraPreset === "top") {
-      desiredPos.current.set(0, 37 * spanScale, centerZ + 4.5);
-      desiredTarget.current.set(0, 0, centerZ);
+      desiredPos.current.set(0, 41 * spanScale, centerZ + 4.8);
+      desiredTarget.current.set(0, 0, centerZ + 0.6);
     } else {
-      // Hero 3/4 architectural diorama angle (highlights depth & truck size differences)
+      // Hero 3/4 architectural diorama angle (keeps warehouse + both yards cleanly above bottom HUD)
       desiredPos.current.set(
-        -11 * spanScale,
-        19.5 * spanScale,
-        centerZ + 27 * spanScale,
+        -10.5 * spanScale,
+        21.5 * spanScale,
+        centerZ + 30.5 * spanScale,
       );
-      desiredTarget.current.set(0, 0.6, centerZ - 1.0);
+      desiredTarget.current.set(0, 0.4, centerZ + 0.4);
     }
     isAnimating.current = true;
   }, [
