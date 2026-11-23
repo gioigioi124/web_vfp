@@ -82,7 +82,10 @@ export const TRUCK_CLASS_ORDER: TruckSizeClass[] = [
  * Uses strict regex boundaries so "1.25t", "3.5t", and "5 ta" never collide with "5t".
  */
 export function resolveTruckSpec(weightRaw?: string): TruckSpec {
-  const norm = normalizeSearchText(weightRaw || "");
+  const norm = normalizeSearchText(weightRaw || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
 
   // 1. Container (Cont 40 / Cont 20 / HN ngoài)
   if (/\bcont\s*40\b/.test(norm)) {

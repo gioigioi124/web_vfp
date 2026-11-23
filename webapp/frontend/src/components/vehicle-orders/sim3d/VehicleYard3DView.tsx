@@ -257,7 +257,7 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
         )}
 
         {/* Chú giải góc dưới trái */}
-        <div className="hidden lg:flex absolute bottom-3 left-3 pointer-events-none bg-slate-900/88 text-slate-200 backdrop-blur-md border border-white/10 rounded-xl px-3 py-1.5 shadow-lg items-center gap-3 text-[11px]">
+        <div className="hidden lg:flex absolute bottom-3 left-3 pointer-events-none bg-slate-900/85 text-slate-200 backdrop-blur-md border border-white/10 rounded-xl px-3 py-1.5 shadow-lg items-center gap-3 text-[11px]">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-slate-400" />
             Chờ xếp
@@ -277,7 +277,7 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
         </div>
 
         {/* Thanh điều khiển góc nhìn & hiển thị */}
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-3 flex flex-wrap items-center justify-center gap-1 bg-slate-900/94 text-white backdrop-blur-md px-2 py-1.5 rounded-xl shadow-lg border border-white/15">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-3 flex flex-wrap items-center justify-center gap-1 bg-slate-900/90 text-white backdrop-blur-md px-2 py-1.5 rounded-xl shadow-lg border border-white/15">
           <button
             type="button"
             onClick={() => jumpCamera("overview")}
