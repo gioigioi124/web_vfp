@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Eye, RotateCcw, Search, Truck } from "lucide-react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
+import { Box, Columns3, Eye, RotateCcw, Search, Truck } from "lucide-react";
 import { Button } from "../ui/Button";
 import {
   VehicleOrder,
@@ -12,9 +12,16 @@ import { VehicleOrderListColumn } from "./VehicleOrderListColumn";
 import { OrderDetailColumn } from "./OrderDetailColumn";
 import { getTodayIsoDate } from "./sortItems";
 
+const VehicleYard3DView = lazy(() =>
+  import("./sim3d/VehicleYard3DView").then((m) => ({
+    default: m.VehicleYard3DView,
+  })),
+);
+
 export const VehicleOrdersPage: React.FC = () => {
   const today = getTodayIsoDate();
 
+  const [displayMode, setDisplayMode] = useState<"list" | "3d">("list");
   const [selectedVehicle, setSelectedVehicle] =
     useState<VehicleOrderVehicle | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<VehicleOrder | null>(null);
@@ -101,7 +108,7 @@ export const VehicleOrdersPage: React.FC = () => {
     <div className="h-full flex flex-col overflow-y-auto lg:overflow-hidden bg-surface p-2 md:p-4">
       {/* Header + Bộ lọc (chỉ xem, bỏ các nút tạo/sửa/xóa của elanX) */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-3 mb-3 md:mb-4 shrink-0">
-        <div className="flex flex-wrap items-end gap-3 md:gap-4 w-full lg:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg md:text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -114,12 +121,40 @@ export const VehicleOrdersPage: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
-              Theo dõi danh sách xe hàng, đơn hàng theo xe và chi tiết hàng hóa (chờ kết nối CSDL)
+              Theo dõi danh sách xe hàng, đơn hàng theo xe và mô phỏng 3D bãi xe (chờ kết nối CSDL)
             </p>
+          </div>
+
+          {/* Nút chuyển chế độ Danh sách 3 cột <-> Mô phỏng 3D */}
+          <div className="inline-flex bg-gray-200/80 p-0.5 rounded-lg border border-gray-300/80 shrink-0">
+            <button
+              type="button"
+              onClick={() => setDisplayMode("list")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                displayMode === "list"
+                  ? "bg-white text-primary-800 shadow-sm"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              <Columns3 className="w-3.5 h-3.5" />
+              <span>Danh sách 3 cột</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDisplayMode("3d")}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                displayMode === "3d"
+                  ? "bg-primary-700 text-white shadow-sm"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              <Box className="w-3.5 h-3.5" />
+              <span>Bãi xe 3D</span>
+            </button>
           </div>
         </div>
 
-        {/* Bộ lọc ngày & người tạo (giống PageHeader + DateRangeSearch của elanX) */}
+        {/* Bộ lọc ngày & người tạo (dùng chung cho cả 2 chế độ) */}
         <div className="flex flex-wrap items-end gap-2 w-full lg:w-auto">
           <div className="flex flex-col gap-1 flex-1 sm:flex-initial">
             <label
@@ -211,39 +246,59 @@ export const VehicleOrdersPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bố cục 3 cột giống HomePage của elanX: 3 / 3 / 6 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 md:gap-4 flex-1 min-h-0">
-        {/* Cột 1: Danh sách xe hàng */}
-        <div className="lg:col-span-3 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[50vh] lg:max-h-none lg:h-full">
-          <VehicleListColumn
-            selectedVehicle={selectedVehicle}
-            onSelectVehicle={setSelectedVehicle}
+      {displayMode === "3d" ? (
+        <Suspense
+          fallback={
+            <div className="flex-1 flex items-center justify-center bg-slate-100 rounded-lg border border-gray-200 text-sm text-gray-500">
+              Đang tải module bãi xe 3D...
+            </div>
+          }
+        >
+          <VehicleYard3DView
             fromDate={dateRange.fromDate}
             toDate={dateRange.toDate}
             creator={selectedStaff === "all" ? "" : selectedStaff}
             refreshTrigger={refreshTrigger}
+            selectedVehicle={selectedVehicle}
+            onSelectVehicle={setSelectedVehicle}
           />
-        </div>
+        </Suspense>
+      ) : (
+        /* Bố cục 3 cột giống HomePage của elanX: 3 / 3 / 6 */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 md:gap-4 flex-1 min-h-0">
+          {/* Cột 1: Danh sách xe hàng */}
+          <div className="lg:col-span-3 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[50vh] lg:max-h-none lg:h-full">
+            <VehicleListColumn
+              selectedVehicle={selectedVehicle}
+              onSelectVehicle={setSelectedVehicle}
+              fromDate={dateRange.fromDate}
+              toDate={dateRange.toDate}
+              creator={selectedStaff === "all" ? "" : selectedStaff}
+              refreshTrigger={refreshTrigger}
+            />
+          </div>
 
-        {/* Cột 2: Danh sách đơn hàng của xe */}
-        <div className="lg:col-span-3 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[50vh] lg:max-h-none lg:h-full">
-          <VehicleOrderListColumn
-            vehicle={selectedVehicle}
-            selectedOrder={selectedOrder}
-            onSelectOrder={setSelectedOrder}
-            refreshTrigger={refreshTrigger}
-          />
-        </div>
+          {/* Cột 2: Danh sách đơn hàng của xe */}
+          <div className="lg:col-span-3 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[50vh] lg:max-h-none lg:h-full">
+            <VehicleOrderListColumn
+              vehicle={selectedVehicle}
+              selectedOrder={selectedOrder}
+              onSelectOrder={setSelectedOrder}
+              refreshTrigger={refreshTrigger}
+            />
+          </div>
 
-        {/* Cột 3: Chi tiết đơn hàng */}
-        <div className="md:col-span-2 lg:col-span-6 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[65vh] lg:max-h-none lg:h-full">
-          <OrderDetailColumn
-            order={selectedOrder}
-            vehicle={selectedVehicle}
-            refreshTrigger={refreshTrigger}
-          />
+          {/* Cột 3: Chi tiết đơn hàng */}
+          <div className="md:col-span-2 lg:col-span-6 bg-white rounded-lg shadow-sm p-3 md:p-4 border border-gray-200/80 overflow-y-auto max-h-[65vh] lg:max-h-none lg:h-full">
+            <OrderDetailColumn
+              order={selectedOrder}
+              vehicle={selectedVehicle}
+              refreshTrigger={refreshTrigger}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
+

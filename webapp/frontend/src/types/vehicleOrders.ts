@@ -84,3 +84,32 @@ export interface VehicleOrdersDataSource {
   getOrdersByVehicle: (vehicleId: string) => Promise<VehicleOrder[]>;
   getStaffList: () => Promise<VehicleOrderStaff[]>;
 }
+
+export type TruckSizeClass = "mini" | "light" | "medium" | "heavy" | "container";
+export type YardZone = "waiting" | "completed";
+export type YardCameraPreset = "overview" | "waiting" | "completed" | "top";
+
+export interface TruckDimensions {
+  length: number;
+  width: number;
+  height: number;
+  cabLength: number;
+  axleCount: number;
+  accentHex: string;
+  badgeClass: string;
+  sizeRank: number;
+  sizeLabel: string;
+  capacityCm: number;
+}
+
+export interface VehicleYardPlacement {
+  vehicle: VehicleOrderVehicle;
+  zone: YardZone;
+  slotIndex: number;
+  slotNumber: number;
+  position: [number, number, number];
+  rotationY: number;
+  sizeClass: TruckSizeClass;
+  dimensions: TruckDimensions;
+}
+
