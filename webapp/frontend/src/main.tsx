@@ -56,6 +56,11 @@ const InventoryReportPage = lazy(() =>
     default: m.InventoryReportPage,
   })),
 );
+const VehicleOrdersPage = lazy(() =>
+  import("./components/vehicle-orders/VehicleOrdersPage").then((m) => ({
+    default: m.VehicleOrdersPage,
+  })),
+);
 
 const LazyFallback = (
   <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
@@ -188,6 +193,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/sales-returns/:stt" element={<App initialVoucherMode="return" />} />
             <Route path="/warehouse-slips" element={<App initialVoucherMode="warehouse" />} />
             <Route path="/warehouse-slips/:stt" element={<App initialVoucherMode="warehouse" />} />
+            <Route
+              path="/vehicle-orders"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <VehicleOrdersPage />
+                </Suspense>
+              }
+            />
             <Route
               path="/price-lists"
               element={

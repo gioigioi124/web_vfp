@@ -14,6 +14,7 @@ import {
   Package,
   RotateCcw,
   ShoppingCart,
+  Truck,
   Warehouse,
 } from "lucide-react";
 import { NavModuleItem } from "../../config/accountingModules";
@@ -53,6 +54,8 @@ export const ModuleIcon: React.FC<{
       return <BarChart3 className={className} />;
     case "database":
       return <Database className={className} />;
+    case "truck":
+      return <Truck className={className} />;
     default:
       return <FileSpreadsheet className={className} />;
   }

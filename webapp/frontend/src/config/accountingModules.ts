@@ -20,7 +20,8 @@ export interface NavModuleItem {
     | "layers"
     | "calculator"
     | "bar-chart-3"
-    | "database";
+    | "database"
+    | "truck";
   implemented: boolean;
   keywords?: string;
   badgeTone?: "emerald" | "rose" | "sky" | "amber" | "primary" | "neutral";
@@ -122,6 +123,16 @@ export const NAV_GROUPS: NavModuleGroup[] = [
         implemented: true,
         badgeTone: "emerald",
         keywords: "phieu kho kh_2014 xuat kho",
+      },
+      {
+        id: "vehicle-orders",
+        label: "Xe hàng & Đơn hàng",
+        shortCode: "XE",
+        route: "/vehicle-orders",
+        iconName: "truck",
+        implemented: true,
+        badgeTone: "sky",
+        keywords: "xe hang don hang chi tiet don hang dieu van elanx van chuyen",
       },
       {
         id: "price-lists",
