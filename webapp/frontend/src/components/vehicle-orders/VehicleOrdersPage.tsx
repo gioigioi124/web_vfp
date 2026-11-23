@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Box, Columns3, Eye, RotateCcw, Search, Truck } from "lucide-react";
 import { Button } from "../ui/Button";
 import {
@@ -20,8 +21,11 @@ const VehicleYard3DView = lazy(() =>
 
 export const VehicleOrdersPage: React.FC = () => {
   const today = getTodayIsoDate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [displayMode, setDisplayMode] = useState<"list" | "3d">("list");
+  const [displayMode, setDisplayMode] = useState<"list" | "3d">(() =>
+    searchParams.get("view") === "3d" ? "3d" : "list",
+  );
   const [selectedVehicle, setSelectedVehicle] =
     useState<VehicleOrderVehicle | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<VehicleOrder | null>(null);
@@ -129,7 +133,10 @@ export const VehicleOrdersPage: React.FC = () => {
           <div className="inline-flex bg-gray-200/80 p-0.5 rounded-lg border border-gray-300/80 shrink-0">
             <button
               type="button"
-              onClick={() => setDisplayMode("list")}
+              onClick={() => {
+                setDisplayMode("list");
+                setSearchParams({}, { replace: true });
+              }}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 displayMode === "list"
                   ? "bg-white text-primary-800 shadow-sm"
@@ -141,7 +148,10 @@ export const VehicleOrdersPage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setDisplayMode("3d")}
+              onClick={() => {
+                setDisplayMode("3d");
+                setSearchParams({ view: "3d" }, { replace: true });
+              }}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 displayMode === "3d"
                   ? "bg-primary-700 text-white shadow-sm"

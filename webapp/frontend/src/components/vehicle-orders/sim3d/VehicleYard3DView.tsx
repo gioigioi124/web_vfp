@@ -230,7 +230,7 @@ export const VehicleYard3DView: React.FC<VehicleYard3DViewProps> = ({
       </div>
 
       {/* Không gian 3D chính + Panel chi tiết bên phải khi chọn xe */}
-      <div className="relative flex-1 min-h-[420px] rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-[#e8eef6]">
+      <div className="relative flex-1 min-h-[420px] rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-[#d8e3ef]">
         <MinimalYardCanvas3D
           layout={layout}
           selectedVehicleId={selectedVehicle?._id || null}

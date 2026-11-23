@@ -1,6 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import {
+  ContactShadows,
+  Environment,
+  Lightformer,
+  OrbitControls,
+} from "@react-three/drei";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
@@ -60,8 +65,8 @@ const CameraRig: React.FC<{
 }> = ({ layout, cameraPreset, cameraSignal, selectedPlacement }) => {
   const { camera } = useThree();
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const desiredPos = useRef(new THREE.Vector3(0, 22, 30));
-  const desiredTarget = useRef(new THREE.Vector3(0, 0, 2));
+  const desiredPos = useRef(new THREE.Vector3(-11, 20, 30));
+  const desiredTarget = useRef(new THREE.Vector3(0, 0.5, 1));
   const isAnimating = useRef(true);
 
   useEffect(() => {
@@ -70,32 +75,37 @@ const CameraRig: React.FC<{
 
     if (cameraPreset === "waiting") {
       desiredPos.current.set(
-        layout.waitingZone.centerX - 3,
-        14 * spanScale,
-        layout.waitingZone.centerZ + 14 * spanScale,
+        layout.waitingZone.centerX - 6,
+        13 * spanScale,
+        layout.waitingZone.centerZ + 14.5 * spanScale,
       );
       desiredTarget.current.set(
         layout.waitingZone.centerX,
-        0.5,
-        layout.waitingZone.centerZ - 1,
+        0.6,
+        layout.waitingZone.centerZ - 0.8,
       );
     } else if (cameraPreset === "completed") {
       desiredPos.current.set(
-        layout.completedZone.centerX + 3,
-        14 * spanScale,
-        layout.completedZone.centerZ + 14 * spanScale,
+        layout.completedZone.centerX + 6,
+        13 * spanScale,
+        layout.completedZone.centerZ + 14.5 * spanScale,
       );
       desiredTarget.current.set(
         layout.completedZone.centerX,
-        0.5,
-        layout.completedZone.centerZ - 1,
+        0.6,
+        layout.completedZone.centerZ - 0.8,
       );
     } else if (cameraPreset === "top") {
-      desiredPos.current.set(0, 36 * spanScale, centerZ + 4);
+      desiredPos.current.set(0, 37 * spanScale, centerZ + 4.5);
       desiredTarget.current.set(0, 0, centerZ);
     } else {
-      desiredPos.current.set(0, 21 * spanScale, centerZ + 26 * spanScale);
-      desiredTarget.current.set(0, 0.5, centerZ - 1);
+      // Hero 3/4 architectural diorama angle (highlights depth & truck size differences)
+      desiredPos.current.set(
+        -11 * spanScale,
+        19.5 * spanScale,
+        centerZ + 27 * spanScale,
+      );
+      desiredTarget.current.set(0, 0.6, centerZ - 1.0);
     }
     isAnimating.current = true;
   }, [
@@ -108,12 +118,12 @@ const CameraRig: React.FC<{
     layout.completedZone.centerZ,
   ]);
 
-  // Nhẹ nhàng hướng tâm nhìn về xe vừa click
+  // Smoothly focus on clicked truck from a handsome 3/4 angle
   useEffect(() => {
     if (!selectedPlacement) return;
     const [tx, , tz] = selectedPlacement.position;
-    desiredTarget.current.set(tx, 0.8, tz);
-    desiredPos.current.set(tx + (tx < 0 ? -7 : 7), 10.5, tz + 12.5);
+    desiredTarget.current.set(tx, 1.0, tz);
+    desiredPos.current.set(tx + (tx < 0 ? -7.5 : 7.5), 8.2, tz + 10.5);
     isAnimating.current = true;
   }, [selectedPlacement]);
 
@@ -160,33 +170,90 @@ export const MinimalYardCanvas3D: React.FC<MinimalYardCanvas3DProps> = ({
   const selectedPlacement =
     layout.placements.find((p) => p.vehicle._id === selectedVehicleId) || null;
 
+  const shadowBakeKey = layout.placements
+    .map((p) => `${p.vehicle._id}:${p.slotIndex}:${p.zone}`)
+    .join("|");
+
   return (
     <WebGLErrorBoundary>
       <Canvas
         shadows
-        dpr={[1, 1.5]}
-        camera={{ position: [0, 22, 30], fov: 38, near: 0.5, far: 250 }}
+        dpr={[1, 1.75]}
+        gl={{
+          antialias: true,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.04,
+        }}
+        camera={{ position: [-11, 20, 30], fov: 36, near: 0.5, far: 250 }}
         onPointerMissed={() => onSelectPlacement(null)}
         className="w-full h-full"
       >
-        <color attach="background" args={["#e8eef6"]} />
+        <color attach="background" args={["#d8e3ef"]} />
+        <fog attach="fog" args={["#d8e3ef", 58, 145]} />
 
-        {/* Ánh sáng ban ngày trung tính, rõ khối và kích thước xe */}
-        <hemisphereLight args={["#ffffff", "#cbd5e1", 0.95]} />
+        {/* Studio Softbox Environment (100% offline procedural Lightformers for realistic glass & paint sheen) */}
+        <Environment resolution={256} frames={1}>
+          <Lightformer
+            form="rect"
+            intensity={1.7}
+            color="#fffdf8"
+            position={[0, 18, 8]}
+            rotation={[Math.PI / 2.2, 0, 0]}
+            scale={[34, 16, 1]}
+          />
+          <Lightformer
+            form="rect"
+            intensity={1.0}
+            color="#dbeafe"
+            position={[-22, 10, 6]}
+            rotation={[0, Math.PI / 2, 0]}
+            scale={[24, 10, 1]}
+          />
+          <Lightformer
+            form="rect"
+            intensity={1.15}
+            color="#f8fafc"
+            position={[22, 12, -10]}
+            rotation={[0, -Math.PI / 2, 0]}
+            scale={[24, 10, 1]}
+          />
+        </Environment>
+
+        {/* Balanced Architectural Daylight Rig */}
+        <hemisphereLight args={["#f5f9ff", "#94a3b8", 0.65]} />
         <directionalLight
-          position={[18, 32, 22]}
-          intensity={1.1}
+          position={[22, 34, 20]}
+          intensity={1.32}
+          color="#fff9ef"
           castShadow
           shadow-mapSize={[2048, 2048]}
-          shadow-camera-left={-35}
-          shadow-camera-right={35}
-          shadow-camera-top={35}
-          shadow-camera-bottom={-35}
-          shadow-camera-near={2}
+          shadow-radius={3.5}
+          shadow-camera-left={-36}
+          shadow-camera-right={36}
+          shadow-camera-top={36}
+          shadow-camera-bottom={-36}
+          shadow-camera-near={4}
           shadow-camera-far={95}
-          shadow-bias={-0.0004}
+          shadow-bias={-0.00035}
         />
-        <directionalLight position={[-18, 16, -12]} intensity={0.35} />
+        <directionalLight
+          position={[-20, 14, -16]}
+          intensity={0.38}
+          color="#dbeafe"
+        />
+
+        {/* Soft Ambient-Occlusion Grounding Shadows under tires & trucks (baked once per layout change) */}
+        <ContactShadows
+          key={shadowBakeKey}
+          position={[0, 0.064, layout.waitingZone.centerZ - 1]}
+          opacity={0.44}
+          scale={Math.max(54, layout.groundWidth + 6)}
+          blur={1.85}
+          far={10}
+          resolution={512}
+          frames={2}
+          color="#0f172a"
+        />
 
         <CameraRig
           layout={layout}
