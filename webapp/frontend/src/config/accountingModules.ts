@@ -105,6 +105,16 @@ export const NAV_GROUPS: NavModuleGroup[] = [
         keywords: "ban hang hoa don phieu xuat ban x1 ctbh",
       },
       {
+        id: "truck-batch",
+        label: "Xuất nhanh theo xe",
+        shortCode: "XC",
+        route: "/sales-invoices/truck-batch",
+        iconName: "truck",
+        implemented: true,
+        badgeTone: "sky",
+        keywords: "xuat nhanh ca xe chuyen xe hang loat gop don tach don truck batch",
+      },
+      {
         id: "N5",
         label: "Hàng bán bị trả lại",
         shortCode: "N5",

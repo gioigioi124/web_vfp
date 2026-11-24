@@ -31,7 +31,7 @@ import pyodbc
 from app.config import settings
 from app.database import close_all_pools, test_db_connection
 from app.routers import lookups, vouchers, pickup, debt, print as print_router
-from app.routers import prices, products, customers, cash_vouchers, price_lists, general_modules, inventory_reports
+from app.routers import prices, products, customers, cash_vouchers, price_lists, general_modules, inventory_reports, truck_batch
 from app.utils.errors import SqlUnavailableError, is_sql_connection_error
 from app.services.product_index_service import product_index_service, REFRESH_INTERVAL
 from app.services.customer_index_service import (
@@ -152,6 +152,7 @@ app.include_router(cash_vouchers.router)
 app.include_router(price_lists.router)
 app.include_router(general_modules.router)
 app.include_router(inventory_reports.router)
+app.include_router(truck_batch.router)
 
 
 @app.exception_handler(pyodbc.OperationalError)

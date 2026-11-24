@@ -61,6 +61,11 @@ const VehicleOrdersPage = lazy(() =>
     default: m.VehicleOrdersPage,
   })),
 );
+const TruckBatchWorkbench = lazy(() =>
+  import("./components/truck-batch/TruckBatchWorkbench").then((m) => ({
+    default: m.TruckBatchWorkbench,
+  })),
+);
 
 const LazyFallback = (
   <div className="h-full w-full flex items-center justify-center bg-surface text-xs text-neutral-500">
@@ -188,6 +193,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 
             {/* Nhóm 2: Bán hàng & Kho (giữ nguyên toàn bộ route hiện hữu) */}
             <Route path="/sales-invoices" element={<App initialVoucherMode="sales" />} />
+            <Route
+              path="/sales-invoices/truck-batch"
+              element={
+                <Suspense fallback={LazyFallback}>
+                  <TruckBatchWorkbench />
+                </Suspense>
+              }
+            />
             <Route path="/sales-invoices/:stt" element={<App initialVoucherMode="sales" />} />
             <Route path="/sales-returns" element={<App initialVoucherMode="return" />} />
             <Route path="/sales-returns/:stt" element={<App initialVoucherMode="return" />} />

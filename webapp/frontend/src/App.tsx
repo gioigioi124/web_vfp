@@ -7,7 +7,7 @@ import React, {
   lazy,
   Suspense,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useVouchers } from "./hooks/useVouchers";
 import { useHotkeys } from "./hooks/useHotkeys";
 import { useModalLock } from "./lib/modalLock";
@@ -33,6 +33,7 @@ import {
   X,
   Keyboard,
   Filter,
+  Truck,
 } from "lucide-react";
 
 const loadVoucherForm = () =>
@@ -278,6 +279,30 @@ export function App({
   // ==== Đồng bộ URL route (/sales-invoices, /sales-invoices/new, /sales-invoices/:stt) ====
   const { stt: sttParam } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Nhận danh sách phiếu vừa xuất hàng loạt theo xe -> refresh VoucherList & tự đánh dấu (markedStts)
+  useEffect(() => {
+    const state = location.state as {
+      batchCreatedStts?: string[];
+      batchSummaryMessage?: string;
+    } | null;
+    if (!state?.batchCreatedStts || state.batchCreatedStts.length === 0) return;
+
+    const createdStts = state.batchCreatedStts.filter(Boolean);
+    if (createdStts.length === 0) return;
+
+    invalidate("vouchers:");
+    setMarked(new Set(createdStts));
+    setSelectedStt(createdStts[0]);
+    refresh({ silent: false });
+    showToast(
+      `${state.batchSummaryMessage || `Đã xuất thành công ${createdStts.length} phiếu theo xe.`} Đã đánh dấu sẵn ${createdStts.length} phiếu — bấm F7 / Ctrl+F7 để in.`,
+      "success",
+    );
+    // Xóa state để tránh lặp lại khi F5
+    navigate(location.pathname + location.search, { replace: true, state: null });
+  }, [location.state, location.pathname, location.search, navigate, refresh, setSelectedStt, showToast]);
 
   const isNew = sttParam === "new";
   const isEditing = Boolean(sttParam && !isNew);
@@ -1211,6 +1236,19 @@ export function App({
             onApplyFilter={handleApplyFilter}
             onRefresh={refresh}
             customerSearchInputRef={customerSearchInputRef}
+            extraRightActions={
+              voucherMode === "sales" ? (
+                <button
+                  type="button"
+                  onClick={() => navigate("/sales-invoices/truck-batch")}
+                  className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded bg-sky-700 hover:bg-sky-600 text-white border border-sky-500/60 text-xs font-semibold shadow-xs transition cursor-pointer whitespace-nowrap"
+                  title="Mở Bàn soát nhanh & Xuất hàng loạt cả chuyến xe trong 1 lần"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>Xuất theo xe</span>
+                </button>
+              ) : undefined
+            }
           />
           {activeFilterChips.length > 0 && (
             <div className="bg-primary-50/70 border-b border-primary-200/80 px-3.5 py-1 flex items-center flex-wrap gap-1.5 text-[11px] flex-shrink-0">

@@ -4,7 +4,10 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from app.repositories.voucher.helpers import _DETAIL_INSERT_BATCH_SIZE
+from app.repositories.voucher.helpers import (
+    _DETAIL_INSERT_BATCH_SIZE,
+    increment_voucher_number,
+)
 from app.schemas.voucher import (
     VoucherCreateRequest,
     VoucherDeleteResponse,
@@ -13,6 +16,26 @@ from app.schemas.voucher import (
 from app.utils.money import round_amount, round_vnd
 
 logger = logging.getLogger("app.repositories.voucher")
+
+
+class BatchVoucherError(ValueError):
+    """Structured error raised during batch voucher commit (All-or-Nothing)."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "BATCH_VALIDATION_ERROR",
+        voucher_index: Optional[int] = None,
+        draft_id: Optional[str] = None,
+        conflict_order_keys: Optional[List[str]] = None,
+        debt_info: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.voucher_index = voucher_index
+        self.draft_id = draft_id
+        self.conflict_order_keys = conflict_order_keys or []
+        self.debt_info = debt_info
 
 
 class VoucherMutationMixin:
@@ -237,6 +260,7 @@ class VoucherMutationMixin:
         stt: str,
         data: VoucherCreateRequest,
         is_wh: bool,
+        preallocated_stt0s: Optional[List[str]] = None,
     ) -> None:
         """2. Ghi Detail dbo.CtBH0 (Delete cũ nếu 'S' + Batch cấp Stt0 & Multi-row INSERT)."""
         if mode == "S":
@@ -248,7 +272,10 @@ class VoucherMutationMixin:
         default_tk_du2 = "5212" if is_return else ("5112" if is_wh else "5111")
         fixed_gia_tb_tt = "K" if is_return else "C"
 
-        stt0_list = self.generate_stts_batch(data.ma_dvcs or "S1", len(data.items), cur)
+        if preallocated_stt0s is not None and len(preallocated_stt0s) == len(data.items):
+            stt0_list = preallocated_stt0s
+        else:
+            stt0_list = self.generate_stts_batch(data.ma_dvcs or "S1", len(data.items), cur)
         row_placeholder = (
             f"(?, ?, ?, ?, ?, ?, ?, "
             f"?, ?, {self.fn_tcvn}(?), {self.fn_tcvn}(?), ?, ?, "
@@ -324,6 +351,7 @@ class VoucherMutationMixin:
         is_wh: bool,
         user_name: str,
         db_mode: Optional[str],
+        strict: bool = False,
     ) -> None:
         """2b & 3. Xóa sổ cái cũ (nếu S), chạy CtBH_Post, CtBH_SoCai, CtBH_SoCaiVT_Save, ST_Save_Number."""
         clean_ma_ct = (data.ma_ct or "X1").strip().upper()
@@ -344,7 +372,7 @@ class VoucherMutationMixin:
             )
         except Exception as e:
             logger.warning(f"CtBH_Post ({db_mode}) warning: {e}")
-            if mode == "S":
+            if mode == "S" or strict:
                 raise
 
         # 3b. Ghi SỔ CÁI TÀI KHOẢN (SoCai) — bút toán DOANH THU (X1) hoặc HÀNG BÁN TRẢ LẠI (N5) (chỉ ghi trên VP_2014):
@@ -408,14 +436,14 @@ class VoucherMutationMixin:
                         ])
                     except Exception as e:
                         logger.warning(f"CtBH_SoCai warning: {e}")
-                        if mode == "S":
+                        if mode == "S" or strict:
                             raise
 
         try:
             cur.execute(f"SET NOCOUNT ON; EXEC {target_db}.dbo.CtBH_SoCaiVT_Save @p_Stt=?", [stt])
         except Exception as e:
             logger.warning(f"CtBH_SoCaiVT_Save ({db_mode}) warning: {e}")
-            if mode == "S":
+            if mode == "S" or strict:
                 raise
         try:
             cur.execute(
@@ -424,6 +452,8 @@ class VoucherMutationMixin:
             )
         except Exception as e:
             logger.warning(f"ST_Save_Number warning: {e}")
+            if strict:
+                raise
 
     def save_voucher(
         self,
@@ -559,6 +589,390 @@ class VoucherMutationMixin:
                 else ("Lưu phiếu nhập hàng trả lại thành công." if is_return else "Lưu chứng từ thành công.")
             ),
         )
+
+    def save_vouchers_batch(
+        self,
+        vouchers: List[VoucherCreateRequest],
+        user_name: str = "KTCN3",
+        draft_ids: Optional[List[Optional[str]]] = None,
+    ) -> List[VoucherSaveResponse]:
+        """
+        Xuất nhanh cả xe hàng trong 1 ACID Transaction duy nhất (All-or-Nothing) vào VP_2014:
+        - Phase 1 (NGOÀI transaction, 0 lock): kiểm tra khóa sổ, trường bắt buộc, chống trùng Stt_PX
+          nội bộ batch, chuẩn hóa dòng hàng (4 cột giá vốn = NULL), đồng bộ tổng header,
+          kiểm tra hạn mức công nợ cộng dồn theo từng Ma_Dt.
+        - Phase 2 (TRONG 1 transaction duy nhất): xác minh DmDt, sp_getapplock tuần tự theo kỳ,
+          kiểm tra chống trùng Stt_PX đồng thời (UPDLOCK, HOLDLOCK), cấp khóa Stt/Stt0 1 round-trip,
+          cấp số hóa đơn So_Ct liên tục không trùng (ST_Check_Number + tập đã cấp),
+          ghi CtBH + CtBH0 + CtBH_Post + CtBH_SoCai + CtBH_SoCaiVT_Save + ST_Save_Number (strict),
+          và Integrity Assertion hàng loạt trước COMMIT.
+        """
+        if not vouchers:
+            raise BatchVoucherError(
+                "Danh sách chứng từ xuất theo xe không được rỗng!",
+                code="EMPTY_BATCH",
+            )
+
+        target_db = self.vp_db
+        resolved_draft_ids: List[Optional[str]] = [
+            draft_ids[i] if draft_ids and i < len(draft_ids) else None
+            for i in range(len(vouchers))
+        ]
+
+        # ===== PHASE 1: PRE-VALIDATION (NGOÀI TRANSACTION ĐỂ RÚT NGẮN THỜI GIAN GIỮ LOCK) =====
+        closing_cache: Dict[str, Optional[str]] = {}
+        seen_stt_px_owner: Dict[str, int] = {}
+        prepared: List[Dict[str, Any]] = []
+        debt_check_customers: List[str] = []
+        debt_check_seen = set()
+
+        for idx, data in enumerate(vouchers):
+            draft_id = resolved_draft_ids[idx]
+            dvcs = (data.ma_dvcs or "S1").strip().upper() or "S1"
+            clean_ma_ct = (data.ma_ct or "X1").strip().upper()
+            is_return = clean_ma_ct == "N5"
+            data.ma_dvcs = dvcs
+            data.ma_ct = clean_ma_ct
+            data.nh_ct = "1" if is_return else (data.nh_ct or "2")
+
+            # CHỐT 1: Ngày khóa sổ
+            if dvcs not in closing_cache:
+                closing_cache[dvcs] = self.get_closing_date(dvcs)
+            ngay_kt_ht = closing_cache[dvcs]
+            if ngay_kt_ht and data.ngay_ct <= ngay_kt_ht:
+                raise BatchVoucherError(
+                    f"Phiếu #{idx + 1}: Ngày chứng từ ({data.ngay_ct}) nằm trong kỳ đã khóa sổ (đến ngày {ngay_kt_ht})!",
+                    code="CLOSING_DATE",
+                    voucher_index=idx,
+                    draft_id=draft_id,
+                )
+
+            # CHỐT 2: Trường bắt buộc
+            clean_ma_dt = (data.ma_dt or "").strip().upper()
+            if not clean_ma_dt:
+                raise BatchVoucherError(
+                    f"Phiếu #{idx + 1}: Mã khách hàng (Ma_Dt) là bắt buộc!",
+                    code="VALIDATION_ERROR",
+                    voucher_index=idx,
+                    draft_id=draft_id,
+                )
+            data.ma_dt = clean_ma_dt
+            if not data.ma_nx or not data.ma_nx.strip():
+                data.ma_nx = "131"
+            if not data.items or len(data.items) == 0:
+                raise BatchVoucherError(
+                    f"Phiếu #{idx + 1} ({clean_ma_dt}): Chứng từ phải có ít nhất 1 dòng hàng hóa!",
+                    code="VALIDATION_ERROR",
+                    voucher_index=idx,
+                    draft_id=draft_id,
+                )
+
+            # Kiểm tra Stt_PX không bị 2 phiếu khác nhau cùng nhận trong cùng 1 batch
+            voucher_stt_pxs = set()
+            for it in data.items:
+                raw_px = (it.stt_px or "").strip()
+                if raw_px:
+                    if len(raw_px) > 20:
+                        raise BatchVoucherError(
+                            f"Phiếu #{idx + 1} ({clean_ma_dt}): Mã đơn nguồn Stt_PX '{raw_px}' vượt quá 20 ký tự!",
+                            code="VALIDATION_ERROR",
+                            voucher_index=idx,
+                            draft_id=draft_id,
+                        )
+                    it.stt_px = raw_px
+                    voucher_stt_pxs.add(raw_px)
+                else:
+                    it.stt_px = None
+
+            for px in voucher_stt_pxs:
+                prev_idx = seen_stt_px_owner.get(px)
+                if prev_idx is not None and prev_idx != idx:
+                    raise BatchVoucherError(
+                        f"Đơn nguồn '{px}' bị trùng giữa phiếu #{prev_idx + 1} và phiếu #{idx + 1} trong cùng lô xuất!",
+                        code="DUPLICATE_STT_PX",
+                        voucher_index=idx,
+                        draft_id=draft_id,
+                        conflict_order_keys=[px],
+                    )
+                seen_stt_px_owner[px] = idx
+
+            # CHỐT 4, 5, 6: Chuẩn hóa dòng hàng (4 cột giá vốn = NULL) & tổng Header
+            safe_ty_gia = float(data.ty_gia) if data.ty_gia and data.ty_gia > 0 else 1.0
+            safe_ma_tte = (data.ma_tte or "VND").strip().upper()
+            self._normalize_voucher_items(data, False, safe_ty_gia, safe_ma_tte, is_return=is_return)
+            self._sync_header_totals(data, False)
+
+            if not is_return and not getattr(data, "skip_debt_check", False):
+                if clean_ma_dt not in debt_check_seen:
+                    debt_check_seen.add(clean_ma_dt)
+                    debt_check_customers.append(clean_ma_dt)
+
+            prepared.append({
+                "idx": idx,
+                "draft_id": draft_id,
+                "data": data,
+                "dvcs": dvcs,
+                "clean_ma_ct": clean_ma_ct,
+                "is_return": is_return,
+                "safe_ty_gia": safe_ty_gia,
+            })
+
+        # CHỐT 3: Kiểm tra hạn mức công nợ CỘNG DỒN theo từng khách hàng (khớp VFP 1S: check dư nợ trước phiếu >= giới hạn)
+        if debt_check_customers:
+            debt_repo = self._get_debt_repository()
+            debt_summaries: Dict[str, Any] = {}
+            for ma_dt in debt_check_customers:
+                debt_summaries[ma_dt] = debt_repo.get_customer_debt_summary(ma_dt, check_only=True)
+
+            running_added: Dict[str, float] = {}
+            for entry in prepared:
+                data = entry["data"]
+                if entry["is_return"]:
+                    continue
+                ma_dt = data.ma_dt
+                voucher_amount = float(data.ttien0 or 0.0)
+                if not getattr(data, "skip_debt_check", False) and ma_dt in debt_summaries:
+                    summary = debt_summaries[ma_dt]
+                    raw_check = getattr(summary, "du_cuoi_kiem_tra", None)
+                    base_debt = raw_check if isinstance(raw_check, (int, float)) else float(summary.du_cuoi or 0.0)
+                    gioi_han = float(summary.gioi_han or 0.0)
+                    du_cuoi_before = base_debt + running_added.get(ma_dt, 0.0)
+                    if gioi_han > 0 and du_cuoi_before >= gioi_han:
+                        raise BatchVoucherError(
+                            f"Phiếu #{entry['idx'] + 1} - Khách hàng {ma_dt} vượt quá hạn mức nợ cho phép! "
+                            f"(Dư nợ cộng dồn: {du_cuoi_before:,.0f} >= Giới hạn: {gioi_han:,.0f})",
+                            code="DEBT_OVER_LIMIT",
+                            voucher_index=entry["idx"],
+                            draft_id=entry["draft_id"],
+                            debt_info={
+                                "ma_dt": ma_dt,
+                                "du_cuoi_before": du_cuoi_before,
+                                "voucher_amount": voucher_amount,
+                                "gioi_han": gioi_han,
+                            },
+                        )
+                running_added[ma_dt] = running_added.get(ma_dt, 0.0) + voucher_amount
+
+        # ===== PHASE 2: SINGLE ACID TRANSACTION (ALL-OR-NOTHING) =====
+        all_ma_dts = sorted({entry["data"].ma_dt for entry in prepared})
+        all_stt_pxs = sorted(seen_stt_px_owner.keys())
+        responses: List[VoucherSaveResponse] = []
+
+        with self._get_db_transaction(target_db) as (conn, cur):
+            # 1. Xác minh toàn bộ mã khách hàng tồn tại trong VTSYS.dbo.DmDt
+            found_dts = set()
+            for i in range(0, len(all_ma_dts), 500):
+                chunk = all_ma_dts[i:i + 500]
+                ph = ",".join(["?"] * len(chunk))
+                cur.execute(
+                    f"SELECT RTRIM(Ma_Dt) FROM {self.sys_db}.dbo.DmDt WITH (NOLOCK) WHERE Ma_Dt IN ({ph})",
+                    chunk,
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        found_dts.add(str(row[0]).strip().upper())
+
+            missing_dts = [dt for dt in all_ma_dts if dt not in found_dts]
+            if missing_dts:
+                missing_dt = missing_dts[0]
+                bad_entry = next(e for e in prepared if e["data"].ma_dt == missing_dt)
+                raise BatchVoucherError(
+                    f"Phiếu #{bad_entry['idx'] + 1}: Mã khách hàng '{missing_dt}' không tồn tại trong danh mục DmDt!",
+                    code="CUSTOMER_NOT_FOUND",
+                    voucher_index=bad_entry["idx"],
+                    draft_id=bad_entry["draft_id"],
+                )
+
+            # 2. Acquire sp_getapplock tuần tự theo kỳ (chống deadlock & chống trùng số chứng từ)
+            lock_resources = set()
+            for entry in prepared:
+                clean_ma_ct = entry["clean_ma_ct"]
+                ngay_ct = entry["data"].ngay_ct
+                if clean_ma_ct == "N5":
+                    _, _, period = self._day_date_bounds(ngay_ct)
+                else:
+                    _, _, period = self._month_date_bounds(ngay_ct)
+                entry["period"] = period
+                lock_resources.add(f"web_vfp_soct:{target_db}:{clean_ma_ct}:{period}")
+
+            for res_name in sorted(lock_resources):
+                try:
+                    cur.execute(
+                        """
+                        SET NOCOUNT ON;
+                        DECLARE @rc int;
+                        EXEC @rc = sp_getapplock @Resource=?, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=15000;
+                        IF @rc < 0
+                            THROW 50001, 'Could not acquire voucher number lock (sp_getapplock timeout)', 1;
+                        """,
+                        [res_name],
+                    )
+                except Exception as e:
+                    if "50001" in str(e) or "sp_getapplock timeout" in str(e):
+                        raise BatchVoucherError(
+                            "Hệ thống đang bận cấp số chứng từ cho máy khác, vui lòng thử xuất lại sau giây lát.",
+                            code="LOCK_TIMEOUT",
+                        ) from e
+                    logger.warning(f"sp_getapplock batch warning ({res_name}): {e}")
+
+            # 3. Chống xuất trùng Stt_PX đồng thời ngay trong transaction (UPDLOCK, HOLDLOCK)
+            if all_stt_pxs:
+                existing_pxs: List[str] = []
+                for i in range(0, len(all_stt_pxs), 500):
+                    chunk = all_stt_pxs[i:i + 500]
+                    ph = ",".join(["?"] * len(chunk))
+                    cur.execute(
+                        f"SELECT DISTINCT RTRIM(Stt_PX) FROM {target_db}.dbo.CtBH0 WITH (UPDLOCK, HOLDLOCK) WHERE Stt_PX IN ({ph})",
+                        chunk,
+                    )
+                    for row in cur.fetchall() or []:
+                        if row and row[0]:
+                            existing_pxs.append(str(row[0]).strip())
+                if existing_pxs:
+                    first_conflict = existing_pxs[0]
+                    conflict_idx = seen_stt_px_owner.get(first_conflict)
+                    conflict_draft = (
+                        resolved_draft_ids[conflict_idx]
+                        if conflict_idx is not None and conflict_idx < len(resolved_draft_ids)
+                        else None
+                    )
+                    raise BatchVoucherError(
+                        f"Phát hiện {len(existing_pxs)} đơn kho đã được xuất trước đó ({', '.join(existing_pxs[:5])}). "
+                        "Toàn bộ lô xuất đã được hoàn tác — vui lòng tải lại dữ liệu xe.",
+                        code="DUPLICATE_STT_PX",
+                        voucher_index=conflict_idx,
+                        draft_id=conflict_draft,
+                        conflict_order_keys=existing_pxs,
+                    )
+
+            # 4. Cấp phát toàn bộ Stt (header) và Stt0 (detail) trong 1 round-trip mỗi Ma_DvCs
+            key_counts_by_dvcs: Dict[str, int] = {}
+            for entry in prepared:
+                dvcs = entry["dvcs"]
+                key_counts_by_dvcs[dvcs] = key_counts_by_dvcs.get(dvcs, 0) + 1 + len(entry["data"].items)
+
+            key_pools: Dict[str, List[str]] = {
+                dvcs: self.generate_stts_batch(dvcs, count, cur)
+                for dvcs, count in key_counts_by_dvcs.items()
+            }
+            key_offsets: Dict[str, int] = {dvcs: 0 for dvcs in key_pools}
+
+            # 5. Cấp số chứng từ So_Ct tuần tự không trùng & ghi từng phiếu
+            last_so_ct_by_bucket: Dict[tuple, str] = {}
+            allocated_so_ct: set = set()
+            expected_integrity: Dict[str, tuple] = {}
+
+            for entry in prepared:
+                data: VoucherCreateRequest = entry["data"]
+                dvcs = entry["dvcs"]
+                clean_ma_ct = entry["clean_ma_ct"]
+                period = entry["period"]
+                bucket = (dvcs, clean_ma_ct, period)
+
+                raw_so_ct = (data.so_ct or "").strip()
+                is_custom_so_ct = bool(getattr(data, "custom_so_ct", False))
+                if is_custom_so_ct and raw_so_ct:
+                    candidate = raw_so_ct
+                elif bucket in last_so_ct_by_bucket:
+                    candidate = increment_voucher_number(last_so_ct_by_bucket[bucket])
+                else:
+                    candidate = self.get_next_voucher_number(
+                        ma_dvcs=dvcs,
+                        ma_ct=clean_ma_ct,
+                        ngay_ct=data.ngay_ct,
+                        cur=cur,
+                        db_mode="sales",
+                    )
+
+                final_so_ct = candidate
+                for _ in range(500):
+                    cand_norm = final_so_ct.strip().upper()
+                    if cand_norm not in allocated_so_ct:
+                        is_dup = self._exec_check_number(
+                            cur, target_db, dvcs, "M", "", clean_ma_ct, data.ngay_ct, final_so_ct
+                        )
+                        if not is_dup:
+                            break
+                    final_so_ct = increment_voucher_number(final_so_ct)
+
+                allocated_so_ct.add(final_so_ct.strip().upper())
+                if not (is_custom_so_ct and raw_so_ct):
+                    last_so_ct_by_bucket[bucket] = final_so_ct
+                data.so_ct = final_so_ct
+
+                # Lấy Stt & danh sách Stt0 từ pool đã cấp sẵn
+                offset = key_offsets[dvcs]
+                stt = key_pools[dvcs][offset]
+                n_items = len(data.items)
+                stt0_slice = key_pools[dvcs][offset + 1:offset + 1 + n_items]
+                key_offsets[dvcs] = offset + 1 + n_items
+
+                self._write_header(cur, target_db, "M", stt, final_so_ct, data, entry["safe_ty_gia"], False, user_name)
+                self._write_details(cur, target_db, "M", stt, data, False, preallocated_stt0s=stt0_slice)
+                self._post_ledgers(
+                    cur,
+                    target_db,
+                    "M",
+                    stt,
+                    final_so_ct,
+                    data,
+                    entry["safe_ty_gia"],
+                    False,
+                    user_name,
+                    "sales",
+                    strict=True,
+                )
+
+                expected_integrity[stt] = (
+                    float(data.ttien_nt2 or 0.0),
+                    n_items,
+                    entry["idx"],
+                    entry["draft_id"],
+                )
+                responses.append(
+                    VoucherSaveResponse(
+                        stt=stt,
+                        so_ct=final_so_ct,
+                        message="Lưu chứng từ thành công.",
+                    )
+                )
+
+            # 6. Batch Integrity Assertion TRƯỚC COMMIT
+            created_stts = list(expected_integrity.keys())
+            db_totals: Dict[str, tuple] = {}
+            for i in range(0, len(created_stts), 500):
+                chunk = created_stts[i:i + 500]
+                ph = ",".join(["?"] * len(chunk))
+                cur.execute(
+                    f"""
+                    SELECT RTRIM(Stt), ISNULL(SUM(Tien_Nt2), 0), COUNT(1)
+                    FROM {target_db}.dbo.CtBH0
+                    WHERE Stt IN ({ph})
+                    GROUP BY Stt
+                    """,
+                    chunk,
+                )
+                for row in cur.fetchall() or []:
+                    if row and row[0]:
+                        db_totals[str(row[0]).strip()] = (float(row[1] or 0.0), int(row[2] or 0))
+
+            for stt, (exp_sum2, exp_count, idx, draft_id) in expected_integrity.items():
+                actual = db_totals.get(stt)
+                if actual is None:
+                    raise AssertionError(
+                        f"Phiếu #{idx + 1} ({stt}): Không tìm thấy dòng chi tiết trong CtBH0 trước khi COMMIT!"
+                    )
+                db_sum2, db_count = actual
+                if abs(db_sum2 - exp_sum2) > 0.05:
+                    raise AssertionError(
+                        f"Phiếu #{idx + 1} ({stt}): Lệch tổng tiền Header/Detail: DB Tien_Nt2={db_sum2} vs Header={exp_sum2}"
+                    )
+                if db_count != exp_count:
+                    raise AssertionError(
+                        f"Phiếu #{idx + 1} ({stt}): Số dòng chi tiết không khớp: DB={db_count} vs Form={exp_count}"
+                    )
+
+        return responses
 
     def delete_voucher(
         self, stt: str, user_name: str = "KTCN3", db_mode: Optional[str] = "sales"

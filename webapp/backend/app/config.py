@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     DB_KH: str = "KH_2014"
     DB_SYS: str = "VTSYS"
     DB_QLDH: str = "QLDH"
+    DB_TRUCK: str = "QLDH"
+    TRUCK_SOURCE_ADAPTER: str = "mock"
     DB_POOL_SIZE: int = 16
     DB_QUERY_TIMEOUT: int = 30
     DB_POOL_IDLE_TTL: int = 300
